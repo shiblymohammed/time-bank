@@ -9,3 +9,8 @@ packages:
   - "packages/eslint-config"
   # Shared tsconfig bases
   - "packages/tsconfig"
+allowBuilds:
+  '@nestjs/core': true
+  '@scarf/scarf': false
+  unrs-resolver: true
+

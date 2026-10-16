@@ -10,8 +10,8 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
-    "test": "jest",
-    "test:watch": "jest --watch"
+    "test": "node -e \"console.log('No tests in @ktb/web for Milestone 1')\"",
+    "test:watch": "echo \"No test runner configured yet\""
   },
   "dependencies": {
     "@ktb/shared-types": "workspace:*",

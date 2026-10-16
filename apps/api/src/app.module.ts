@@ -44,10 +44,7 @@ import { HealthModule } from './health/health.module';
         // (NFR-17: versioned migrations with rollback plans)
         synchronize: false,
         logging: config.get('NODE_ENV') !== 'production',
-        ssl:
-          config.get('NODE_ENV') === 'production'
-            ? { rejectUnauthorized: true }
-            : false,
+        ssl: config.get('NODE_ENV') === 'production' ? { rejectUnauthorized: true } : false,
       }),
     }),
 

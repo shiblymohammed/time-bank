@@ -1,6 +1,5 @@
 import { Test } from '@nestjs/testing';
 import { TerminusModule } from '@nestjs/terminus';
-import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { HealthController } from './health.controller';
 

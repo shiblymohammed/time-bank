@@ -26,7 +26,9 @@ describe('Health Endpoints (e2e)', () => {
         ConfigModule.forRoot({ isGlobal: true }),
         TypeOrmModule.forRoot({
           type: 'postgres',
-          url: process.env['DATABASE_URL'] ?? 'postgresql://ktb_test:ktb_test_password@localhost:5432/ktb_test',
+          url:
+            process.env['DATABASE_URL'] ??
+            'postgresql://ktb_test:ktb_test_password@localhost:5432/ktb_test',
           entities: [],
           synchronize: false,
         }),
@@ -48,9 +50,7 @@ describe('Health Endpoints (e2e)', () => {
 
   describe('GET /health/live', () => {
     it('returns 200 with status ok', async () => {
-      const response = await request(app.getHttpServer())
-        .get('/health/live')
-        .expect(200);
+      const response = await request(app.getHttpServer()).get('/health/live').expect(200);
 
       expect(response.body).toMatchObject({
         status: 'ok',
@@ -62,9 +62,7 @@ describe('Health Endpoints (e2e)', () => {
 
   describe('GET /health/ready', () => {
     it('returns 200 when database is reachable', async () => {
-      const response = await request(app.getHttpServer())
-        .get('/health/ready')
-        .expect(200);
+      const response = await request(app.getHttpServer()).get('/health/ready').expect(200);
 
       expect(response.body.status).toBe('ok');
       expect(response.body.info?.database?.status).toBe('up');

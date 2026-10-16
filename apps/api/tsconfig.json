@@ -9,7 +9,7 @@
     "outDir": "dist",
     "baseUrl": ".",
     "paths": {
-      "@ktb/shared-types": ["../../packages/shared-types/src"]
+      "@ktb/shared-types": ["../../packages/shared-types/dist"]
     }
   },
   "include": ["src"],
