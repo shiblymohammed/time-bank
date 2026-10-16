@@ -19,7 +19,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./infra/docker/postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ktb_dev} -d ${POSTGRES_DB:-ktb_dev}"]
+      test: [ "CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ktb_dev} -d ${POSTGRES_DB:-ktb_dev}" ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -50,12 +50,11 @@ services:
     volumes:
       # Mount source for hot-reload in dev
       - ./apps/api/src:/app/apps/api/src:ro
-      - ./packages:/app/packages:ro
     depends_on:
       postgres:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health/live || exit 1"]
+      test: [ "CMD-SHELL", "wget -qO- http://127.0.0.1:3001/api/health/live || exit 1" ]
       interval: 15s
       timeout: 5s
       retries: 3
