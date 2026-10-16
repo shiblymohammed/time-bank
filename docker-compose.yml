@@ -1,0 +1,119 @@
+services:
+  # ─── PostgreSQL database ─────────────────────────────────────────────────
+  # NFR-04: Development and production use isolated databases with separate secrets.
+  # NFR-05: WAL archiving configured in production; dev uses default.
+  postgres:
+    image: postgres:17-alpine
+    container_name: ktb_postgres_dev
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ktb_dev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-ktb_dev}
+      # Improve logging for development
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.utf8"
+    ports:
+      # Only bind to localhost in dev — never expose to 0.0.0.0 in production
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/docker/postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ktb_dev} -d ${POSTGRES_DB:-ktb_dev}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - ktb_internal
+
+  # ─── NestJS API ──────────────────────────────────────────────────────────
+  # D#95: NestJS + TypeScript + PostgreSQL backend
+  # NFR-01: Versioned APIs; NFR-02: Docker Compose on VPS
+  api:
+    build:
+      context: .
+      dockerfile: ./infra/docker/Dockerfile.api
+      target: development
+    container_name: ktb_api_dev
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      APP_ENV: development
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ktb_dev}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-ktb_dev}
+      API_PORT: ${API_PORT:-3001}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      JWT_ACCESS_TOKEN_EXPIRY: ${JWT_ACCESS_TOKEN_EXPIRY:-15m}
+      JWT_REFRESH_TOKEN_EXPIRY: ${JWT_REFRESH_TOKEN_EXPIRY:-7d}
+    ports:
+      - "127.0.0.1:${API_PORT:-3001}:3001"
+    volumes:
+      # Mount source for hot-reload in dev
+      - ./apps/api/src:/app/apps/api/src:ro
+      - ./packages:/app/packages:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3001/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      - ktb_internal
+
+  # ─── Next.js Web Dashboard ───────────────────────────────────────────────
+  # D#96: Next.js + React + TypeScript role-aware dashboards
+  web:
+    build:
+      context: .
+      dockerfile: ./infra/docker/Dockerfile.web
+      target: development
+    container_name: ktb_web_dev
+    restart: unless-stopped
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-3001}
+      NEXT_PUBLIC_APP_ENV: development
+    ports:
+      - "127.0.0.1:${WEB_PORT:-3000}:3000"
+    volumes:
+      - ./apps/web/src:/app/apps/web/src:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - ktb_internal
+      - ktb_web
+
+  # ─── Nginx reverse proxy ─────────────────────────────────────────────────
+  # NFR-08: TLS termination; NFR-02: reverse proxy layer
+  # In dev, Nginx routes both web and API traffic through one port (8080)
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ktb_nginx_dev
+    restart: unless-stopped
+    ports:
+      - "8080:80"
+    volumes:
+      - ./infra/nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - web
+      - api
+    networks:
+      - ktb_internal
+      - ktb_web
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  # Internal network — only containers can reach postgres and api directly
+  ktb_internal:
+    driver: bridge
+    internal: true
+  # Web-facing network — nginx and web containers are attached here
+  ktb_web:
+    driver: bridge

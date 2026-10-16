@@ -1,0 +1,31 @@
+{
+  "name": "kottakkal-time-bank",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Kottakkal Time Bank — centrally governed multi-municipality volunteer assistance platform",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=12.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --parallel --filter './apps/*' dev",
+    "dev:api": "pnpm --filter @ktb/api dev",
+    "dev:web": "pnpm --filter @ktb/web dev",
+    "build": "pnpm --filter './apps/*' build",
+    "build:api": "pnpm --filter @ktb/api build",
+    "build:web": "pnpm --filter @ktb/web build",
+    "typecheck": "pnpm --recursive typecheck",
+    "lint": "pnpm --recursive lint",
+    "format": "pnpm --recursive format",
+    "test": "pnpm --recursive test",
+    "test:e2e": "pnpm --filter @ktb/api test:e2e",
+    "clean": "pnpm --recursive exec rm -rf dist .next .turbo node_modules"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.3",
+    "turbo": "^2.3.0"
+  },
+  "pnpm": {
+    "overrides": {}
+  }
+}

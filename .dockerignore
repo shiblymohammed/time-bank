@@ -1,0 +1,52 @@
+# .dockerignore — excludes from Docker build context
+# Keeping build context small speeds up image builds significantly
+
+# Version control
+.git/
+.gitignore
+
+# Node dependencies (installed fresh inside container)
+node_modules/
+.pnpm-store/
+
+# Build outputs (rebuilt inside container)
+dist/
+.next/
+build/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# Flutter (not needed in API/web Docker images)
+apps/mobile/
+
+# Secrets and local environment
+.env
+.env.local
+.env.*.local
+.env.production
+
+# Documentation (not needed in runtime image)
+docs/
+*.md
+!apps/api/README.md
+
+# Test files (not needed in production image)
+**/*.spec.ts
+**/*.test.ts
+**/test/
+**/__tests__/
+**/jest*.json
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/

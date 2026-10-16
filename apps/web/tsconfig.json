@@ -1,0 +1,14 @@
+{
+  "extends": "@ktb/tsconfig/nextjs.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": ".next",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+      "@ktb/shared-types": ["../../packages/shared-types/src"]
+    }
+  },
+  "include": ["next-env.d.ts", "src/**/*.ts", "src/**/*.tsx", ".next/types/**/*.ts"],
+  "exclude": ["node_modules"]
+}

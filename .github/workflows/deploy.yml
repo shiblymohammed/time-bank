@@ -1,0 +1,161 @@
+name: Deploy to Production
+
+# D#101: Docker Compose on VPS + GitHub Actions CI/CD + approved production releases
+# UC-30: GitHub Actions checks → build images → approval gate → deploy → health check/rollback
+#
+# IMPORTANT: This workflow requires a manual approval step (environment protection rule).
+# Configure GitHub environment "production" with required reviewers before enabling.
+# NFR-18: Human review required for production deployments.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type 'deploy' to confirm intentional production deployment"
+        required: true
+        type: string
+
+# Production deployments must never run in parallel
+concurrency:
+  group: production-deploy
+  cancel-in-progress: false
+
+jobs:
+  # ─── Gate: validate confirmation string ───────────────────────────────────
+  gate:
+    name: Validate Deployment Intent
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check confirmation input
+        run: |
+          if [ "${{ github.event.inputs.confirm }}" != "deploy" ]; then
+            echo "Confirmation string must be 'deploy'. Received: ${{ github.event.inputs.confirm }}"
+            exit 1
+          fi
+
+  # ─── CI must pass first ───────────────────────────────────────────────────
+  ci:
+    name: Run CI (required before deploy)
+    needs: gate
+    uses: ./.github/workflows/ci.yml
+
+  # ─── Build and push versioned images ─────────────────────────────────────
+  build-and-push:
+    name: Build & Push Production Images
+    needs: ci
+    runs-on: ubuntu-latest
+    # NFR-17: Explicit human approval via GitHub environment protection rules
+    environment: production
+    outputs:
+      image_tag: ${{ steps.meta.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Docker meta — generate image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ghcr.io/${{ github.repository }}/api
+            ghcr.io/${{ github.repository }}/web
+          tags: |
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./infra/docker/Dockerfile.api
+          target: production
+          push: true
+          tags: ghcr.io/${{ github.repository }}/api:${{ steps.meta.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: ${{ steps.meta.outputs.labels }}
+
+      - name: Build and push Web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./infra/docker/Dockerfile.web
+          target: production
+          push: true
+          tags: ghcr.io/${{ github.repository }}/web:${{ steps.meta.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # ─── Deploy to VPS ────────────────────────────────────────────────────────
+  deploy:
+    name: Deploy to VPS
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout (for scripts)
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.1.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          script: |
+            set -euo pipefail
+
+            cd ${{ secrets.VPS_DEPLOY_PATH }}
+
+            # Pull latest compose file and scripts
+            git pull origin main
+
+            # Export image tag for docker compose
+            export IMAGE_TAG=${{ needs.build-and-push.outputs.image_tag }}
+
+            echo "[deploy] Pulling images for tag: $IMAGE_TAG"
+            docker compose pull
+
+            # NFR-17: Back up DB before risky changes
+            echo "[deploy] Creating pre-deploy backup..."
+            docker compose exec -T postgres pg_dump \
+              -U "$POSTGRES_USER" "$POSTGRES_DB" \
+              | gzip > "/backups/pre-deploy-$(date +%Y%m%d-%H%M%S).sql.gz"
+
+            # Run migrations
+            echo "[deploy] Running database migrations..."
+            docker compose run --rm api node apps/api/dist/database/migrations/run.js
+
+            # Rolling update
+            echo "[deploy] Updating services..."
+            docker compose up -d --no-deps --build api web nginx
+
+            # Health check (UC-30: health check/rollback)
+            echo "[deploy] Waiting for health checks..."
+            sleep 15
+            docker compose exec api wget -qO- http://localhost:3001/health/ready || {
+              echo "[deploy] Health check failed — initiating rollback..."
+              # TODO(operations): Implement automated rollback to previous image tag
+              exit 1
+            }
+
+            echo "[deploy] Deployment successful: $IMAGE_TAG"
+
+      - name: Record deployment
+        run: |
+          echo "Deployed image tag: ${{ needs.build-and-push.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "Deployed at: $(date -u)" >> $GITHUB_STEP_SUMMARY
+          echo "Deployed by: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY

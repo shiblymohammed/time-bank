@@ -1,0 +1,11 @@
+packages:
+  # NestJS API backend
+  - "apps/api"
+  # Next.js web dashboard
+  - "apps/web"
+  # Shared TypeScript types consumed by both api and web
+  - "packages/shared-types"
+  # Shared ESLint config
+  - "packages/eslint-config"
+  # Shared tsconfig bases
+  - "packages/tsconfig"

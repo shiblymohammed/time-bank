@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.next/
+build/
+coverage/
+*.log
+.env
+.env.local
+.env.*.local
+apps/mobile/build/
+apps/mobile/.dart_tool/
