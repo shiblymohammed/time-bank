@@ -4,6 +4,8 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { TerminusModule } from '@nestjs/terminus';
 
 import { HealthModule } from './health/health.module';
+import { AuditModule } from './audit/audit.module';
+import { AuthorizationModule } from './authorization/authorization.module';
 
 /**
  * Root application module.
@@ -52,6 +54,10 @@ import { HealthModule } from './health/health.module';
     // NFR-06: Health endpoint used by Docker Compose healthcheck and monitoring
     TerminusModule,
     HealthModule,
+
+    // ─── Milestone 2 Foundations ─────────────────────────────────────
+    AuditModule,
+    AuthorizationModule,
   ],
 })
 export class AppModule {}

@@ -29,7 +29,7 @@ export enum UserRole {
   MERCHANT = 'MERCHANT',
 }
 
-// ─── Account status ───────────────────────────────────────────────────────────
+// ─── Account & verification status ──────────────────────────────────────────
 /**
  * Lifecycle states for a user account.
  * PRD: D#80 suspension; D#82 permanent ban; D#46 deceased closure.
@@ -44,6 +44,113 @@ export enum AccountStatus {
   DECEASED_CLOSED = 'DECEASED_CLOSED',
   /** Duplicate account — coordinator-reviewed and Municipality Admin approved (D#87, D#88) */
   DUPLICATE_CLOSED = 'DUPLICATE_CLOSED',
+}
+
+/**
+ * Identity verification status for a global user.
+ */
+export enum IdentityVerificationStatus {
+  UNVERIFIED = 'UNVERIFIED',
+  PENDING_REVIEW = 'PENDING_REVIEW',
+  VERIFIED = 'VERIFIED',
+  REJECTED = 'REJECTED',
+}
+
+/**
+ * Standard identity document types recognized for KYC/verification.
+ */
+export enum IdentityDocumentType {
+  AADHAAR_CARD = 'AADHAAR_CARD',
+  VOTER_ID = 'VOTER_ID',
+  DRIVING_LICENSE = 'DRIVING_LICENSE',
+  PASSPORT = 'PASSPORT',
+  RATION_CARD = 'RATION_CARD',
+  OTHER_GOVERNMENT_ID = 'OTHER_GOVERNMENT_ID',
+}
+
+/**
+ * Document review status.
+ */
+export enum DocumentReviewStatus {
+  PENDING = 'PENDING',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+  SUPERSEDED = 'SUPERSEDED',
+}
+
+// ─── Organization & membership types ─────────────────────────────────────────
+/**
+ * Administrative classification of an onboarded civic organization.
+ */
+export enum OrganizationType {
+  MUNICIPAL_CORPORATION = 'MUNICIPAL_CORPORATION',
+  MUNICIPALITY = 'MUNICIPALITY',
+  GRAMA_PANCHAYAT = 'GRAMA_PANCHAYAT',
+  SPECIAL_ADMINISTRATIVE_ZONE = 'SPECIAL_ADMINISTRATIVE_ZONE',
+}
+
+/**
+ * Status of an onboarded organization / tenant.
+ */
+export enum OrganizationStatus {
+  DRAFT = 'DRAFT',
+  ACTIVE = 'ACTIVE',
+  SUSPENDED = 'SUSPENDED',
+  ARCHIVED = 'ARCHIVED',
+}
+
+/**
+ * Organization membership lifecycle states.
+ */
+export enum MembershipStatus {
+  APPLIED = 'APPLIED',
+  PENDING_REVIEW = 'PENDING_REVIEW',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+  SUSPENDED = 'SUSPENDED',
+  REVOKED = 'REVOKED',
+}
+
+/**
+ * Role grant lifecycle state.
+ */
+export enum RoleGrantStatus {
+  ACTIVE = 'ACTIVE',
+  REVOKED = 'REVOKED',
+  SUSPENDED = 'SUSPENDED',
+}
+
+/**
+ * Audit actions for membership approvals and lifecycle transitions.
+ */
+export enum MembershipApprovalAction {
+  APPLICATION_SUBMITTED = 'APPLICATION_SUBMITTED',
+  DOCUMENT_REQUESTED = 'DOCUMENT_REQUESTED',
+  MEMBERSHIP_APPROVED = 'MEMBERSHIP_APPROVED',
+  MEMBERSHIP_REJECTED = 'MEMBERSHIP_REJECTED',
+  MEMBERSHIP_SUSPENDED = 'MEMBERSHIP_SUSPENDED',
+  MEMBERSHIP_REINSTATED = 'MEMBERSHIP_REINSTATED',
+  ROLE_GRANTED = 'ROLE_GRANTED',
+  ROLE_REVOKED = 'ROLE_REVOKED',
+}
+
+/**
+ * Platform-wide global restriction types.
+ */
+export enum GlobalRestrictionType {
+  TEMPORARY_SUSPENSION = 'TEMPORARY_SUSPENSION',
+  PERMANENT_BAN = 'PERMANENT_BAN',
+  DUPLICATE_FREEZE = 'DUPLICATE_FREEZE',
+  FRAUD_INVESTIGATION_HOLD = 'FRAUD_INVESTIGATION_HOLD',
+}
+
+/**
+ * Global restriction lifecycle status.
+ */
+export enum GlobalRestrictionStatus {
+  ACTIVE = 'ACTIVE',
+  RESOLVED = 'RESOLVED',
+  OVERTURNED_ON_APPEAL = 'OVERTURNED_ON_APPEAL',
 }
 
 // ─── Wallet / ledger types ────────────────────────────────────────────────────
