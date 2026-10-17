@@ -6,6 +6,8 @@ import { TerminusModule } from '@nestjs/terminus';
 import { HealthModule } from './health/health.module';
 import { AuditModule } from './audit/audit.module';
 import { AuthorizationModule } from './authorization/authorization.module';
+import { AuthModule } from './auth/auth.module';
+import { OrganizationsModule } from './organizations/organizations.module';
 
 /**
  * Root application module.
@@ -58,6 +60,8 @@ import { AuthorizationModule } from './authorization/authorization.module';
     // ─── Milestone 2 Foundations ─────────────────────────────────────
     AuditModule,
     AuthorizationModule,
+    AuthModule,
+    OrganizationsModule,
   ],
 })
 export class AppModule {}

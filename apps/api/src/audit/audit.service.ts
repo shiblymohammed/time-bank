@@ -5,13 +5,13 @@ import { AuditEvent } from './entities/audit-event.entity';
 
 export interface CreateAuditEventInput {
   eventType: string;
-  actorId?: string | null;
-  targetId?: string | null;
-  targetType?: string | null;
-  organizationId?: string | null;
-  municipalityId?: string | null;
-  payload?: Record<string, unknown>;
-  ipAddress?: string | null;
+  actorId?: string | null | undefined;
+  targetId?: string | null | undefined;
+  targetType?: string | null | undefined;
+  organizationId?: string | null | undefined;
+  municipalityId?: string | null | undefined;
+  payload?: Record<string, unknown> | undefined;
+  ipAddress?: string | null | undefined;
 }
 
 @Injectable()
