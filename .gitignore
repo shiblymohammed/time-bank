@@ -70,3 +70,6 @@ desktop.ini
 *.key
 *.crt
 !infra/nginx/certs/.gitkeep
+
+# Independent mobile Git repository
+/apps/mobile/time_bank/
