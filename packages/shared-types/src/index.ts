@@ -57,6 +57,15 @@ export enum IdentityVerificationStatus {
 }
 
 /**
+ * Identity verification levels (Basic mobile verification vs document-verified).
+ */
+export enum IdentityVerificationLevel {
+  BASIC = 'BASIC',
+  DOCUMENT_VERIFIED = 'DOCUMENT_VERIFIED',
+  COMMUNITY_VOUCHED = 'COMMUNITY_VOUCHED',
+}
+
+/**
  * Standard identity document types recognized for KYC/verification.
  */
 export enum IdentityDocumentType {
