@@ -14,6 +14,17 @@ export interface CreateAuditEventInput {
   ipAddress?: string | null | undefined;
 }
 
+export interface QueryAuditEventsInput {
+  eventType?: string | undefined;
+  actorId?: string | undefined;
+  organizationId?: string | undefined;
+  targetId?: string | undefined;
+  startDate?: Date | undefined;
+  endDate?: Date | undefined;
+  limit?: number | undefined;
+  offset?: number | undefined;
+}
+
 @Injectable()
 export class AuditService {
   constructor(
@@ -37,6 +48,39 @@ export class AuditService {
     });
 
     return this.auditRepo.save(event);
+  }
+
+  /**
+   * Search and paginate audit events with multi-criteria filtering (M2-13).
+   */
+  async queryEvents(input: QueryAuditEventsInput): Promise<{ events: AuditEvent[]; total: number }> {
+    const qb = this.auditRepo.createQueryBuilder('audit');
+
+    if (input.eventType) {
+      qb.andWhere('audit.eventType = :eventType', { eventType: input.eventType });
+    }
+    if (input.actorId) {
+      qb.andWhere('audit.actorId = :actorId', { actorId: input.actorId });
+    }
+    if (input.organizationId) {
+      qb.andWhere('audit.organizationId = :organizationId', { organizationId: input.organizationId });
+    }
+    if (input.targetId) {
+      qb.andWhere('audit.targetId = :targetId', { targetId: input.targetId });
+    }
+    if (input.startDate) {
+      qb.andWhere('audit.createdAt >= :startDate', { startDate: input.startDate });
+    }
+    if (input.endDate) {
+      qb.andWhere('audit.createdAt <= :endDate', { endDate: input.endDate });
+    }
+
+    qb.orderBy('audit.createdAt', 'DESC');
+    qb.take(Math.min(input.limit ?? 50, 100));
+    qb.skip(input.offset ?? 0);
+
+    const [events, total] = await qb.getManyAndCount();
+    return { events, total };
   }
 
   /**

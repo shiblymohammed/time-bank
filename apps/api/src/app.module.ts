@@ -8,6 +8,7 @@ import { AuditModule } from './audit/audit.module';
 import { AuthorizationModule } from './authorization/authorization.module';
 import { AuthModule } from './auth/auth.module';
 import { OrganizationsModule } from './organizations/organizations.module';
+import { AdminModule } from './admin/admin.module';
 
 /**
  * Root application module.
@@ -62,6 +63,7 @@ import { OrganizationsModule } from './organizations/organizations.module';
     AuthorizationModule,
     AuthModule,
     OrganizationsModule,
+    AdminModule,
   ],
 })
 export class AppModule {}
