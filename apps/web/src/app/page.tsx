@@ -1,30 +1,1164 @@
-/**
- * Root page — placeholder for Milestone 1.
- *
- * Authentication and role-based routing are implemented in Milestone 2.
- * This page simply confirms the Next.js app is running.
- */
-export default function RootPage(): React.JSX.Element {
+'use client';
+
+import React, { useState, useEffect } from 'react';
+
+interface MetricOverview {
+  totalUsers: number;
+  totalOrganizations: number;
+  activeOrganizations: number;
+  totalUniversalWallets: number;
+  totalBalanceCredits: number;
+  pendingMemberships: number;
+}
+
+interface OrganizationItem {
+  id: string;
+  code: string;
+  name: string;
+  district: string;
+  type: string;
+  status: 'ACTIVE' | 'DRAFT' | 'SUSPENDED' | 'ARCHIVED';
+  branding?: {
+    appDisplayName: string;
+    primaryColor: string;
+    secondaryColor: string;
+  };
+}
+
+interface RestrictionItem {
+  id: string;
+  userId: string;
+  userPhone?: string;
+  restrictionType: string;
+  reasonCode: string;
+  status: 'ACTIVE' | 'RESOLVED';
+  authorizedBy: string;
+  createdAt: string;
+}
+
+interface AuditItem {
+  id: string;
+  eventType: string;
+  actorId?: string;
+  organizationId?: string;
+  ipAddress?: string;
+  createdAt: string;
+  payload: Record<string, unknown>;
+}
+
+interface MembershipItem {
+  id: string;
+  organizationId: string;
+  userId: string;
+  userPhone?: string;
+  status: 'APPLIED' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED';
+  membershipNumber?: string;
+  appliedAt: string;
+  roleGrants?: { role: string; status: string }[];
+}
+
+export default function AdminDashboard(): React.JSX.Element {
+  const [activeTab, setActiveTab] = useState<'overview' | 'organizations' | 'restrictions' | 'audit' | 'memberships'>('overview');
+  const [selectedTenant, setSelectedTenant] = useState<string>('GLOBAL');
+
+  // Overview metrics state
+  const [metrics, setMetrics] = useState<MetricOverview>({
+    totalUsers: 142,
+    totalOrganizations: 3,
+    activeOrganizations: 2,
+    totalUniversalWallets: 142,
+    totalBalanceCredits: 3840.5,
+    pendingMemberships: 8,
+  });
+
+  // Organizations state
+  const [organizations, setOrganizations] = useState<OrganizationItem[]>([
+    {
+      id: 'org-ktb-01',
+      code: 'KOTTAKKAL',
+      name: 'Kottakkal Time Bank',
+      district: 'Malappuram',
+      type: 'MUNICIPALITY',
+      status: 'ACTIVE',
+      branding: {
+        appDisplayName: 'Kottakkal Time Bank',
+        primaryColor: '#0D5C75',
+        secondaryColor: '#F59E0B',
+      },
+    },
+    {
+      id: 'org-kzd-02',
+      code: 'KOZHIKODE',
+      name: 'Kozhikode Municipal Time Bank',
+      district: 'Kozhikode',
+      type: 'MUNICIPAL_CORPORATION',
+      status: 'ACTIVE',
+      branding: {
+        appDisplayName: 'Kozhikode Time Bank',
+        primaryColor: '#1E3A8A',
+        secondaryColor: '#10B981',
+      },
+    },
+    {
+      id: 'org-mlp-03',
+      code: 'MALAPPURAM',
+      name: 'Malappuram District Civic Bank',
+      district: 'Malappuram',
+      type: 'MUNICIPALITY',
+      status: 'DRAFT',
+      branding: {
+        appDisplayName: 'Malappuram Time Bank',
+        primaryColor: '#047857',
+        secondaryColor: '#FBBF24',
+      },
+    },
+  ]);
+
+  // Restrictions state
+  const [restrictions, setRestrictions] = useState<RestrictionItem[]>([
+    {
+      id: 'res-01',
+      userId: 'usr-9921',
+      userPhone: '+91 98765 11223',
+      restrictionType: 'TEMPORARY_SUSPENSION',
+      reasonCode: 'KYC_DISCREPANCY_HOLD',
+      status: 'ACTIVE',
+      authorizedBy: 'Super Admin',
+      createdAt: '2026-10-15T09:30:00Z',
+    },
+  ]);
+
+  // Audit logs state
+  const [auditLogs, setAuditLogs] = useState<AuditItem[]>([
+    {
+      id: 'aud-101',
+      eventType: 'AUTH_LOGIN',
+      actorId: 'usr-admin-01',
+      organizationId: 'org-ktb-01',
+      ipAddress: '192.168.1.10',
+      createdAt: '2026-10-17T08:15:00Z',
+      payload: { isNewUser: false, activeOrg: 'KOTTAKKAL' },
+    },
+    {
+      id: 'aud-102',
+      eventType: 'MEMBERSHIP_APPROVED',
+      actorId: 'usr-admin-01',
+      organizationId: 'org-ktb-01',
+      ipAddress: '192.168.1.10',
+      createdAt: '2026-10-17T08:00:00Z',
+      payload: { membershipNumber: 'KOTTAKKAL-2026-0042', role: 'VOLUNTEER' },
+    },
+    {
+      id: 'aud-103',
+      eventType: 'ORGANIZATION_STATUS_CHANGED',
+      actorId: 'usr-admin-01',
+      organizationId: 'org-kzd-02',
+      ipAddress: '192.168.1.10',
+      createdAt: '2026-10-16T14:20:00Z',
+      payload: { previousStatus: 'DRAFT', newStatus: 'ACTIVE' },
+    },
+  ]);
+
+  // Memberships state
+  const [memberships, setMemberships] = useState<MembershipItem[]>([
+    {
+      id: 'mem-001',
+      organizationId: 'org-ktb-01',
+      userId: 'usr-1049',
+      userPhone: '+91 94471 23456',
+      status: 'APPLIED',
+      appliedAt: '2026-10-17T04:12:00Z',
+      roleGrants: [],
+    },
+    {
+      id: 'mem-002',
+      organizationId: 'org-ktb-01',
+      userId: 'usr-1050',
+      userPhone: '+91 98460 78901',
+      status: 'APPLIED',
+      appliedAt: '2026-10-17T05:30:00Z',
+      roleGrants: [],
+    },
+    {
+      id: 'mem-003',
+      organizationId: 'org-kzd-02',
+      userId: 'usr-1049',
+      userPhone: '+91 94471 23456',
+      status: 'APPROVED',
+      membershipNumber: 'KOZHIKODE-2026-0018',
+      appliedAt: '2026-10-12T11:00:00Z',
+      roleGrants: [{ role: 'VOLUNTEER', status: 'ACTIVE' }],
+    },
+  ]);
+
+  // Modal states
+  const [showNewOrgModal, setShowNewOrgModal] = useState(false);
+  const [newOrgForm, setNewOrgForm] = useState({
+    code: '',
+    name: '',
+    district: 'Malappuram',
+    type: 'MUNICIPALITY',
+    primaryColor: '#0D5C75',
+    secondaryColor: '#F59E0B',
+  });
+
+  const [showImposeModal, setShowImposeModal] = useState(false);
+  const [imposeForm, setImposeForm] = useState({
+    userId: '',
+    restrictionType: 'TEMPORARY_SUSPENSION',
+    reasonCode: 'FRAUD_SUSPICION',
+    notes: '',
+  });
+
+  // Attempt live API fetch if API is reachable
+  useEffect(() => {
+    const fetchApi = async () => {
+      try {
+        const res = await fetch('http://localhost:3001/api/v1/admin/overview', {
+          headers: {
+            'x-user-id': 'admin-preview-id',
+            'x-is-super-admin': 'true',
+          },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setMetrics(data);
+        }
+      } catch {
+        // Fallback demo seed remains active
+      }
+    };
+    fetchApi();
+  }, []);
+
+  // Handlers
+  const handleCreateOrg = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newOrgForm.code || !newOrgForm.name) return;
+
+    const newOrg: OrganizationItem = {
+      id: `org-${Date.now()}`,
+      code: newOrgForm.code.toUpperCase(),
+      name: newOrgForm.name,
+      district: newOrgForm.district,
+      type: newOrgForm.type,
+      status: 'ACTIVE',
+      branding: {
+        appDisplayName: newOrgForm.name,
+        primaryColor: newOrgForm.primaryColor,
+        secondaryColor: newOrgForm.secondaryColor,
+      },
+    };
+
+    setOrganizations((prev) => [newOrg, ...prev]);
+    setMetrics((prev) => ({
+      ...prev,
+      totalOrganizations: prev.totalOrganizations + 1,
+      activeOrganizations: prev.activeOrganizations + 1,
+    }));
+    setShowNewOrgModal(false);
+    setNewOrgForm({
+      code: '',
+      name: '',
+      district: 'Malappuram',
+      type: 'MUNICIPALITY',
+      primaryColor: '#0D5C75',
+      secondaryColor: '#F59E0B',
+    });
+  };
+
+  const handleToggleOrgStatus = (orgId: string) => {
+    setOrganizations((prev) =>
+      prev.map((org) => {
+        if (org.id === orgId) {
+          const nextStatus = org.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
+          return { ...org, status: nextStatus };
+        }
+        return org;
+      }),
+    );
+  };
+
+  const handleApproveMembership = (id: string, orgCode: string) => {
+    const year = new Date().getFullYear();
+    const count = memberships.filter((m) => m.status === 'APPROVED').length + 1;
+    const genNumber = `${orgCode}-${year}-${String(count).padStart(4, '0')}`;
+
+    setMemberships((prev) =>
+      prev.map((m) => {
+        if (m.id === id) {
+          return {
+            ...m,
+            status: 'APPROVED',
+            membershipNumber: genNumber,
+            roleGrants: [{ role: 'VOLUNTEER', status: 'ACTIVE' }],
+          };
+        }
+        return m;
+      }),
+    );
+
+    setMetrics((prev) => ({
+      ...prev,
+      pendingMemberships: Math.max(0, prev.pendingMemberships - 1),
+    }));
+  };
+
+  const handleRejectMembership = (id: string) => {
+    setMemberships((prev) =>
+      prev.map((m) => (m.id === id ? { ...m, status: 'REJECTED' } : m)),
+    );
+    setMetrics((prev) => ({
+      ...prev,
+      pendingMemberships: Math.max(0, prev.pendingMemberships - 1),
+    }));
+  };
+
+  const handleResolveRestriction = (id: string) => {
+    setRestrictions((prev) =>
+      prev.map((r) => (r.id === id ? { ...r, status: 'RESOLVED' } : r)),
+    );
+  };
+
+  const handleImposeRestriction = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!imposeForm.userId) return;
+
+    const newRes: RestrictionItem = {
+      id: `res-${Date.now()}`,
+      userId: imposeForm.userId,
+      userPhone: '+91 99999 88888',
+      restrictionType: imposeForm.restrictionType,
+      reasonCode: imposeForm.reasonCode,
+      status: 'ACTIVE',
+      authorizedBy: 'Super Admin',
+      createdAt: new Date().toISOString(),
+    };
+
+    setRestrictions((prev) => [newRes, ...prev]);
+    setShowImposeModal(false);
+    setImposeForm({
+      userId: '',
+      restrictionType: 'TEMPORARY_SUSPENSION',
+      reasonCode: 'FRAUD_SUSPICION',
+      notes: '',
+    });
+  };
+
   return (
-    <main
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        minHeight: '100vh',
-        fontFamily: 'system-ui, sans-serif',
-        color: '#1a1a1a',
-        background: '#f5f5f5',
-      }}
-    >
-      <h1 style={{ fontSize: '1.5rem', fontWeight: 700 }}>Kottakkal Time Bank</h1>
-      <p style={{ color: '#666', marginTop: '0.5rem' }}>
-        Web dashboard — Milestone 1 foundation running ✓
-      </p>
-      <p style={{ color: '#999', fontSize: '0.875rem', marginTop: '1rem' }}>
-        Login and role-aware routing coming in Milestone 2.
-      </p>
-    </main>
+    <div className="app-container">
+      {/* ─── SIDEBAR NAVIGATION ─── */}
+      <aside className="sidebar">
+        <div className="brand-badge">
+          <div className="brand-icon">ITB</div>
+          <div>
+            <div className="brand-title">Indian Time Bank</div>
+            <div className="brand-subtitle">Super Admin Portal</div>
+          </div>
+        </div>
+
+        <nav className="nav-group">
+          <button
+            id="nav-overview"
+            className={`nav-item ${activeTab === 'overview' ? 'active' : ''}`}
+            onClick={() => setActiveTab('overview')}
+          >
+            <span>📊</span> Overview Metrics
+          </button>
+          <button
+            id="nav-orgs"
+            className={`nav-item ${activeTab === 'organizations' ? 'active' : ''}`}
+            onClick={() => setActiveTab('organizations')}
+          >
+            <span>🏛️</span> Organizations & Branding
+          </button>
+          <button
+            id="nav-memberships"
+            className={`nav-item ${activeTab === 'memberships' ? 'active' : ''}`}
+            onClick={() => setActiveTab('memberships')}
+          >
+            <span>👥</span> Multi-Tenant Memberships
+          </button>
+          <button
+            id="nav-restrictions"
+            className={`nav-item ${activeTab === 'restrictions' ? 'active' : ''}`}
+            onClick={() => setActiveTab('restrictions')}
+          >
+            <span>🛡️</span> Global Restrictions
+          </button>
+          <button
+            id="nav-audit"
+            className={`nav-item ${activeTab === 'audit' ? 'active' : ''}`}
+            onClick={() => setActiveTab('audit')}
+          >
+            <span>📜</span> Audit Explorer
+          </button>
+        </nav>
+
+        <div style={{ padding: '16px 8px', borderTop: '1px solid var(--border-subtle)' }}>
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>Architecture v2.0</div>
+          <div style={{ fontSize: '0.75rem', color: 'var(--success)', marginTop: '2px' }}>
+            ● Central Identity Active
+          </div>
+        </div>
+      </aside>
+
+      {/* ─── MAIN CONTENT ─── */}
+      <div className="main-wrapper">
+        {/* Top Header */}
+        <header className="top-bar">
+          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Tenant Scope:</span>
+            <div className="tenant-selector" id="tenant-dropdown">
+              <span className="tenant-dot" />
+              <select
+                id="tenant-select"
+                value={selectedTenant}
+                onChange={(e) => setSelectedTenant(e.target.value)}
+                style={{
+                  background: 'transparent',
+                  border: 'none',
+                  color: '#FFFFFF',
+                  fontSize: '0.88rem',
+                  fontWeight: 600,
+                  outline: 'none',
+                  cursor: 'pointer',
+                }}
+              >
+                <option value="GLOBAL" style={{ background: '#0E1626' }}>
+                  🌐 Central Super Admin (Global Scope)
+                </option>
+                {organizations.map((org) => (
+                  <option key={org.id} value={org.code} style={{ background: '#0E1626' }}>
+                    🏛️ {org.name} ({org.code})
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '10px',
+                padding: '6px 12px',
+                background: 'rgba(255, 255, 255, 0.04)',
+                border: '1px solid var(--border-subtle)',
+                borderRadius: 'var(--radius-full)',
+              }}
+            >
+              <div
+                style={{
+                  width: '28px',
+                  height: '28px',
+                  borderRadius: '50%',
+                  background: 'var(--primary)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                }}
+              >
+                SA
+              </div>
+              <div>
+                <div style={{ fontSize: '0.82rem', fontWeight: 600 }}>Super Admin</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>+91 98765 43210</div>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* Viewport Content */}
+        <main className="content-body">
+          {/* ────────────────── OVERVIEW TAB ────────────────── */}
+          {activeTab === 'overview' && (
+            <div>
+              <div style={{ marginBottom: '28px' }}>
+                <h1 style={{ fontSize: '1.8rem', fontWeight: 800, letterSpacing: '-0.02em' }}>
+                  Central Platform Overview
+                </h1>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', marginTop: '4px' }}>
+                  Indian Time Bank network health, universal wallet ledger supply, and cross-municipality memberships.
+                </p>
+              </div>
+
+              {/* Metrics Grid */}
+              <div className="metric-grid">
+                <div className="glass-panel metric-card" id="card-metric-users">
+                  <div className="metric-label">Registered Global Users</div>
+                  <div className="metric-value">{metrics.totalUsers}</div>
+                  <div className="metric-sub">Single lifetime verified identities (D#39)</div>
+                </div>
+
+                <div className="glass-panel metric-card" id="card-metric-orgs">
+                  <div className="metric-label">Civic Organizations</div>
+                  <div className="metric-value">
+                    {metrics.activeOrganizations}{' '}
+                    <span style={{ fontSize: '1rem', color: 'var(--text-dim)' }}>
+                      / {metrics.totalOrganizations}
+                    </span>
+                  </div>
+                  <div className="metric-sub">Active municipal / corporation tenants</div>
+                </div>
+
+                <div className="glass-panel metric-card" id="card-metric-supply">
+                  <div className="metric-label">Universal Credit Supply</div>
+                  <div className="metric-value">
+                    {metrics.totalBalanceCredits.toFixed(1)}{' '}
+                    <span style={{ fontSize: '1rem', color: 'var(--accent)' }}>hrs</span>
+                  </div>
+                  <div className="metric-sub">Across {metrics.totalUniversalWallets} non-org wallets (D#17)</div>
+                </div>
+
+                <div className="glass-panel metric-card" id="card-metric-pending">
+                  <div className="metric-label">Pending Memberships</div>
+                  <div className="metric-value" style={{ color: 'var(--accent)' }}>
+                    {metrics.pendingMemberships}
+                  </div>
+                  <div className="metric-sub">Applications awaiting coordinator review</div>
+                </div>
+              </div>
+
+              {/* Network Highlights */}
+              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px' }}>
+                <div className="glass-panel" style={{ padding: '24px' }}>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '16px' }}>
+                    Active White-Label Tenants
+                  </h3>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                    {organizations.map((org) => (
+                      <div
+                        key={org.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '14px 18px',
+                          background: 'rgba(255, 255, 255, 0.02)',
+                          border: '1px solid var(--border-subtle)',
+                          borderRadius: 'var(--radius-md)',
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                          <div
+                            style={{
+                              width: '18px',
+                              height: '18px',
+                              borderRadius: '4px',
+                              backgroundColor: org.branding?.primaryColor ?? '#0D5C75',
+                              border: '1px solid rgba(255, 255, 255, 0.3)',
+                            }}
+                          />
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{org.name}</div>
+                            <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>
+                              Code: <strong style={{ color: 'var(--text-main)' }}>{org.code}</strong> • {org.district}
+                            </div>
+                          </div>
+                        </div>
+                        <span className={`badge badge-${org.status.toLowerCase()}`}>{org.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="glass-panel" style={{ padding: '24px' }}>
+                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '16px' }}>
+                    Multi-Organization Architecture (D#39 & ITB-004)
+                  </h3>
+                  <div style={{ fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: '1.6' }}>
+                    <p style={{ marginBottom: '12px' }}>
+                      ✓ <strong>One Universal Wallet:</strong> Each citizen holds exactly one lifetime time-credit balance
+                      that follows them across all municipal borders.
+                    </p>
+                    <p style={{ marginBottom: '12px' }}>
+                      ✓ <strong>Independent Tenant Approval:</strong> Applying to Kottakkal requires local coordinator
+                      approval and yields a branded municipal membership, without affecting existing Kozhikode access.
+                    </p>
+                    <p>
+                      ✓ <strong>Strict Auditability:</strong> Every role grant, restriction, and status transition is recorded
+                      in an immutable append-only ledger.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ────────────────── ORGANIZATIONS TAB ────────────────── */}
+          {activeTab === 'organizations' && (
+            <div>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: '28px',
+                }}
+              >
+                <div>
+                  <h1 style={{ fontSize: '1.8rem', fontWeight: 800, letterSpacing: '-0.02em' }}>
+                    Civic Organizations & White-Label Theming
+                  </h1>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', marginTop: '4px' }}>
+                    Provision municipalities, manage visual branding assets, and configure mobile app package IDs.
+                  </p>
+                </div>
+                <button
+                  id="btn-new-org"
+                  className="btn btn-primary"
+                  onClick={() => setShowNewOrgModal(true)}
+                >
+                  <span>+</span> Onboard New Municipality
+                </button>
+              </div>
+
+              <div className="glass-panel table-container">
+                <table className="custom-table" id="table-organizations">
+                  <thead>
+                    <tr>
+                      <th>Organization</th>
+                      <th>Slug Code</th>
+                      <th>District & Type</th>
+                      <th>Brand Palette</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {organizations.map((org) => (
+                      <tr key={org.id} id={`row-org-${org.code.toLowerCase()}`}>
+                        <td>
+                          <div style={{ fontWeight: 700 }}>{org.name}</div>
+                          <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>
+                            {org.branding?.appDisplayName}
+                          </div>
+                        </td>
+                        <td>
+                          <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>
+                            {org.code}
+                          </code>
+                        </td>
+                        <td>
+                          <div>{org.district}</div>
+                          <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>{org.type}</div>
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                            <div
+                              style={{
+                                width: '22px',
+                                height: '22px',
+                                borderRadius: '4px',
+                                backgroundColor: org.branding?.primaryColor,
+                                border: '1px solid rgba(255, 255, 255, 0.2)',
+                              }}
+                              title={`Primary: ${org.branding?.primaryColor}`}
+                            />
+                            <div
+                              style={{
+                                width: '22px',
+                                height: '22px',
+                                borderRadius: '4px',
+                                backgroundColor: org.branding?.secondaryColor,
+                                border: '1px solid rgba(255, 255, 255, 0.2)',
+                              }}
+                              title={`Secondary: ${org.branding?.secondaryColor}`}
+                            />
+                          </div>
+                        </td>
+                        <td>
+                          <span className={`badge badge-${org.status.toLowerCase()}`}>{org.status}</span>
+                        </td>
+                        <td>
+                          <button
+                            id={`btn-toggle-${org.code.toLowerCase()}`}
+                            className="btn btn-secondary"
+                            style={{ padding: '6px 12px', fontSize: '0.78rem' }}
+                            onClick={() => handleToggleOrgStatus(org.id)}
+                          >
+                            {org.status === 'ACTIVE' ? 'Suspend' : 'Activate'}
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ────────────────── MEMBERSHIPS TAB ────────────────── */}
+          {activeTab === 'memberships' && (
+            <div>
+              <div style={{ marginBottom: '28px' }}>
+                <h1 style={{ fontSize: '1.8rem', fontWeight: 800, letterSpacing: '-0.02em' }}>
+                  Multi-Tenant Memberships & Role Grants
+                </h1>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', marginTop: '4px' }}>
+                  Review civic applications, generate sequential membership IDs, and assign coordinator/volunteer roles.
+                </p>
+              </div>
+
+              <div className="glass-panel table-container">
+                <table className="custom-table" id="table-memberships">
+                  <thead>
+                    <tr>
+                      <th>Citizen Contact</th>
+                      <th>Target Organization</th>
+                      <th>Status</th>
+                      <th>Membership Number</th>
+                      <th>Assigned Roles</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {memberships.map((m) => {
+                      const org = organizations.find((o) => o.id === m.organizationId);
+                      return (
+                        <tr key={m.id} id={`row-membership-${m.id}`}>
+                          <td>
+                            <div style={{ fontWeight: 700 }}>{m.userPhone ?? 'Mobile Citizen'}</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                              UID: {m.userId}
+                            </div>
+                          </td>
+                          <td>
+                            <div style={{ fontWeight: 600 }}>{org?.name ?? m.organizationId}</div>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
+                              Code: {org?.code}
+                            </div>
+                          </td>
+                          <td>
+                            <span className={`badge badge-${m.status.toLowerCase()}`}>{m.status}</span>
+                          </td>
+                          <td>
+                            {m.membershipNumber ? (
+                              <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--success)' }}>
+                                {m.membershipNumber}
+                              </code>
+                            ) : (
+                              <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>Pending Approval</span>
+                            )}
+                          </td>
+                          <td>
+                            {m.roleGrants && m.roleGrants.length > 0 ? (
+                              m.roleGrants.map((g, idx) => (
+                                <span
+                                  key={idx}
+                                  style={{
+                                    display: 'inline-block',
+                                    padding: '2px 8px',
+                                    borderRadius: '4px',
+                                    background: 'rgba(13, 92, 117, 0.4)',
+                                    color: '#E0F2FE',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 600,
+                                    marginRight: '4px',
+                                  }}
+                                >
+                                  {g.role}
+                                </span>
+                              ))
+                            ) : (
+                              <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>None</span>
+                            )}
+                          </td>
+                          <td>
+                            {m.status === 'APPLIED' && (
+                              <div style={{ display: 'flex', gap: '8px' }}>
+                                <button
+                                  id={`btn-approve-${m.id}`}
+                                  className="btn btn-success"
+                                  style={{ padding: '5px 10px', fontSize: '0.78rem' }}
+                                  onClick={() => handleApproveMembership(m.id, org?.code ?? 'KTB')}
+                                >
+                                  ✓ Approve
+                                </button>
+                                <button
+                                  id={`btn-reject-${m.id}`}
+                                  className="btn btn-danger"
+                                  style={{ padding: '5px 10px', fontSize: '0.78rem' }}
+                                  onClick={() => handleRejectMembership(m.id)}
+                                >
+                                  ✕ Reject
+                                </button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ────────────────── RESTRICTIONS TAB ────────────────── */}
+          {activeTab === 'restrictions' && (
+            <div>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  marginBottom: '28px',
+                }}
+              >
+                <div>
+                  <h1 style={{ fontSize: '1.8rem', fontWeight: 800, letterSpacing: '-0.02em' }}>
+                    Global Account Restrictions & Fraud Holds
+                  </h1>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', marginTop: '4px' }}>
+                    Platform-wide suspensions and permanent bans authorized by Central Super Admin (D#82, D#83).
+                  </p>
+                </div>
+                <button
+                  id="btn-impose-restriction"
+                  className="btn btn-danger"
+                  onClick={() => setShowImposeModal(true)}
+                >
+                  <span>⚠️</span> Impose Account Restriction
+                </button>
+              </div>
+
+              <div className="glass-panel table-container">
+                <table className="custom-table" id="table-restrictions">
+                  <thead>
+                    <tr>
+                      <th>Target Citizen</th>
+                      <th>Restriction Type</th>
+                      <th>Reason Code</th>
+                      <th>Authorized By</th>
+                      <th>Status</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {restrictions.map((r) => (
+                      <tr key={r.id} id={`row-res-${r.id}`}>
+                        <td>
+                          <div style={{ fontWeight: 700 }}>{r.userPhone ?? r.userId}</div>
+                          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>ID: {r.id}</div>
+                        </td>
+                        <td>
+                          <span style={{ color: '#F87171', fontWeight: 600 }}>{r.restrictionType}</span>
+                        </td>
+                        <td>
+                          <code style={{ fontFamily: 'var(--font-mono)' }}>{r.reasonCode}</code>
+                        </td>
+                        <td>{r.authorizedBy}</td>
+                        <td>
+                          <span className={`badge badge-${r.status.toLowerCase()}`}>{r.status}</span>
+                        </td>
+                        <td>
+                          {r.status === 'ACTIVE' && (
+                            <button
+                              id={`btn-resolve-${r.id}`}
+                              className="btn btn-secondary"
+                              style={{ padding: '6px 12px', fontSize: '0.78rem' }}
+                              onClick={() => handleResolveRestriction(r.id)}
+                            >
+                              Resolve Hold
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* ────────────────── AUDIT EXPLORER TAB ────────────────── */}
+          {activeTab === 'audit' && (
+            <div>
+              <div style={{ marginBottom: '28px' }}>
+                <h1 style={{ fontSize: '1.8rem', fontWeight: 800, letterSpacing: '-0.02em' }}>
+                  Global Audit Trail Explorer
+                </h1>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', marginTop: '4px' }}>
+                  Immutable, append-only record of administrative, authentication, and civic operations.
+                </p>
+              </div>
+
+              <div className="glass-panel table-container">
+                <table className="custom-table" id="table-audit-logs">
+                  <thead>
+                    <tr>
+                      <th>Event Type</th>
+                      <th>Actor ID</th>
+                      <th>Organization</th>
+                      <th>IP Address</th>
+                      <th>Timestamp</th>
+                      <th>Details</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditLogs.map((log) => (
+                      <tr key={log.id} id={`row-audit-${log.id}`}>
+                        <td>
+                          <span
+                            style={{
+                              fontFamily: 'var(--font-mono)',
+                              fontSize: '0.8rem',
+                              color: 'var(--accent)',
+                              fontWeight: 700,
+                            }}
+                          >
+                            {log.eventType}
+                          </span>
+                        </td>
+                        <td>
+                          <div style={{ fontSize: '0.82rem', fontFamily: 'var(--font-mono)' }}>
+                            {log.actorId ?? 'SYSTEM'}
+                          </div>
+                        </td>
+                        <td>{log.organizationId ?? 'CENTRAL'}</td>
+                        <td>
+                          <code style={{ fontSize: '0.78rem' }}>{log.ipAddress ?? '—'}</code>
+                        </td>
+                        <td style={{ fontSize: '0.82rem', color: 'var(--text-dim)' }}>
+                          {new Date(log.createdAt).toLocaleString()}
+                        </td>
+                        <td>
+                          <pre
+                            style={{
+                              fontFamily: 'var(--font-mono)',
+                              fontSize: '0.75rem',
+                              background: 'rgba(0, 0, 0, 0.3)',
+                              padding: '4px 8px',
+                              borderRadius: '4px',
+                              color: '#93C5FD',
+                            }}
+                          >
+                            {JSON.stringify(log.payload)}
+                          </pre>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </main>
+      </div>
+
+      {/* ─── NEW ORGANIZATION MODAL ─── */}
+      {showNewOrgModal && (
+        <div className="modal-backdrop">
+          <div className="modal-content">
+            <h2 style={{ fontSize: '1.3rem', fontWeight: 800, marginBottom: '6px' }}>
+              Onboard Civic Organization
+            </h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '20px' }}>
+              Create an administrative tenant with custom white-label colors and mobile branding.
+            </p>
+
+            <form onSubmit={handleCreateOrg}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
+                    Slug Code (Uppercase)
+                  </label>
+                  <input
+                    id="input-org-code"
+                    type="text"
+                    required
+                    placeholder="e.g. THRISSUR"
+                    className="form-input"
+                    value={newOrgForm.code}
+                    onChange={(e) => setNewOrgForm({ ...newOrgForm, code: e.target.value.toUpperCase() })}
+                  />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
+                    Administrative Type
+                  </label>
+                  <select
+                    id="select-org-type"
+                    className="form-input"
+                    value={newOrgForm.type}
+                    onChange={(e) => setNewOrgForm({ ...newOrgForm, type: e.target.value })}
+                  >
+                    <option value="MUNICIPALITY">Municipality</option>
+                    <option value="MUNICIPAL_CORPORATION">Municipal Corporation</option>
+                    <option value="GRAMA_PANCHAYAT">Grama Panchayat</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
+                  Full Organization Display Name
+                </label>
+                <input
+                  id="input-org-name"
+                  type="text"
+                  required
+                  placeholder="e.g. Thrissur Municipal Corporation Time Bank"
+                  className="form-input"
+                  value={newOrgForm.name}
+                  onChange={(e) => setNewOrgForm({ ...newOrgForm, name: e.target.value })}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '22px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
+                    Primary Brand Color
+                  </label>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      id="input-org-primary"
+                      type="color"
+                      value={newOrgForm.primaryColor}
+                      onChange={(e) => setNewOrgForm({ ...newOrgForm, primaryColor: e.target.value })}
+                      style={{ width: '40px', height: '40px', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                    />
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={newOrgForm.primaryColor}
+                      onChange={(e) => setNewOrgForm({ ...newOrgForm, primaryColor: e.target.value })}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
+                    Secondary Accent Color
+                  </label>
+                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <input
+                      id="input-org-secondary"
+                      type="color"
+                      value={newOrgForm.secondaryColor}
+                      onChange={(e) => setNewOrgForm({ ...newOrgForm, secondaryColor: e.target.value })}
+                      style={{ width: '40px', height: '40px', border: 'none', background: 'transparent', cursor: 'pointer' }}
+                    />
+                    <input
+                      type="text"
+                      className="form-input"
+                      value={newOrgForm.secondaryColor}
+                      onChange={(e) => setNewOrgForm({ ...newOrgForm, secondaryColor: e.target.value })}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowNewOrgModal(false)}
+                >
+                  Cancel
+                </button>
+                <button id="btn-submit-org" type="submit" className="btn btn-primary">
+                  Provision Organization
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ─── IMPOSE RESTRICTION MODAL ─── */}
+      {showImposeModal && (
+        <div className="modal-backdrop">
+          <div className="modal-content">
+            <h2 style={{ fontSize: '1.3rem', fontWeight: 800, marginBottom: '6px' }}>
+              Impose Platform Restriction
+            </h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '20px' }}>
+              Enforce a platform-wide suspension or permanent ban across all organization apps.
+            </p>
+
+            <form onSubmit={handleImposeRestriction}>
+              <div style={{ marginBottom: '14px' }}>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
+                  Target Citizen User ID
+                </label>
+                <input
+                  id="input-res-userid"
+                  type="text"
+                  required
+                  placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000"
+                  className="form-input"
+                  value={imposeForm.userId}
+                  onChange={(e) => setImposeForm({ ...imposeForm, userId: e.target.value })}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
+                    Restriction Type
+                  </label>
+                  <select
+                    id="select-res-type"
+                    className="form-input"
+                    value={imposeForm.restrictionType}
+                    onChange={(e) => setImposeForm({ ...imposeForm, restrictionType: e.target.value })}
+                  >
+                    <option value="TEMPORARY_SUSPENSION">Temporary Suspension</option>
+                    <option value="PERMANENT_BAN">Permanent Ban</option>
+                    <option value="FRAUD_INVESTIGATION_HOLD">Fraud Hold</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
+                    Reason Code
+                  </label>
+                  <input
+                    id="input-res-code"
+                    type="text"
+                    required
+                    placeholder="e.g. FRAUD_SUSPICION"
+                    className="form-input"
+                    value={imposeForm.reasonCode}
+                    onChange={(e) => setImposeForm({ ...imposeForm, reasonCode: e.target.value })}
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginBottom: '22px' }}>
+                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
+                  Administrative Justification Notes
+                </label>
+                <textarea
+                  id="input-res-notes"
+                  rows={3}
+                  className="form-input"
+                  placeholder="Detailed findings and evidence reference..."
+                  value={imposeForm.notes}
+                  onChange={(e) => setImposeForm({ ...imposeForm, notes: e.target.value })}
+                />
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setShowImposeModal(false)}
+                >
+                  Cancel
+                </button>
+                <button id="btn-submit-restriction" type="submit" className="btn btn-danger">
+                  Authorize Restriction
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
