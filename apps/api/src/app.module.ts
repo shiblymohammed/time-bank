@@ -9,6 +9,7 @@ import { AuthorizationModule } from './authorization/authorization.module';
 import { AuthModule } from './auth/auth.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { AdminModule } from './admin/admin.module';
+import { MembershipsModule } from './memberships/memberships.module';
 
 /**
  * Root application module.
@@ -64,6 +65,7 @@ import { AdminModule } from './admin/admin.module';
     AuthModule,
     OrganizationsModule,
     AdminModule,
+    MembershipsModule,
   ],
 })
 export class AppModule {}
