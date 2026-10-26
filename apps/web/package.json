@@ -2,7 +2,7 @@
   "name": "@ktb/web",
   "version": "0.0.1",
   "private": true,
-  "description": "Kottakkal Time Bank — Next.js web dashboards for coordinators, admins and merchants (D#96, D#93)",
+  "description": "Kottakkal Time Bank \u2014 Next.js web dashboards for coordinators, admins and merchants (D#96, D#93)",
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
@@ -10,7 +10,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
-    "test": "node -e \"console.log('No tests in @ktb/web for Milestone 1')\"",
+    "test": "node --test test/*.test.cjs",
     "test:watch": "echo \"No test runner configured yet\""
   },
   "dependencies": {

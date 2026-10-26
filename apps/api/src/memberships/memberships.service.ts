@@ -494,7 +494,7 @@ export class MembershipsService {
   ): Promise<OrganizationMembership> {
     const membership = await this.membershipRepo.findOne({
       where: { id: membershipId, organizationId },
-      relations: ['user', 'roleGrants', 'approvals'],
+      relations: ['user', 'roleGrants', 'approvals', 'documents'],
     });
 
     if (!membership) {

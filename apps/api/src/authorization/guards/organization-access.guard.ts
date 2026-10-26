@@ -30,6 +30,7 @@ export class OrganizationAccessGuard implements CanActivate {
     const orgId =
       request.params?.orgId ??
       request.params?.organizationId ??
+      request.params?.id ??
       request.query?.orgId ??
       request.headers['x-organization-id'];
 

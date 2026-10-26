@@ -7,6 +7,15 @@ import type { NextConfig } from 'next';
  * D#93: Browser dashboards for coordinators, admins, Super Admin and merchants
  */
 const nextConfig: NextConfig = {
+  async rewrites() {
+    const apiUrl = (
+      process.env.API_URL ||
+      process.env.NEXT_PUBLIC_API_URL ||
+      'http://localhost:3001'
+    ).replace(/\/$/, '');
+    return [{ source: '/backend/:path*', destination: `${apiUrl}/:path*` }];
+  },
+
   // Strict mode helps surface concurrent rendering issues early
   reactStrictMode: true,
 

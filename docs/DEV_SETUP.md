@@ -326,3 +326,38 @@ Milestone 2 will wire in (see PRD §11):
 - `MunicipalitiesModule` — Super Admin provisions municipalities (D#52)
 - `RolesModule` — role grants, permission checks (NFR-09, FR-GOV-03)
 - `BeneficiariesModule` — eligibility, caregiver authorization (FR-BEN)
+
+## Web dashboard API integration
+
+The dashboard uses real OTP authentication and live API data. Copy
+`apps/web/.env.example` to `apps/web/.env.local` and set `API_URL` to the
+NestJS server origin (default `http://localhost:3001`). Start the API and
+web apps with `corepack pnpm dev`. Next.js forwards `/backend/*` requests
+to that origin, avoiding browser CORS configuration. Set the origin before
+starting development or building; production rewrites are fixed at build time.
+Docker Compose uses `http://api:3001` for the server proxy.
+
+Sign in with the phone number of an existing Super Admin. OTP verification
+does not grant admin privileges; the account needs an active Super Admin
+role on an approved membership in the database. Development OTP responses
+include a code, which the sign-in form fills automatically. Click Verify and sign in to submit it. Production uses SMS.
+Tokens are held in memory, refreshed automatically, and revoked on sign-out.
+Reloading the page requires signing in again.
+
+Overview metrics and account restrictions are platform-wide. The tenant
+selector scopes organization rows, memberships, and audit events. Membership
+review and branding updates require an active organization, as enforced by
+the backend. Memberships are fetched in pages of 100; audit events have
+50-row pagination and an event-type filter. API failures are displayed and
+never replaced with sample records. Successful actions reload server data,
+including server-assigned membership numbers and audit events.
+
+
+Use **Manage organization** on an organization row to edit its name, district,
+and lifecycle status, list/register app builds, or appoint a role by global
+user ID. Organization settings and app build writes require an active tenant.
+Use **Details & roles** on a membership row to inspect approval history,
+grant/revoke roles, and review supporting document records. Document storage
+keys are shown as references; the backend does not expose a document download
+endpoint. These controls use the existing administrative and membership APIs;
+applicant-only application and upload endpoints are outside this admin dashboard.

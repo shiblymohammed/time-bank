@@ -39,6 +39,27 @@ export class AuthorizationService {
     private readonly restrictionRepo: Repository<GlobalAccountRestriction>,
   ) {}
 
+  /** Validates platform administration against current account and role records. */
+  async assertGlobalSuperAdmin(userId: string): Promise<void> {
+    const user = await this.userRepo.findOne({ where: { id: userId } });
+    if (!user || user.status !== AccountStatus.ACTIVE) {
+      throw new ForbiddenException('Active account required');
+    }
+    const restriction = await this.restrictionRepo.findOne({
+      where: { userId, status: GlobalRestrictionStatus.ACTIVE },
+    });
+    if (restriction) throw new ForbiddenException('Global account restriction active');
+    const grant = await this.roleGrantRepo
+      .createQueryBuilder('grant')
+      .innerJoin('grant.membership', 'm')
+      .where('m.userId = :userId', { userId })
+      .andWhere('grant.role = :role', { role: UserRole.SUPER_ADMIN })
+      .andWhere('grant.status = :status', { status: RoleGrantStatus.ACTIVE })
+      .andWhere('m.status = :mStatus', { mStatus: MembershipStatus.APPROVED })
+      .getOne();
+    if (!grant) throw new ForbiddenException('Super Admin access required');
+  }
+
   /**
    * Evaluates if a user has access to an organization.
    * Enforces:
