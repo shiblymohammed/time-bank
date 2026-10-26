@@ -10,13 +10,18 @@ import { AuthModule } from './auth/auth.module';
 import { OrganizationsModule } from './organizations/organizations.module';
 import { AdminModule } from './admin/admin.module';
 import { MembershipsModule } from './memberships/memberships.module';
+import { CatalogueModule } from './catalogue/catalogue.module';
+import { BeneficiariesModule } from './beneficiaries/beneficiaries.module';
+import { RequestsModule } from './requests/requests.module';
+import { MatchingModule } from './matching/matching.module';
 
 /**
  * Root application module.
  *
- * Only Milestone 1 modules are wired here. Later milestones will add:
- *   Milestone 2: AuthModule, IdentityModule, MunicipalitiesModule, RolesModule
- *   Milestone 3: CatalogueModule, RequestsModule, MatchingModule, TimersModule
+ * Modules wired:
+ *   Milestone 1: HealthModule, AuditModule
+ *   Milestone 2: AuthModule, AuthorizationModule, OrganizationsModule, AdminModule, MembershipsModule
+ *   Milestone 3: CatalogueModule, BeneficiariesModule, RequestsModule, MatchingModule
  *   Milestone 4: TimeLedgerModule, DonationsModule
  *   ...
  *
@@ -66,6 +71,12 @@ import { MembershipsModule } from './memberships/memberships.module';
     OrganizationsModule,
     AdminModule,
     MembershipsModule,
+
+    // ─── Milestone 3 Core Services & Matching ─────────────────────────
+    CatalogueModule,
+    BeneficiariesModule,
+    RequestsModule,
+    MatchingModule,
   ],
 })
 export class AppModule {}

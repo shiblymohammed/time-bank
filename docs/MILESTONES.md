@@ -68,21 +68,30 @@ permissions, account recovery.
 
 ---
 
-## Milestone 3: Core services
+## Milestone 3: Core service catalogue & request matching ✅ IMPLEMENTED
 
-**Goal:** Catalogue, request creation, location, immediate and scheduled matching,
-assignment, timers, independent verification.
+**Goal:** Centrally managed catalogue, municipal enablement/proposals, beneficiary eligibility,
+caregiver proxy, manual service location, immediate and scheduled candidate matching,
+volunteer assignment lifecycle, concurrency locks, and coordinator escalation.
 
-**Planned scope:**
-- CatalogueModule: service types, municipality enablement (FR-SVC, D#10)
-- RequestsModule: immediate + future requests (FR-SVC-01, D#60)
-- Manual service location entry (FR-SVC-02, D#59)
-- MatchingModule: location + skills + eligibility filtering (FR-MATCH, D#9)
-- TimersModule: start/stop, manual correction (FR-SVC-05)
-- VerificationModule: independent verifier workflow (D#27, BR-01)
-- Assignment lifecycle: accept, decline, withdraw, cancel (D#12, D#62)
+**Implemented scope:**
+- [x] `@ktb/shared-types` — Core M3 enums (`UrgencyType`, `CreationChannel`, `ServiceRequestStatus`, `VolunteerAssignmentStatus`, `CaregiverAuthorizationStatus`, `BeneficiaryEligibilityType`, `SkillVerificationStatus`, `MatchingRoundStatus`, `MatchingEscalationReason`)
+- [x] TypeORM Migration 0003: `1729118400003-ServiceCatalogueAndRequests.ts` (12 core catalogue & request tables + indexes)
+- [x] TypeORM Migration 0004: `1729118400004-OperationalZonesAndMatchingRounds.ts` (`operational_zones`, `volunteer_zone_assignments`, `matching_rounds`, residential address & GPS consent columns)
+- [x] `CatalogueModule`: Global service categories, master definitions, municipal catalogue enablement, municipal proposals (FR-SVC, D#10, ITB-002)
+- [x] `BeneficiariesModule`: Beneficiary ongoing/temporary eligibility, review dates, monthly request quotas, caregiver authorization (FR-BEN, D#8, D#24, D#25, D#26, D#37)
+- [x] `RequestsModule`: Immediate & scheduled requests, mandatory manual location entry, cancellation audit, rescheduling history (FR-SVC-01, FR-SVC-02, D#59, D#60, D#61, D#62)
+- [x] `MatchingModule` (Phase C):
+  - Coordinator-managed operational zones and volunteer zone assignments (D#9, D#13)
+  - Verified residential address base location with optional fresh, consented GPS (D#58)
+  - Policy candidate filtering: role grants, verified skill prerequisites, active account restrictions, schedule conflict avoidance, sensitive service checks, cross-org participation toggle (ITB-006, D#7, D#11, D#79)
+  - `DeterministicCandidateRankingStrategy`: ward/zone match, distance proximity, skills, workload balancing, home org affinity, and deterministic lexical tie-breaking
+  - Configurable `MatchingConfigService` (tiers, search radii 3/7/15km, timeouts)
+  - Durable `MatchingRound` records and multi-round progression (Tier 1 -> Tier 2 -> Tier 3 -> Escalation)
+  - Atomic offer acceptance with offline retry idempotency (`clientOperationId`), expiry handling, and concurrency locks (D#12, D#64, NFR-11)
+- [x] Multi-tenant isolation guards & cross-organization community drive authorization rules (ITB-005, ITB-006, ITB-007)
+- [x] Test suite: 24 test suites, 238 unit and integration tests passing with zero regressions
 
----
 
 ## Milestone 4: Universal time-credit ledger
 
