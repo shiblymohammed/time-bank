@@ -221,3 +221,100 @@ export interface HealthCheckResponse {
   environment: AppEnvironment;
   timestamp: string;
 }
+
+// ─── Milestone 3: Service Catalogue, Requests & Matching Types ───────────────
+
+export enum UrgencyType {
+  IMMEDIATE = 'IMMEDIATE',
+  SCHEDULED = 'SCHEDULED',
+}
+
+export enum CreationChannel {
+  DIRECT_BENEFICIARY = 'DIRECT_BENEFICIARY',
+  CAREGIVER_PROXY = 'CAREGIVER_PROXY',
+  COORDINATOR_ON_BEHALF = 'COORDINATOR_ON_BEHALF',
+}
+
+export enum ServiceRequestStatus {
+  DRAFT = 'DRAFT',
+  MATCHING_ACTIVE = 'MATCHING_ACTIVE',
+  PARTIALLY_ACCEPTED = 'PARTIALLY_ACCEPTED',
+  FULLY_MATCHED = 'FULLY_MATCHED',
+  IN_PROGRESS = 'IN_PROGRESS',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
+  RESCHEDULED = 'RESCHEDULED',
+  EXPIRED_UNMATCHED = 'EXPIRED_UNMATCHED',
+  ESCALATED_TO_COORDINATOR = 'ESCALATED_TO_COORDINATOR',
+}
+
+export enum VolunteerAssignmentStatus {
+  OFFERED = 'OFFERED',
+  ACCEPTED = 'ACCEPTED',
+  DECLINED = 'DECLINED',
+  TIMED_OUT = 'TIMED_OUT',
+  IN_PROGRESS = 'IN_PROGRESS',
+  COMPLETED = 'COMPLETED',
+  CANCELLED = 'CANCELLED',
+  WITHDRAWN = 'WITHDRAWN',
+  REPLACED = 'REPLACED',
+}
+
+export enum CaregiverRelationshipType {
+  FAMILY_CHILD = 'FAMILY_CHILD',
+  FAMILY_SPOUSE = 'FAMILY_SPOUSE',
+  LEGAL_GUARDIAN = 'LEGAL_GUARDIAN',
+  COMMUNITY_REPRESENTATIVE = 'COMMUNITY_REPRESENTATIVE',
+  OTHER = 'OTHER',
+}
+
+export enum CaregiverAuthorizationStatus {
+  PENDING_REVIEW = 'PENDING_REVIEW',
+  APPROVED = 'APPROVED',
+  REVOKED = 'REVOKED',
+}
+
+export enum BeneficiaryEligibilityType {
+  ONGOING = 'ONGOING',
+  TEMPORARY = 'TEMPORARY',
+}
+
+export enum BeneficiaryEligibilityStatus {
+  ACTIVE = 'ACTIVE',
+  PENDING_REVIEW = 'PENDING_REVIEW',
+  EXPIRED = 'EXPIRED',
+  SUSPENDED = 'SUSPENDED',
+}
+
+export enum SkillVerificationStatus {
+  PENDING_VERIFICATION = 'PENDING_VERIFICATION',
+  VERIFIED = 'VERIFIED',
+  REJECTED = 'REJECTED',
+}
+
+export enum ServiceProposalStatus {
+  PENDING_REVIEW = 'PENDING_REVIEW',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+}
+
+export enum CancellerRole {
+  BENEFICIARY = 'BENEFICIARY',
+  CAREGIVER = 'CAREGIVER',
+  COORDINATOR = 'COORDINATOR',
+  SYSTEM = 'SYSTEM',
+}
+
+export enum MatchingRoundStatus {
+  ACTIVE = 'ACTIVE',
+  COMPLETED = 'COMPLETED',
+  EXPIRED = 'EXPIRED',
+  ESCALATED = 'ESCALATED',
+}
+
+export enum MatchingEscalationReason {
+  ROUNDS_EXHAUSTED = 'ROUNDS_EXHAUSTED',
+  NO_QUALIFIED_CANDIDATES = 'NO_QUALIFIED_CANDIDATES',
+  START_TIME_IMMINENT = 'START_TIME_IMMINENT',
+  MANUAL_COORDINATOR_TRIGGER = 'MANUAL_COORDINATOR_TRIGGER',
+}
