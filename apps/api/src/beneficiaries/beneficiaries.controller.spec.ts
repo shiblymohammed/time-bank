@@ -17,6 +17,7 @@ describe('BeneficiariesController', () => {
   let controller: BeneficiariesController;
 
   const mockBeneficiariesService = {
+    listCareRecipientsForCaregiver: jest.fn(),
     grantEligibility: jest.fn(),
     getEligibility: jest.fn(),
     createCaregiverAuthorization: jest.fn(),
@@ -47,6 +48,18 @@ describe('BeneficiariesController', () => {
     controller = module.get<BeneficiariesController>(BeneficiariesController);
   });
 
+  it('discovers care recipients using the authenticated caregiver membership', async () => {
+    mockBeneficiariesService.listCareRecipientsForCaregiver.mockResolvedValue([]);
+    const req = {
+      organizationMembership: { membershipId: 'caregiver-member' },
+    } as unknown as Request;
+    await controller.listMyCareRecipients('org-1', req);
+    expect(mockBeneficiariesService.listCareRecipientsForCaregiver).toHaveBeenCalledWith(
+      'org-1',
+      'caregiver-member',
+    );
+  });
+
   describe('grantEligibility (D#24, D#25)', () => {
     it('grants or renews beneficiary eligibility', async () => {
       const dto = {
@@ -62,7 +75,9 @@ describe('BeneficiariesController', () => {
       });
 
       const result = await controller.grantEligibility('org-1', dto, 'coord-1', mockRequest);
-      expect(result).toEqual(expect.objectContaining({ id: 'elig-1', status: BeneficiaryEligibilityStatus.ACTIVE }));
+      expect(result).toEqual(
+        expect.objectContaining({ id: 'elig-1', status: BeneficiaryEligibilityStatus.ACTIVE }),
+      );
       expect(mockBeneficiariesService.grantEligibility).toHaveBeenCalledWith(
         'org-1',
         dto,
@@ -74,7 +89,10 @@ describe('BeneficiariesController', () => {
 
   describe('getEligibility', () => {
     it('retrieves beneficiary eligibility', async () => {
-      mockBeneficiariesService.getEligibility.mockResolvedValue({ id: 'elig-1', membershipId: 'mem-1' });
+      mockBeneficiariesService.getEligibility.mockResolvedValue({
+        id: 'elig-1',
+        membershipId: 'mem-1',
+      });
 
       const result = await controller.getEligibility('org-1', 'mem-1');
       expect(result).toEqual({ id: 'elig-1', membershipId: 'mem-1' });
@@ -96,8 +114,18 @@ describe('BeneficiariesController', () => {
         ...dto,
       });
 
-      const result = await controller.createCaregiverAuthorization('org-1', dto, 'user-cg-1', mockRequest);
-      expect(result).toEqual(expect.objectContaining({ id: 'auth-1', status: CaregiverAuthorizationStatus.PENDING_REVIEW }));
+      const result = await controller.createCaregiverAuthorization(
+        'org-1',
+        dto,
+        'user-cg-1',
+        mockRequest,
+      );
+      expect(result).toEqual(
+        expect.objectContaining({
+          id: 'auth-1',
+          status: CaregiverAuthorizationStatus.PENDING_REVIEW,
+        }),
+      );
       expect(mockBeneficiariesService.createCaregiverAuthorization).toHaveBeenCalledWith(
         'org-1',
         dto,
@@ -124,7 +152,9 @@ describe('BeneficiariesController', () => {
         'coord-1',
         mockRequest,
       );
-      expect(result).toEqual(expect.objectContaining({ id: 'auth-1', status: CaregiverAuthorizationStatus.APPROVED }));
+      expect(result).toEqual(
+        expect.objectContaining({ id: 'auth-1', status: CaregiverAuthorizationStatus.APPROVED }),
+      );
       expect(mockBeneficiariesService.reviewCaregiverAuthorization).toHaveBeenCalledWith(
         'org-1',
         'auth-1',
@@ -141,7 +171,10 @@ describe('BeneficiariesController', () => {
 
       const result = await controller.listCaregivers('org-1', 'mem-1');
       expect(result).toHaveLength(1);
-      expect(mockBeneficiariesService.listCaregiversForBeneficiary).toHaveBeenCalledWith('org-1', 'mem-1');
+      expect(mockBeneficiariesService.listCaregiversForBeneficiary).toHaveBeenCalledWith(
+        'org-1',
+        'mem-1',
+      );
     });
   });
 });

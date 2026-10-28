@@ -56,6 +56,20 @@ export class BeneficiariesController {
     return this.beneficiariesService.getEligibility(organizationId, membershipId);
   }
 
+  @Get('caregivers/mine')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @ApiOperation({ summary: 'List the authenticated caregiver’s approved care recipients' })
+  async listMyCareRecipients(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @Req() req: Request,
+  ) {
+    const membership = (req as any).organizationMembership;
+    return this.beneficiariesService.listCareRecipientsForCaregiver(
+      organizationId,
+      membership.membershipId,
+    );
+  }
+
   @Post('caregivers/authorize')
   @UseGuards(AuthGuard, OrganizationAccessGuard)
   @ApiOperation({ summary: 'Create caregiver authorization request (D#8, D#37)' })

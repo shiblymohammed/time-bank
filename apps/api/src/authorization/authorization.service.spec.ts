@@ -57,6 +57,41 @@ describe('AuthorizationService', () => {
   const kozhikodeOrgId = 'org-kozhikode-uuid';
   const kottakkalOrgId = 'org-kottakkal-uuid';
 
+  describe('assertGlobalSuperAdmin()', () => {
+    it('requires an active account even with a previously issued token', async () => {
+      mockUserRepo.findOne.mockResolvedValue({ status: AccountStatus.SUSPENDED });
+      await expect(service.assertGlobalSuperAdmin(userId)).rejects.toThrow(ForbiddenException);
+    });
+    it('rejects a current global restriction', async () => {
+      mockUserRepo.findOne.mockResolvedValue({ status: AccountStatus.ACTIVE });
+      mockRestrictionRepo.findOne.mockResolvedValue({ status: GlobalRestrictionStatus.ACTIVE });
+      await expect(service.assertGlobalSuperAdmin(userId)).rejects.toThrow(ForbiddenException);
+    });
+    it.each([true, false])(
+      'checks current approved Super Admin grants (grant exists: %s)',
+      async (exists) => {
+        mockUserRepo.findOne.mockResolvedValue({ status: AccountStatus.ACTIVE });
+        mockRestrictionRepo.findOne.mockResolvedValue(null);
+        const qb = {
+          innerJoin: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          getOne: jest.fn().mockResolvedValue(exists ? {} : null),
+        };
+        mockRoleGrantRepo.createQueryBuilder.mockReturnValue(qb);
+        const result = service.assertGlobalSuperAdmin(userId);
+        if (exists) await expect(result).resolves.toBeUndefined();
+        else await expect(result).rejects.toThrow(ForbiddenException);
+        expect(qb.andWhere).toHaveBeenCalledWith('m.status = :mStatus', {
+          mStatus: MembershipStatus.APPROVED,
+        });
+        expect(qb.andWhere).toHaveBeenCalledWith('grant.status = :status', {
+          status: RoleGrantStatus.ACTIVE,
+        });
+      },
+    );
+  });
+
   describe('evaluateOrganizationAccess()', () => {
     it('should grant access and return roles for an approved member in active organization', async () => {
       mockUserRepo.findOne.mockResolvedValue({

@@ -123,6 +123,26 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
     transaction: jest.fn(async (callback) => callback(mockTransactionalManager)),
   };
 
+  it('requires the target request to belong to the organization before matching controls run', async () => {
+    mockRequestRepo.findOne.mockResolvedValueOnce(null);
+    await expect(service.assertRequestOrganization('org-b', 'request-a')).rejects.toThrow(
+      NotFoundException,
+    );
+    expect(mockRequestRepo.findOne).toHaveBeenCalledWith({
+      where: { id: 'request-a', organizationId: 'org-b' },
+    });
+  });
+
+  it('scopes offer discovery to organization and volunteer membership', async () => {
+    mockAssignmentRepo.find.mockResolvedValue([]);
+    await service.listMyAssignments('org-1', 'volunteer-1');
+    expect(mockAssignmentRepo.find).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { organizationId: 'org-1', volunteerMembershipId: 'volunteer-1' },
+      }),
+    );
+  });
+
   beforeEach(async () => {
     jest.clearAllMocks();
 
@@ -181,13 +201,20 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
       mockZoneRepo.findOne.mockResolvedValue({ id: 'existing-zone', code: 'ZONE_NORTH' });
 
       await expect(
-        service.createZone('org-1', { code: 'ZONE_NORTH', name: 'Zone', wardNumbers: [] }, 'coord-1'),
+        service.createZone(
+          'org-1',
+          { code: 'ZONE_NORTH', name: 'Zone', wardNumbers: [] },
+          'coord-1',
+        ),
       ).rejects.toThrow(ConflictException);
     });
 
     it('assigns approved volunteer to operational zone', async () => {
       mockZoneRepo.findOne.mockResolvedValue({ id: 'zone-1', organizationId: 'org-1' });
-      mockMembershipRepo.findOne.mockResolvedValue({ id: 'mem-1', status: MembershipStatus.APPROVED });
+      mockMembershipRepo.findOne.mockResolvedValue({
+        id: 'mem-1',
+        status: MembershipStatus.APPROVED,
+      });
       mockZoneAssignRepo.findOne.mockResolvedValue(null);
 
       const assigned = await service.assignVolunteerToZone(
@@ -473,9 +500,9 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
         offerExpiresAt: new Date(Date.now() - 5000), // Expired 5 seconds ago
       });
 
-      await expect(
-        service.acceptOffer('org-1', 'assign-1', 'vol-mem-1', {}),
-      ).rejects.toThrow(ConflictException);
+      await expect(service.acceptOffer('org-1', 'assign-1', 'vol-mem-1', {})).rejects.toThrow(
+        ConflictException,
+      );
 
       expect(mockTransactionalManager.save).toHaveBeenCalledWith(
         VolunteerAssignment,
