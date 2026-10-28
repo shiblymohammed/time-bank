@@ -28,12 +28,6 @@ export class RolesGuard implements CanActivate {
     }
 
     const request = context.switchToHttp().getRequest();
-
-    // Central Super Admin override
-    if (request.user?.isSuperAdmin) {
-      return true;
-    }
-
     const membershipContext: EvaluatedMembershipContext | undefined =
       request.organizationMembership;
 
@@ -49,17 +43,12 @@ export class RolesGuard implements CanActivate {
     }
 
     if (!membershipContext) {
-      const userRoles: UserRole[] = request.user?.roles ?? [];
-      const hasRole = requiredRoles.some((role) => userRoles.includes(role));
-      if (hasRole) {
-        return true;
-      }
       throw new ForbiddenException(
-        'Insufficient role permissions. Super Admin or approved organization membership required.',
+        'RolesGuard requires OrganizationAccessGuard to precede it in the guard chain',
       );
     }
 
-    // Super Admin has universal override within org context
+    // Super Admin has universal override
     if (membershipContext.isSuperAdmin) {
       return true;
     }

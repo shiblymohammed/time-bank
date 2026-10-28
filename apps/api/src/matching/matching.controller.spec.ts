@@ -10,6 +10,8 @@ describe('MatchingController (Milestone 3 Phase C)', () => {
   let controller: MatchingController;
 
   const mockMatchingService = {
+    listMyAssignments: jest.fn(),
+    assertRequestOrganization: jest.fn(),
     createZone: jest.fn(),
     listZones: jest.fn(),
     getZone: jest.fn(),
@@ -43,9 +45,7 @@ describe('MatchingController (Milestone 3 Phase C)', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [MatchingController],
-      providers: [
-        { provide: MatchingService, useValue: mockMatchingService },
-      ],
+      providers: [{ provide: MatchingService, useValue: mockMatchingService }],
     })
       .overrideGuard(AuthGuard)
       .useValue({ canActivate: () => true })
@@ -56,6 +56,51 @@ describe('MatchingController (Milestone 3 Phase C)', () => {
       .compile();
 
     controller = module.get<MatchingController>(MatchingController);
+  });
+
+  it('does not expand matching for a request outside the selected tenant', async () => {
+    mockMatchingService.assertRequestOrganization.mockRejectedValueOnce(new Error('Wrong tenant'));
+    await expect(controller.expandRadius('org-other', 'request-1')).rejects.toThrow('Wrong tenant');
+    expect(mockMatchingService.expandSearchRadius).not.toHaveBeenCalled();
+  });
+
+  it('lists assignments only for the authenticated membership', async () => {
+    mockMatchingService.listMyAssignments.mockResolvedValue([]);
+    await controller.listMyAssignments('org-1', mockRequest);
+    expect(mockMatchingService.listMyAssignments).toHaveBeenCalledWith('org-1', 'mem-123');
+  });
+
+  it('prevents an ordinary member from modifying another volunteer', async () => {
+    await expect(
+      controller.updateAvailability(
+        'org-1',
+        'someone-else',
+        { isAvailableImmediate: false },
+        mockRequest,
+      ),
+    ).rejects.toThrow('own volunteer preferences');
+    expect(mockMatchingService.updateAvailability).not.toHaveBeenCalled();
+  });
+
+  it('allows members to update their own availability and coordinators to manage others', async () => {
+    await controller.updateAvailability(
+      'org-1',
+      'mem-123',
+      { isAvailableImmediate: true },
+      mockRequest,
+    );
+    const coordinator = {
+      organizationMembership: { membershipId: 'coord', roles: ['COORDINATOR'] },
+    } as unknown as Request;
+    await controller.updateAvailability(
+      'org-1',
+      'other',
+      { isAvailableImmediate: false },
+      coordinator,
+    );
+    expect(mockMatchingService.updateAvailability).toHaveBeenCalledWith('org-1', 'other', {
+      isAvailableImmediate: false,
+    });
   });
 
   describe('Operational Zones', () => {
@@ -130,7 +175,10 @@ describe('MatchingController (Milestone 3 Phase C)', () => {
     });
 
     it('evaluates round progression', async () => {
-      mockMatchingService.evaluateRoundProgression.mockResolvedValue({ id: 'req-1', matchingTier: 2 });
+      mockMatchingService.evaluateRoundProgression.mockResolvedValue({
+        id: 'req-1',
+        matchingTier: 2,
+      });
 
       const result = await controller.evaluateProgression('org-1', 'req-1');
       expect(result.matchingTier).toBe(2);
@@ -138,7 +186,10 @@ describe('MatchingController (Milestone 3 Phase C)', () => {
     });
 
     it('expands search radius', async () => {
-      mockMatchingService.expandSearchRadius.mockResolvedValue({ id: 'req-1', matchingRadiusKm: 7.0 });
+      mockMatchingService.expandSearchRadius.mockResolvedValue({
+        id: 'req-1',
+        matchingRadiusKm: 7.0,
+      });
 
       const result = await controller.expandRadius('org-1', 'req-1');
       expect(result.matchingRadiusKm).toBe(7.0);

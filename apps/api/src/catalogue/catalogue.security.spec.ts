@@ -13,18 +13,19 @@ describe('Milestone 3 Phase A Security & Boundary Invariants', () => {
 
   beforeEach(() => {
     reflector = new Reflector();
-    rolesGuard = new RolesGuard(reflector);
 
     mockAuthzService = {
       evaluateOrganizationAccess: jest.fn(),
+      assertGlobalSuperAdmin: jest.fn().mockResolvedValue(undefined),
     };
+    rolesGuard = new RolesGuard(reflector, mockAuthzService as AuthorizationService);
     orgAccessGuard = new OrganizationAccessGuard(
       mockAuthzService as unknown as AuthorizationService,
     );
   });
 
   describe('Invariant 1: Local organization admin cannot create or approve global service without central approval', () => {
-    it('denies local municipality admin from calling central Super Admin endpoint', () => {
+    it('denies local municipality admin from calling central Super Admin endpoint', async () => {
       // Mock route metadata specifying @Roles(UserRole.SUPER_ADMIN)
       jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([UserRole.SUPER_ADMIN]);
 
@@ -44,10 +45,12 @@ describe('Milestone 3 Phase A Security & Boundary Invariants', () => {
         }),
       } as unknown as ExecutionContext;
 
-      expect(() => rolesGuard.canActivate(mockExecutionContext)).toThrow(ForbiddenException);
+      await expect(rolesGuard.canActivate(mockExecutionContext)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
-    it('denies local coordinator from calling central proposal review endpoint', () => {
+    it('denies local coordinator from calling central proposal review endpoint', async () => {
       jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([UserRole.SUPER_ADMIN]);
 
       const mockExecutionContext = {
@@ -65,10 +68,12 @@ describe('Milestone 3 Phase A Security & Boundary Invariants', () => {
         }),
       } as unknown as ExecutionContext;
 
-      expect(() => rolesGuard.canActivate(mockExecutionContext)).toThrow(ForbiddenException);
+      await expect(rolesGuard.canActivate(mockExecutionContext)).rejects.toThrow(
+        ForbiddenException,
+      );
     });
 
-    it('allows central Super Admin to access central catalogue endpoints', () => {
+    it('allows central Super Admin to access central catalogue endpoints', async () => {
       jest.spyOn(reflector, 'getAllAndOverride').mockReturnValue([UserRole.SUPER_ADMIN]);
 
       const mockExecutionContext = {
@@ -81,7 +86,7 @@ describe('Milestone 3 Phase A Security & Boundary Invariants', () => {
         }),
       } as unknown as ExecutionContext;
 
-      const canActivate = rolesGuard.canActivate(mockExecutionContext);
+      const canActivate = await rolesGuard.canActivate(mockExecutionContext);
       expect(canActivate).toBe(true);
     });
   });

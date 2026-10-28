@@ -73,3 +73,39 @@ test('does not retry failed refresh or forbidden responses', async () => {
   await assert.rejects(client.api('/api/admin/overview'), { status: 403 });
   assert.equal(calls.length, 1);
 });
+
+test('refreshes an expired profile request', async () => {
+  client.setApiSession({ accessToken: 'old', refreshToken: 'refresh' });
+  handler = (url, options) =>
+    url.endsWith('/refresh')
+      ? response({ accessToken: 'new' })
+      : options.headers.get('Authorization') === 'Bearer old'
+        ? response({}, 401)
+        : response({ id: 'user' });
+  assert.equal((await client.api('/api/auth/me')).id, 'user');
+  assert.equal(calls.length, 3);
+});
+test('does not retry a write after the user signs out during refresh', async () => {
+  let resolveRefresh;
+  let started;
+  const refreshStarted = new Promise((resolve) => {
+    started = resolve;
+  });
+  client.setApiSession({ accessToken: 'old', refreshToken: 'refresh' });
+  handler = (url) =>
+    url.endsWith('/refresh')
+      ? (started(),
+        new Promise((resolve) => {
+          resolveRefresh = resolve;
+        }))
+      : response({}, 401);
+  const pending = assert.rejects(
+    client.api('/api/organizations/org/requests', { method: 'POST', body: '{}' }),
+    { status: 401 },
+  );
+  await refreshStarted;
+  client.setApiSession(null);
+  resolveRefresh(response({ accessToken: 'new' }));
+  await pending;
+  assert.equal(calls.length, 2);
+});

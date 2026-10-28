@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 
+import { ServiceOperations } from '../components/service-operations';
 import { ApiManagement } from '../components/api-management';
 import { api, ApiError, allMemberships, setApiSession, type Session } from '../lib/api';
 
@@ -64,7 +65,7 @@ interface MembershipItem {
 
 export default function AdminDashboard(): React.JSX.Element {
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'organizations' | 'restrictions' | 'audit' | 'memberships'
+    'overview' | 'organizations' | 'restrictions' | 'audit' | 'memberships' | 'services'
   >('overview');
   const [management, setManagement] = useState<{
     kind: 'organization' | 'membership';
@@ -235,19 +236,25 @@ export default function AdminDashboard(): React.JSX.Element {
     void mutate('/api/admin/restrictions', 'POST', imposeForm, () => setShowImposeModal(false));
   };
   const handleEditBranding = (org: OrganizationItem) => {
-    const appDisplayName = window.prompt(
-      'App display name:',
-      org.branding?.appDisplayName ?? org.name,
-    );
-    if (!appDisplayName?.trim()) return;
-    const primaryColor = window.prompt(
-      'Primary color (hex):',
-      org.branding?.primaryColor ?? '#0D5C75',
-    );
-    if (!primaryColor) return;
-    void mutate(`/api/v1/organizations/${org.id}/branding`, 'PUT', {
-      appDisplayName: appDisplayName.trim(),
-      primaryColor,
+    void run(async () => {
+      const result = await api<{ data: { appDisplayName: string; primaryColor: string } }>(
+        `/api/v1/organizations/${org.id}/branding`,
+      );
+      const appDisplayName = window.prompt(
+        'App display name:',
+        result.data.appDisplayName ?? org.name,
+      );
+      if (!appDisplayName?.trim()) return;
+      const primaryColor = window.prompt(
+        'Primary color (hex):',
+        result.data.primaryColor ?? '#0D5C75',
+      );
+      if (!primaryColor) return;
+      await api(`/api/v1/organizations/${org.id}/branding`, {
+        method: 'PUT',
+        body: JSON.stringify({ appDisplayName: appDisplayName.trim(), primaryColor }),
+      });
+      setRevision((value) => value + 1);
     });
   };
 
@@ -354,6 +361,13 @@ export default function AdminDashboard(): React.JSX.Element {
         </div>
 
         <nav className="nav-group">
+          <button
+            id="nav-services"
+            className={`nav-item ${activeTab === 'services' ? 'active' : ''}`}
+            onClick={() => setActiveTab('services')}
+          >
+            <span>🤝</span> Service Operations
+          </button>
           <button
             id="nav-overview"
             className={`nav-item ${activeTab === 'overview' ? 'active' : ''}`}
@@ -519,6 +533,18 @@ export default function AdminDashboard(): React.JSX.Element {
               target={management}
               onClose={() => setManagement(null)}
               onChanged={() => setRevision((value) => value + 1)}
+              onError={reportError}
+            />
+          )}
+          {activeTab === 'services' && (
+            <ServiceOperations
+              key={selectedTenant}
+              organizationId={
+                selectedTenant !== 'GLOBAL' &&
+                organizations.some((org) => org.id === selectedTenant && org.status === 'ACTIVE')
+                  ? selectedTenant
+                  : null
+              }
               onError={reportError}
             />
           )}

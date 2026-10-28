@@ -102,9 +102,18 @@ export function ApiManagement({ target, onClose, onChanged, onError }: Props) {
     }
   };
   const values = (form: HTMLFormElement) => Object.fromEntries(new FormData(form).entries());
-  const revoke = (id: string) => {
+  const revoke = (id: string, role: string) => {
     const reason = window.prompt('Reason for revoking this role:');
-    if (reason?.trim()) void save(`${memberPath}/roles/${id}`, 'DELETE', { reason: reason.trim() });
+    if (reason?.trim())
+      void save(
+        ['SUPER_ADMIN', 'MUNICIPALITY_ADMIN', 'COORDINATOR'].includes(role)
+          ? `/api/admin/organizations/${target.organizationId}/roles/${id}`
+          : `${memberPath}/roles/${id}`,
+        'DELETE',
+        {
+          reason: reason.trim(),
+        },
+      );
   };
 
   return (
@@ -251,7 +260,7 @@ export function ApiManagement({ target, onClose, onChanged, onError }: Props) {
                 .map((grant) => (
                   <li key={grant.id}>
                     {grant.role}{' '}
-                    <button className="btn btn-danger" onClick={() => revoke(grant.id)}>
+                    <button className="btn btn-danger" onClick={() => revoke(grant.id, grant.role)}>
                       Revoke {grant.role}
                     </button>
                   </li>

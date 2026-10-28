@@ -361,3 +361,73 @@ grant/revoke roles, and review supporting document records. Document storage
 keys are shown as references; the backend does not expose a document download
 endpoint. These controls use the existing administrative and membership APIs;
 applicant-only application and upload endpoints are outside this admin dashboard.
+
+### Service operations (Milestone 3)
+
+Open **Service Operations** in the sidebar after signing in. Global scope supports
+category and service creation/activation and central proposal review. Select an
+active organization in **Tenant Scope** to configure its catalogue, manage service
+requests, review beneficiary eligibility and caregivers, and manage operational
+zones and volunteer skills.
+
+Requests have status filtering and 20-row pagination, details and assignments,
+coordinator creation on behalf of a beneficiary, manual dispatch, matching radius
+expansion/progression, rescheduling, and cancellation. Local date/time inputs are
+converted to ISO timestamps before submission. Eligibility quotas and volunteer
+counts are sent as numbers; ward/category lists are sent as arrays. Successful
+writes refresh server data, and backend validation errors appear in the screen.
+Volunteer offer acceptance/decline/withdrawal remain volunteer-facing workflows.
+
+The updated backend includes migrations `1729118400003` and `1729118400004`.
+Apply pending migrations to your development database using the migration procedure
+above before trying the new endpoints. Build `@ktb/shared-types` after pulling
+backend changes so the API can load the new enums.
+
+Verification commands from the repository root:
+
+```bash
+pnpm --filter @ktb/shared-types build
+pnpm --filter @ktb/web test
+pnpm --filter @ktb/api test --runInBand
+pnpm typecheck
+pnpm build:web
+```
+
+An optional browser integration test uses Playwright, an externally supplied test
+runtime. With the web dev server running on port 3000 and Playwright available in
+Node's module search path, run:
+
+```bash
+node --test apps/web/test/service-operations.e2e.cjs
+```
+
+Set `WEB_TEST_URL` to test a different local port, `NODE_PATH` to your Playwright
+module directory if it is not installed locally, and `CHROME_PATH` to use an
+existing Chrome executable instead of a Playwright-managed browser. This test
+intercepts API responses; it checks frontend integration contracts without writing
+to a real database. Live OTP/database validation requires a running API and a
+provisioned Super Admin account.
+
+
+### Remaining API workflows and Flutter
+
+Service Operations now includes local proposal submission, global/tenant service
+and zone details, profile lookup, and volunteer availability/skills/assigned-zone
+lookup, updates, and zone removal. Branding editing loads the current branding
+endpoint before saving. Administrative and operational role revocations use their
+corresponding backend endpoints.
+
+The independent Flutter repository at `apps/mobile/time_bank` now defaults to live
+member mode. Its `LIVE_API.md` documents API_URL, emulator/device networking,
+authentication, membership applications/document references, caregiver requests,
+and volunteer offers and availability. Use `--dart-define=DEMO_MODE=true` for the
+original offline preview. Mobile changes must be reviewed and committed within
+that repository; the parent ignores it.
+
+Two authenticated discovery endpoints support the mobile workflows:
+`GET /api/organizations/:id/assignments/mine` and
+`GET /api/organizations/:id/caregivers/mine`. They derive the caller's membership
+from the evaluated organization context. Availability, skill and volunteer-zone
+lookups require the same membership or a coordinator/admin context. Radius
+expansion and progression validate that the request belongs to the selected
+organization. No schema changes are required for these endpoints.

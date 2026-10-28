@@ -9,6 +9,7 @@ import {
   Req,
   UseGuards,
   ParseUUIDPipe,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Request } from 'express';
@@ -36,6 +37,18 @@ import { CurrentUserId } from '../authorization/decorators/current-user.decorato
 @Controller('organizations/:id')
 export class MatchingController {
   constructor(private readonly matchingService: MatchingService) {}
+
+  private assertVolunteerAccess(req: Request, membershipId: string) {
+    const context = (req as any).organizationMembership;
+    const canManage =
+      context?.isSuperAdmin ||
+      context?.roles?.some((role: UserRole) =>
+        [UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN].includes(role),
+      );
+    if (!context || (context.membershipId !== membershipId && !canManage)) {
+      throw new ForbiddenException('You may only access your own volunteer preferences');
+    }
+  }
 
   // ─── Operational Zones (Coordinator-Managed) ───────────────────────────────
   @Post('zones')
@@ -114,7 +127,13 @@ export class MatchingController {
     @Req() req: Request,
   ) {
     const ip = req.ip ?? req.socket.remoteAddress;
-    await this.matchingService.removeVolunteerFromZone(organizationId, zoneId, membershipId, userId, ip);
+    await this.matchingService.removeVolunteerFromZone(
+      organizationId,
+      zoneId,
+      membershipId,
+      userId,
+      ip,
+    );
     return { success: true, message: 'Volunteer removed from operational zone' };
   }
 
@@ -125,7 +144,9 @@ export class MatchingController {
   async listVolunteerZones(
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('membershipId', ParseUUIDPipe) membershipId: string,
+    @Req() req: Request,
   ) {
+    this.assertVolunteerAccess(req, membershipId);
     return this.matchingService.listVolunteerZones(organizationId, membershipId);
   }
 
@@ -138,7 +159,9 @@ export class MatchingController {
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('membershipId', ParseUUIDPipe) membershipId: string,
     @Body() dto: UpdateVolunteerAvailabilityDto,
+    @Req() req: Request,
   ) {
+    this.assertVolunteerAccess(req, membershipId);
     return this.matchingService.updateAvailability(organizationId, membershipId, dto);
   }
 
@@ -149,7 +172,9 @@ export class MatchingController {
   async getAvailability(
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('membershipId', ParseUUIDPipe) membershipId: string,
+    @Req() req: Request,
   ) {
+    this.assertVolunteerAccess(req, membershipId);
     return this.matchingService.getAvailability(organizationId, membershipId);
   }
 
@@ -176,11 +201,21 @@ export class MatchingController {
   async listSkills(
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('membershipId', ParseUUIDPipe) membershipId: string,
+    @Req() req: Request,
   ) {
+    this.assertVolunteerAccess(req, membershipId);
     return this.matchingService.listVolunteerSkills(organizationId, membershipId);
   }
 
   // ─── Assignment Offers Lifecycle ───────────────────────────────────────────
+  @Get('assignments/mine')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @ApiOperation({ summary: 'List the authenticated member’s own offers and assignments' })
+  async listMyAssignments(@Param('id', ParseUUIDPipe) organizationId: string, @Req() req: Request) {
+    const membership = (req as any).organizationMembership;
+    return this.matchingService.listMyAssignments(organizationId, membership.membershipId);
+  }
+
   @Post('assignments/:assignmentId/accept')
   @UseGuards(AuthGuard, OrganizationAccessGuard)
   @ApiOperation({ summary: 'Volunteer accepts task offer (D#12, D#64)' })
@@ -267,21 +302,25 @@ export class MatchingController {
   @ApiOperation({ summary: 'Expand matching search radius or escalate (D#7, D#13)' })
   @ApiResponse({ status: 200, description: 'Search radius expanded or escalated' })
   async expandRadius(
-    @Param('id', ParseUUIDPipe) _organizationId: string,
+    @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('requestId', ParseUUIDPipe) requestId: string,
   ) {
+    await this.matchingService.assertRequestOrganization(organizationId, requestId);
     return this.matchingService.expandSearchRadius(requestId);
   }
 
   @Post('requests/:requestId/progression')
   @UseGuards(AuthGuard, OrganizationAccessGuard, RolesGuard)
   @Roles(UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN, UserRole.SUPER_ADMIN)
-  @ApiOperation({ summary: 'Evaluate multi-round matching progression and offer expiry (D#7, D#13)' })
+  @ApiOperation({
+    summary: 'Evaluate multi-round matching progression and offer expiry (D#7, D#13)',
+  })
   @ApiResponse({ status: 200, description: 'Round progression evaluated' })
   async evaluateProgression(
-    @Param('id', ParseUUIDPipe) _organizationId: string,
+    @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('requestId', ParseUUIDPipe) requestId: string,
   ) {
+    await this.matchingService.assertRequestOrganization(organizationId, requestId);
     return this.matchingService.evaluateRoundProgression(requestId);
   }
 }

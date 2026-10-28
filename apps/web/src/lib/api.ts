@@ -28,7 +28,12 @@ export async function api<T>(path: string, options: RequestInit = {}, retry = tr
   const organization = path.match(/^\/api(?:\/v1)?\/organizations\/([^/?]+)/)?.[1];
   if (organization) headers.set('x-organization-id', organization);
   const response = await fetch(`/backend${path}`, { ...options, headers, cache: 'no-store' });
-  if (response.status === 401 && current && retry && !path.startsWith('/api/auth/')) {
+  if (
+    response.status === 401 &&
+    current &&
+    retry &&
+    (!path.startsWith('/api/auth/') || path === '/api/auth/me')
+  ) {
     if (!refreshing) {
       refreshing = (async () => {
         const data = await api<{ accessToken: string }>(
@@ -45,6 +50,7 @@ export async function api<T>(path: string, options: RequestInit = {}, retry = tr
       });
     }
     await refreshing;
+    if (session !== current) throw new ApiError('Your session has ended. Sign in again.', 401);
     return api<T>(path, options, false);
   }
   const body = await response.json().catch(() => null);

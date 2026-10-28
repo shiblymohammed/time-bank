@@ -140,6 +140,23 @@ export class MatchingService {
     return this.zoneRepo.save(zone);
   }
 
+  async assertRequestOrganization(organizationId: string, requestId: string): Promise<void> {
+    const request = await this.requestRepo.findOne({ where: { id: requestId, organizationId } });
+    if (!request) throw new NotFoundException('Service request not found in this organization');
+  }
+
+  async listMyAssignments(organizationId: string, membershipId: string) {
+    return this.assignmentRepo.find({
+      where: { organizationId, volunteerMembershipId: membershipId },
+      relations: [
+        'serviceRequest',
+        'serviceRequest.serviceCatalog',
+        'serviceRequest.serviceCatalog.globalService',
+      ],
+      order: { offeredAt: 'DESC' },
+    });
+  }
+
   async listZones(orgId: string): Promise<OperationalZone[]> {
     return this.zoneRepo.find({
       where: { organizationId: orgId },
@@ -239,7 +256,10 @@ export class MatchingService {
     });
   }
 
-  async listVolunteerZones(orgId: string, membershipId: string): Promise<VolunteerZoneAssignment[]> {
+  async listVolunteerZones(
+    orgId: string,
+    membershipId: string,
+  ): Promise<VolunteerZoneAssignment[]> {
     return this.zoneAssignRepo.find({
       where: { organizationId: orgId, membershipId },
       relations: ['zone'],
@@ -274,18 +294,23 @@ export class MatchingService {
         residentialLng: dto.residentialLng ?? null,
       });
     } else {
-      if (dto.isAvailableImmediate !== undefined) avail.isAvailableImmediate = dto.isAvailableImmediate;
+      if (dto.isAvailableImmediate !== undefined)
+        avail.isAvailableImmediate = dto.isAvailableImmediate;
       if (dto.maxTravelRadiusKm !== undefined) avail.maxTravelRadiusKm = dto.maxTravelRadiusKm;
-      if (dto.preferredWardNumbers !== undefined) avail.preferredWardNumbers = dto.preferredWardNumbers;
+      if (dto.preferredWardNumbers !== undefined)
+        avail.preferredWardNumbers = dto.preferredWardNumbers;
       if (dto.transientLat !== undefined) {
         avail.transientLat = dto.transientLat;
         avail.transientLng = dto.transientLng ?? null;
         avail.transientUpdatedAt = new Date();
       }
       if (dto.isGpsConsented !== undefined) avail.isGpsConsented = dto.isGpsConsented;
-      if (dto.residentialAddressText !== undefined) avail.residentialAddressText = dto.residentialAddressText ?? null;
-      if (dto.residentialWardNumber !== undefined) avail.residentialWardNumber = dto.residentialWardNumber ?? null;
-      if (dto.residentialPostalCode !== undefined) avail.residentialPostalCode = dto.residentialPostalCode ?? null;
+      if (dto.residentialAddressText !== undefined)
+        avail.residentialAddressText = dto.residentialAddressText ?? null;
+      if (dto.residentialWardNumber !== undefined)
+        avail.residentialWardNumber = dto.residentialWardNumber ?? null;
+      if (dto.residentialPostalCode !== undefined)
+        avail.residentialPostalCode = dto.residentialPostalCode ?? null;
       if (dto.residentialLat !== undefined) avail.residentialLat = dto.residentialLat ?? null;
       if (dto.residentialLng !== undefined) avail.residentialLng = dto.residentialLng ?? null;
     }
@@ -400,7 +425,8 @@ export class MatchingService {
       return [];
     }
 
-    const requiredSkills: string[] = request.serviceCatalog?.globalService?.requiredSkillCodes ?? [];
+    const requiredSkills: string[] =
+      request.serviceCatalog?.globalService?.requiredSkillCodes ?? [];
     const requiresSkills = request.serviceCatalog?.globalService?.requiresSkills ?? false;
 
     // Determine current matching tier and radius
@@ -419,7 +445,11 @@ export class MatchingService {
 
     let currentRound: MatchingRound;
     const latestRound = existingRounds[0];
-    if (latestRound && latestRound.tier === currentTier && latestRound.status === MatchingRoundStatus.ACTIVE) {
+    if (
+      latestRound &&
+      latestRound.tier === currentTier &&
+      latestRound.status === MatchingRoundStatus.ACTIVE
+    ) {
       currentRound = latestRound;
     } else {
       const nextRoundNumber = latestRound ? latestRound.roundNumber + 1 : 1;
@@ -618,7 +648,9 @@ export class MatchingService {
       }
 
       const activeAssignmentCount = candidateAssignments.filter((a) =>
-        [VolunteerAssignmentStatus.ACCEPTED, VolunteerAssignmentStatus.IN_PROGRESS].includes(a.status),
+        [VolunteerAssignmentStatus.ACCEPTED, VolunteerAssignmentStatus.IN_PROGRESS].includes(
+          a.status,
+        ),
       ).length;
 
       candidateProfiles.push({
@@ -719,7 +751,9 @@ export class MatchingService {
       }
 
       if (assignment.status !== VolunteerAssignmentStatus.OFFERED) {
-        throw new BadRequestException(`Assignment is not in OFFERED status (current: ${assignment.status})`);
+        throw new BadRequestException(
+          `Assignment is not in OFFERED status (current: ${assignment.status})`,
+        );
       }
 
       if (new Date() > new Date(assignment.offerExpiresAt)) {
@@ -875,7 +909,9 @@ export class MatchingService {
       }
 
       if (assignment.status !== VolunteerAssignmentStatus.ACCEPTED) {
-        throw new BadRequestException(`Can only withdraw from ACCEPTED status (current: ${assignment.status})`);
+        throw new BadRequestException(
+          `Can only withdraw from ACCEPTED status (current: ${assignment.status})`,
+        );
       }
 
       assignment.status = VolunteerAssignmentStatus.WITHDRAWN;
