@@ -180,7 +180,9 @@ export class AuthService {
     }
 
     if (challenge.attemptCount >= challenge.maxAttempts) {
-      throw new BadRequestException('Maximum verification attempts exceeded. Please request a new code');
+      throw new BadRequestException(
+        'Maximum verification attempts exceeded. Please request a new code',
+      );
     }
 
     // 2. Validate code
@@ -270,6 +272,9 @@ export class AuthService {
       .where('membership.userId = :userId', { userId: user.id })
       .andWhere('grant.role = :role', { role: UserRole.SUPER_ADMIN })
       .andWhere('grant.status = :status', { status: RoleGrantStatus.ACTIVE })
+      .andWhere('membership.status = :membershipStatus', {
+        membershipStatus: MembershipStatus.APPROVED,
+      })
       .getOne();
 
     if (superAdminGrant) {
@@ -424,6 +429,9 @@ export class AuthService {
       .where('membership.userId = :userId', { userId: session.user.id })
       .andWhere('grant.role = :role', { role: UserRole.SUPER_ADMIN })
       .andWhere('grant.status = :status', { status: RoleGrantStatus.ACTIVE })
+      .andWhere('membership.status = :membershipStatus', {
+        membershipStatus: MembershipStatus.APPROVED,
+      })
       .getOne();
 
     if (superAdminGrant) {

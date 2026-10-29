@@ -134,7 +134,9 @@ export class CatalogueService {
     }
 
     if (dto.defaultPreferredVolunteers < dto.defaultMinVolunteers) {
-      throw new BadRequestException('Preferred volunteers must be greater than or equal to minimum volunteers');
+      throw new BadRequestException(
+        'Preferred volunteers must be greater than or equal to minimum volunteers',
+      );
     }
 
     const service = this.globalServiceRepo.create({
@@ -191,18 +193,22 @@ export class CatalogueService {
     const prefVol = dto.defaultPreferredVolunteers ?? service.defaultPreferredVolunteers;
 
     if (prefVol < minVol) {
-      throw new BadRequestException('Preferred volunteers must be greater than or equal to minimum volunteers');
+      throw new BadRequestException(
+        'Preferred volunteers must be greater than or equal to minimum volunteers',
+      );
     }
 
     if (dto.nameEn !== undefined) service.nameEn = dto.nameEn;
     if (dto.nameMl !== undefined) service.nameMl = dto.nameMl;
     if (dto.descriptionEn !== undefined) service.descriptionEn = dto.descriptionEn ?? null;
     if (dto.descriptionMl !== undefined) service.descriptionMl = dto.descriptionMl ?? null;
-    if (dto.defaultMinVolunteers !== undefined) service.defaultMinVolunteers = dto.defaultMinVolunteers;
+    if (dto.defaultMinVolunteers !== undefined)
+      service.defaultMinVolunteers = dto.defaultMinVolunteers;
     if (dto.defaultPreferredVolunteers !== undefined) {
       service.defaultPreferredVolunteers = dto.defaultPreferredVolunteers;
     }
-    if (dto.isHazardousPhysical !== undefined) service.isHazardousPhysical = dto.isHazardousPhysical;
+    if (dto.isHazardousPhysical !== undefined)
+      service.isHazardousPhysical = dto.isHazardousPhysical;
     if (dto.requiresSkills !== undefined) service.requiresSkills = dto.requiresSkills;
     if (dto.requiredSkillCodes !== undefined) service.requiredSkillCodes = dto.requiredSkillCodes;
     if (dto.isEmergencyProhibited !== undefined) {
@@ -229,7 +235,10 @@ export class CatalogueService {
     return saved;
   }
 
-  async listGlobalServices(categoryId?: string, activeOnly = true): Promise<GlobalServiceDefinition[]> {
+  async listGlobalServices(
+    categoryId?: string,
+    activeOnly = true,
+  ): Promise<GlobalServiceDefinition[]> {
     const qb = this.globalServiceRepo
       .createQueryBuilder('gs')
       .leftJoinAndSelect('gs.category', 'cat')
@@ -275,8 +284,14 @@ export class CatalogueService {
       throw new NotFoundException(`Global service definition '${dto.globalServiceId}' not found`);
     }
 
-    const minVol = dto.minVolunteers ?? globalService.defaultMinVolunteers;
-    const prefVol = dto.preferredVolunteers ?? Math.max(minVol, globalService.defaultPreferredVolunteers);
+    let entry = await this.orgCatalogRepo.findOne({
+      where: { organizationId: orgId, globalServiceId: dto.globalServiceId },
+    });
+    const minVol = dto.minVolunteers ?? entry?.minVolunteers ?? globalService.defaultMinVolunteers;
+    const prefVol =
+      dto.preferredVolunteers ??
+      entry?.preferredVolunteers ??
+      Math.max(minVol, globalService.defaultPreferredVolunteers);
 
     if (minVol < globalService.defaultMinVolunteers) {
       throw new BadRequestException(
@@ -285,12 +300,10 @@ export class CatalogueService {
     }
 
     if (prefVol < minVol) {
-      throw new BadRequestException('preferredVolunteers must be greater than or equal to minVolunteers');
+      throw new BadRequestException(
+        'preferredVolunteers must be greater than or equal to minVolunteers',
+      );
     }
-
-    let entry = await this.orgCatalogRepo.findOne({
-      where: { organizationId: orgId, globalServiceId: dto.globalServiceId },
-    });
 
     if (!entry) {
       entry = this.orgCatalogRepo.create({
@@ -458,7 +471,9 @@ export class CatalogueService {
     }
 
     if (dto.status === ServiceProposalStatus.REJECTED && !dto.rejectionReason) {
-      throw new BadRequestException('A rejection reason must be provided when rejecting a proposal');
+      throw new BadRequestException(
+        'A rejection reason must be provided when rejecting a proposal',
+      );
     }
 
     proposal.status = dto.status;
@@ -472,7 +487,9 @@ export class CatalogueService {
         where: { id: dto.resultingGlobalServiceId },
       });
       if (!globalService) {
-        throw new NotFoundException(`Resulting global service '${dto.resultingGlobalServiceId}' not found`);
+        throw new NotFoundException(
+          `Resulting global service '${dto.resultingGlobalServiceId}' not found`,
+        );
       }
       proposal.resultingGlobalServiceId = dto.resultingGlobalServiceId;
 

@@ -123,9 +123,9 @@ describe('CatalogueService', () => {
     it('throws NotFoundException when category to update is missing', async () => {
       mockCategoryRepo.findOne.mockResolvedValue(null);
 
-      await expect(
-        service.updateCategory('missing-cat', { nameEn: 'New Name' }),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.updateCategory('missing-cat', { nameEn: 'New Name' })).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -248,9 +248,9 @@ describe('CatalogueService', () => {
     it('throws NotFoundException if global service does not exist', async () => {
       mockGlobalServiceRepo.findOne.mockResolvedValue(null);
 
-      await expect(
-        service.updateGlobalService('missing-gs', { nameEn: 'New' }),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.updateGlobalService('missing-gs', { nameEn: 'New' })).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws BadRequestException if updated preferred volunteers < min volunteers', async () => {
@@ -581,5 +581,26 @@ describe('CatalogueService', () => {
         ),
       ).rejects.toThrow(NotFoundException);
     });
+  });
+  it('preserves local volunteer counts when only service enablement changes', async () => {
+    mockOrgRepo.findOne.mockResolvedValue({ id: 'org' });
+    mockGlobalServiceRepo.findOne.mockResolvedValue({
+      id: 'global',
+      defaultMinVolunteers: 1,
+      defaultPreferredVolunteers: 1,
+    });
+    mockOrgCatalogRepo.findOne.mockResolvedValue({
+      id: 'local',
+      minVolunteers: 3,
+      preferredVolunteers: 5,
+      isEnabled: true,
+    });
+    const saved = await service.configureOrgCatalogue('org', {
+      globalServiceId: 'global',
+      isEnabled: false,
+    });
+    expect(saved.minVolunteers).toBe(3);
+    expect(saved.preferredVolunteers).toBe(5);
+    expect(saved.isEnabled).toBe(false);
   });
 });

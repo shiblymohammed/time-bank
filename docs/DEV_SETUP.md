@@ -132,15 +132,15 @@ Run all of these. Every check should pass before you consider Milestone 1 comple
 
 ```powershell
 # Liveness (no DB required)
-curl http://localhost:3001/health/live
+curl http://localhost:3001/api/health/live
 # Expected: {"status":"ok","version":"0.0.1","environment":"development","timestamp":"..."}
 
 # Readiness (requires DB connection)
-curl http://localhost:3001/health/ready
+curl http://localhost:3001/api/health/ready
 # Expected: {"status":"ok","info":{"database":{"status":"up"}}}
 
 # Via Nginx (confirms reverse proxy is routing correctly)
-curl http://localhost:8080/health/live
+curl http://localhost:8080/api/health/live
 # Expected: same as above
 ```
 

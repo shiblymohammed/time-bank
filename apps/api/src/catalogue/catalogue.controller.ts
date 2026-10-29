@@ -164,6 +164,15 @@ export class CatalogueController {
     return this.catalogueService.listOrgCatalogue(organizationId, enabledOnly);
   }
 
+  @Get('organizations/:id/catalogue/proposals')
+  @UseGuards(AuthGuard, OrganizationAccessGuard, RolesGuard)
+  @Roles(UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'List organization proposals' })
+  @ApiResponse({ status: 200, description: 'Proposals retrieved' })
+  async listOrgProposals(@Param('id', ParseUUIDPipe) organizationId: string) {
+    return this.catalogueService.listProposals(organizationId);
+  }
+
   @Get('organizations/:id/catalogue/:catalogId')
   @UseGuards(AuthGuard, OrganizationAccessGuard)
   @ApiOperation({ summary: 'Get single organization catalogue item' })
@@ -205,14 +214,5 @@ export class CatalogueController {
   ) {
     const ip = req.ip ?? req.socket.remoteAddress;
     return this.catalogueService.createProposal(organizationId, dto, userId, ip);
-  }
-
-  @Get('organizations/:id/catalogue/proposals')
-  @UseGuards(AuthGuard, OrganizationAccessGuard, RolesGuard)
-  @Roles(UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN, UserRole.SUPER_ADMIN)
-  @ApiOperation({ summary: 'List organization proposals' })
-  @ApiResponse({ status: 200, description: 'Proposals retrieved' })
-  async listOrgProposals(@Param('id', ParseUUIDPipe) organizationId: string) {
-    return this.catalogueService.listProposals(organizationId);
   }
 }

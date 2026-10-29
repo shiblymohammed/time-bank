@@ -8,9 +8,11 @@ import {
   Req,
   UseGuards,
   ParseUUIDPipe,
+  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Request } from 'express';
+import { CreationChannel, UserRole } from '@ktb/shared-types';
 
 import { RequestsService } from './requests.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
@@ -40,6 +42,18 @@ export class RequestsController {
     @CurrentUserId() userId: string,
     @Req() req: Request,
   ) {
+    const context = (req as any).organizationMembership;
+    if (
+      dto.creationChannel === CreationChannel.COORDINATOR_ON_BEHALF &&
+      !context?.isSuperAdmin &&
+      !context?.roles?.some((role: UserRole) =>
+        [UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN].includes(role),
+      )
+    ) {
+      throw new ForbiddenException(
+        'Coordinator or administrator role required for on-behalf requests',
+      );
+    }
     const ip = req.ip ?? req.socket.remoteAddress;
     const idempotencyHeader = req.headers?.['x-idempotency-key'];
     if (typeof idempotencyHeader === 'string' && !dto.idempotencyKey) {

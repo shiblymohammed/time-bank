@@ -106,6 +106,10 @@ export class MembershipsService {
       }
     }
 
+    if (existing) {
+      throw new BadRequestException('This membership cannot reapply in its current status');
+    }
+
     // Create new application
     const membership = this.membershipRepo.create({
       organizationId,
@@ -157,6 +161,11 @@ export class MembershipsService {
     if (membership.status === MembershipStatus.APPROVED) {
       throw new BadRequestException('Membership is already approved');
     }
+
+    if (membership.userId === approverId) {
+      throw new ForbiddenException('Cannot approve your own membership');
+    }
+    this.assertOperationalRole(dto.initialRole ?? UserRole.VOLUNTEER);
 
     const org = await this.orgRepo.findOne({ where: { id: organizationId } });
     if (!org) {
@@ -246,7 +255,9 @@ export class MembershipsService {
     }
 
     if (membership.status === MembershipStatus.APPROVED) {
-      throw new BadRequestException('Cannot reject an approved membership; suspend or revoke instead');
+      throw new BadRequestException(
+        'Cannot reject an approved membership; suspend or revoke instead',
+      );
     }
 
     membership.status = MembershipStatus.REJECTED;
@@ -377,6 +388,11 @@ export class MembershipsService {
       throw new BadRequestException('Cannot grant roles to an unapproved membership');
     }
 
+    if (membership.userId === granterId) {
+      throw new ForbiddenException('Cannot grant roles to yourself');
+    }
+    this.assertOperationalRole(dto.role);
+
     const existingGrant = await this.roleGrantRepo.findOne({
       where: {
         membershipId,
@@ -437,6 +453,7 @@ export class MembershipsService {
       throw new BadRequestException('Role grant is already revoked');
     }
 
+    this.assertOperationalRole(grant.role);
     grant.status = RoleGrantStatus.REVOKED;
     grant.revokedAt = new Date();
     grant.revokedBy = revokerId;
@@ -458,6 +475,12 @@ export class MembershipsService {
     });
 
     return saved;
+  }
+
+  private assertOperationalRole(role: UserRole): void {
+    if ([UserRole.SUPER_ADMIN, UserRole.MUNICIPALITY_ADMIN, UserRole.COORDINATOR].includes(role)) {
+      throw new ForbiddenException('Administrative roles require the central administration API');
+    }
   }
 
   /**

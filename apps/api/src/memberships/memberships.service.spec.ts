@@ -117,9 +117,7 @@ describe('MembershipsService', () => {
     it('should throw NotFoundException if organization does not exist', async () => {
       mockOrgRepo.findOne.mockResolvedValueOnce(null);
 
-      await expect(
-        service.apply('missing-org', 'u-1', {}),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.apply('missing-org', 'u-1', {})).rejects.toThrow(NotFoundException);
     });
 
     it('should throw BadRequestException if organization is not active', async () => {
@@ -128,9 +126,7 @@ describe('MembershipsService', () => {
         status: OrganizationStatus.SUSPENDED,
       });
 
-      await expect(
-        service.apply('org-1', 'u-1', {}),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.apply('org-1', 'u-1', {})).rejects.toThrow(BadRequestException);
     });
 
     it('should throw ConflictException if user is already an approved member', async () => {
@@ -140,9 +136,7 @@ describe('MembershipsService', () => {
         status: MembershipStatus.APPROVED,
       });
 
-      await expect(
-        service.apply('org-1', 'u-1', {}),
-      ).rejects.toThrow(ConflictException);
+      await expect(service.apply('org-1', 'u-1', {})).rejects.toThrow(ConflictException);
     });
 
     it('should return existing membership if application is already pending', async () => {
@@ -180,9 +174,9 @@ describe('MembershipsService', () => {
     it('should throw NotFoundException if membership does not exist', async () => {
       mockMembershipRepo.findOne.mockResolvedValueOnce(null);
 
-      await expect(
-        service.approveMembership('org-1', 'm-missing', 'admin-1', {}),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.approveMembership('org-1', 'm-missing', 'admin-1', {})).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('should throw BadRequestException if membership is already approved', async () => {
@@ -192,9 +186,9 @@ describe('MembershipsService', () => {
         status: MembershipStatus.APPROVED,
       });
 
-      await expect(
-        service.approveMembership('org-1', 'm-1', 'admin-1', {}),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.approveMembership('org-1', 'm-1', 'admin-1', {})).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('should approve membership, assign formatted membership number, grant role, and audit', async () => {
@@ -306,12 +300,10 @@ describe('MembershipsService', () => {
       mockDocumentRepo.findOne.mockResolvedValueOnce(doc);
       mockDocumentRepo.save.mockImplementation((d) => Promise.resolve(d));
 
-      const res = await service.reviewDocument(
-        'org-1',
-        'doc-1',
-        'reviewer-1',
-        { status: DocumentReviewStatus.APPROVED, notes: 'Verified' },
-      );
+      const res = await service.reviewDocument('org-1', 'doc-1', 'reviewer-1', {
+        status: DocumentReviewStatus.APPROVED,
+        notes: 'Verified',
+      });
 
       expect(res.reviewStatus).toBe(DocumentReviewStatus.APPROVED);
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
@@ -331,15 +323,10 @@ describe('MembershipsService', () => {
       mockRoleGrantRepo.create.mockImplementation((dto) => ({ id: 'g-1', ...dto }));
       mockRoleGrantRepo.save.mockImplementation((g) => Promise.resolve(g));
 
-      const res = await service.grantRole(
-        'org-1',
-        'm-1',
-        { role: UserRole.COORDINATOR },
-        'admin-1',
-      );
+      const res = await service.grantRole('org-1', 'm-1', { role: UserRole.VOLUNTEER }, 'admin-1');
 
       expect(res.id).toBe('g-1');
-      expect(res.role).toBe(UserRole.COORDINATOR);
+      expect(res.role).toBe(UserRole.VOLUNTEER);
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'MEMBERSHIP_ROLE_GRANTED' }),
       );
@@ -351,7 +338,7 @@ describe('MembershipsService', () => {
         membershipId: 'm-1',
         membership: { organizationId: 'org-1' },
         status: RoleGrantStatus.ACTIVE,
-        role: UserRole.COORDINATOR,
+        role: UserRole.VOLUNTEER,
       };
       mockRoleGrantRepo.findOne.mockResolvedValueOnce(grant);
       mockRoleGrantRepo.save.mockImplementation((g) => Promise.resolve(g));
@@ -369,5 +356,46 @@ describe('MembershipsService', () => {
         expect.objectContaining({ eventType: 'MEMBERSHIP_ROLE_REVOKED' }),
       );
     });
+  });
+  it.each([UserRole.SUPER_ADMIN, UserRole.MUNICIPALITY_ADMIN, UserRole.COORDINATOR])(
+    'rejects administrative role %s through membership grants and approvals',
+    async (role) => {
+      mockMembershipRepo.findOne.mockResolvedValue({
+        id: 'm',
+        userId: 'target',
+        status: MembershipStatus.APPROVED,
+      });
+      await expect(service.grantRole('org', 'm', { role }, 'actor')).rejects.toThrow(
+        ForbiddenException,
+      );
+      mockMembershipRepo.findOne.mockResolvedValue({
+        id: 'm',
+        userId: 'target',
+        status: MembershipStatus.APPLIED,
+      });
+      await expect(
+        service.approveMembership('org', 'm', 'actor', { initialRole: role }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockMembershipRepo.save).not.toHaveBeenCalled();
+      expect(mockRoleGrantRepo.save).not.toHaveBeenCalled();
+    },
+  );
+  it('rejects self approval and self role grants', async () => {
+    mockMembershipRepo.findOne.mockResolvedValue({
+      id: 'm',
+      userId: 'actor',
+      status: MembershipStatus.APPLIED,
+    });
+    await expect(service.approveMembership('org', 'm', 'actor', {})).rejects.toThrow(
+      ForbiddenException,
+    );
+    mockMembershipRepo.findOne.mockResolvedValue({
+      id: 'm',
+      userId: 'actor',
+      status: MembershipStatus.APPROVED,
+    });
+    await expect(
+      service.grantRole('org', 'm', { role: UserRole.VOLUNTEER }, 'actor'),
+    ).rejects.toThrow(ForbiddenException);
   });
 });

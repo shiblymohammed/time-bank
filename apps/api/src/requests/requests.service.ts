@@ -84,6 +84,9 @@ export class RequestsService {
         ],
       });
       if (existing) {
+        if (existing.createdByUserId !== callingUserId) {
+          throw new ConflictException('Idempotency key is already in use');
+        }
         return existing;
       }
     }
@@ -91,10 +94,15 @@ export class RequestsService {
     // 1. Verify catalogue item enablement
     const catalogItem = await this.catalogRepo.findOne({
       where: { id: dto.serviceCatalogId, organizationId: orgId },
-      relations: ['globalService'],
+      relations: ['globalService', 'globalService.category'],
     });
 
-    if (!catalogItem || !catalogItem.isEnabled) {
+    if (
+      !catalogItem ||
+      !catalogItem.isEnabled ||
+      catalogItem.globalService?.isActive === false ||
+      catalogItem.globalService?.category?.isActive === false
+    ) {
       throw new BadRequestException('Selected service is not enabled in this organization (D#10)');
     }
 
@@ -111,7 +119,9 @@ export class RequestsService {
       });
 
       if (!callerMembership || callerMembership.status !== MembershipStatus.APPROVED) {
-        throw new ForbiddenException('Approved organization membership required to create requests');
+        throw new ForbiddenException(
+          'Approved organization membership required to create requests',
+        );
       }
 
       const hasBeneficiaryRole = callerMembership.roleGrants?.some(
@@ -119,13 +129,17 @@ export class RequestsService {
       );
 
       if (!hasBeneficiaryRole) {
-        throw new ForbiddenException('Caller must hold approved BENEFICIARY role to submit requests directly');
+        throw new ForbiddenException(
+          'Caller must hold approved BENEFICIARY role to submit requests directly',
+        );
       }
 
       beneficiaryMembershipId = callerMembership.id;
     } else if (creationChannel === CreationChannel.CAREGIVER_PROXY) {
       if (!dto.beneficiaryMembershipId) {
-        throw new BadRequestException('beneficiaryMembershipId is required for caregiver proxy requests');
+        throw new BadRequestException(
+          'beneficiaryMembershipId is required for caregiver proxy requests',
+        );
       }
 
       // Find caregiver's membership in this org
@@ -147,7 +161,9 @@ export class RequestsService {
       caregiverAuthId = caregiverAuth.id;
     } else if (creationChannel === CreationChannel.COORDINATOR_ON_BEHALF) {
       if (!dto.beneficiaryMembershipId) {
-        throw new BadRequestException('beneficiaryMembershipId is required for coordinator submissions');
+        throw new BadRequestException(
+          'beneficiaryMembershipId is required for coordinator submissions',
+        );
       }
       beneficiaryMembershipId = dto.beneficiaryMembershipId;
     } else {
@@ -187,6 +203,7 @@ export class RequestsService {
       idempotencyKey: idempotencyKey ?? null,
       beneficiaryMembershipId,
       serviceCatalogId: catalogItem.id,
+      serviceCatalog: catalogItem,
       createdByUserId: callingUserId,
       creationChannel,
       caregiverAuthorizationId: caregiverAuthId,
@@ -194,8 +211,15 @@ export class RequestsService {
       status: ServiceRequestStatus.MATCHING_ACTIVE,
       scheduledStartTime: new Date(dto.scheduledStartTime),
       expectedDurationMinutes: dto.expectedDurationMinutes ?? 60,
-      minVolunteers: catalogItem.minVolunteers,
-      preferredVolunteers: catalogItem.preferredVolunteers,
+      minVolunteers: Math.max(
+        catalogItem.minVolunteers,
+        catalogItem.globalService?.defaultMinVolunteers ?? 1,
+      ),
+      preferredVolunteers: Math.max(
+        catalogItem.preferredVolunteers,
+        catalogItem.minVolunteers,
+        catalogItem.globalService?.defaultMinVolunteers ?? 1,
+      ),
       locationAddressText: dto.locationAddressText,
       locationWardNumber: dto.locationWardNumber,
       locationLandmark: dto.locationLandmark ?? null,
@@ -264,7 +288,9 @@ export class RequestsService {
 
         if (query.beneficiaryMembershipId) {
           if (!recipientIds.includes(query.beneficiaryMembershipId)) {
-            throw new ForbiddenException('You are not authorized to view requests for another beneficiary');
+            throw new ForbiddenException(
+              'You are not authorized to view requests for another beneficiary',
+            );
           }
           qb.andWhere('req.beneficiaryMembershipId = :bId', { bId: query.beneficiaryMembershipId });
         } else {
@@ -272,8 +298,13 @@ export class RequestsService {
         }
       } else {
         // Beneficiary only
-        if (query.beneficiaryMembershipId && query.beneficiaryMembershipId !== membershipContext.membershipId) {
-          throw new ForbiddenException('You are not authorized to view requests for another beneficiary');
+        if (
+          query.beneficiaryMembershipId &&
+          query.beneficiaryMembershipId !== membershipContext.membershipId
+        ) {
+          throw new ForbiddenException(
+            'You are not authorized to view requests for another beneficiary',
+          );
         }
         qb.andWhere('req.beneficiaryMembershipId = :bId', { bId: membershipContext.membershipId });
       }
@@ -340,7 +371,11 @@ export class RequestsService {
 
       if (!isCoordOrAdmin && !isBeneficiary) {
         const isCaregiver = await this.beneficiariesService
-          .verifyCaregiverProxyAccess(orgId, membershipContext.membershipId, request.beneficiaryMembershipId)
+          .verifyCaregiverProxyAccess(
+            orgId,
+            membershipContext.membershipId,
+            request.beneficiaryMembershipId,
+          )
           .catch(() => null);
 
         if (!isCaregiver) {
@@ -389,7 +424,11 @@ export class RequestsService {
         cancellerRole = CancellerRole.BENEFICIARY;
       } else {
         const isCaregiver = await this.beneficiariesService
-          .verifyCaregiverProxyAccess(orgId, membershipContext.membershipId, request.beneficiaryMembershipId)
+          .verifyCaregiverProxyAccess(
+            orgId,
+            membershipContext.membershipId,
+            request.beneficiaryMembershipId,
+          )
           .catch(() => null);
 
         if (isCaregiver) {
@@ -490,11 +529,17 @@ export class RequestsService {
 
       if (!isCoordOrAdmin && !isBeneficiary) {
         const isCaregiver = await this.beneficiariesService
-          .verifyCaregiverProxyAccess(orgId, membershipContext.membershipId, request.beneficiaryMembershipId)
+          .verifyCaregiverProxyAccess(
+            orgId,
+            membershipContext.membershipId,
+            request.beneficiaryMembershipId,
+          )
           .catch(() => null);
 
         if (!isCaregiver) {
-          throw new ForbiddenException('You do not have permission to reschedule this service request');
+          throw new ForbiddenException(
+            'You do not have permission to reschedule this service request',
+          );
         }
       }
     }
@@ -527,7 +572,10 @@ export class RequestsService {
       where: { serviceRequestId: request.id },
     });
     for (const a of assignments) {
-      if (a.status === VolunteerAssignmentStatus.OFFERED) {
+      if (
+        a.status === VolunteerAssignmentStatus.OFFERED ||
+        a.status === VolunteerAssignmentStatus.ACCEPTED
+      ) {
         a.status = VolunteerAssignmentStatus.CANCELLED;
         await this.assignmentRepo.save(a);
       }

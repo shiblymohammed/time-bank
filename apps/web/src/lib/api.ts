@@ -17,6 +17,7 @@ let session: Session | null = null;
 let refreshing: Promise<void> | null = null;
 export function setApiSession(value: Session | null) {
   session = value;
+  refreshing = null;
 }
 
 export async function api<T>(path: string, options: RequestInit = {}, retry = true): Promise<T> {
@@ -34,8 +35,9 @@ export async function api<T>(path: string, options: RequestInit = {}, retry = tr
     retry &&
     (!path.startsWith('/api/auth/') || path === '/api/auth/me')
   ) {
+    if (session !== current) throw new ApiError('Your session has ended. Sign in again.', 401);
     if (!refreshing) {
-      refreshing = (async () => {
+      const pending = (async () => {
         const data = await api<{ accessToken: string }>(
           '/api/auth/refresh',
           {
@@ -44,10 +46,14 @@ export async function api<T>(path: string, options: RequestInit = {}, retry = tr
           },
           false,
         );
+        if (typeof data?.accessToken !== 'string' || !data.accessToken) {
+          throw new ApiError('Invalid session response. Sign in again.', 401);
+        }
         if (session === current) current.accessToken = data.accessToken;
       })().finally(() => {
-        refreshing = null;
+        if (refreshing === pending) refreshing = null;
       });
+      refreshing = pending;
     }
     await refreshing;
     if (session !== current) throw new ApiError('Your session has ended. Sign in again.', 401);
@@ -62,6 +68,9 @@ export async function api<T>(path: string, options: RequestInit = {}, retry = tr
         : message || `Request failed (${response.status})`,
       response.status,
     );
+  }
+  if (body === null && response.status !== 204) {
+    throw new ApiError('The server returned an invalid response.', 502);
   }
   return body as T;
 }

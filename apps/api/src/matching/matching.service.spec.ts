@@ -1,17 +1,13 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { ConflictException, NotFoundException, BadRequestException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  AccountStatus,
   GlobalRestrictionStatus,
   MembershipStatus,
-  RoleGrantStatus,
   ServiceRequestStatus,
-  SkillVerificationStatus,
   UrgencyType,
-  UserRole,
   VolunteerAssignmentStatus,
   MatchingRoundStatus,
 } from '@ktb/shared-types';
@@ -597,5 +593,27 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
         expect.objectContaining({ eventType: 'REQUEST_ESCALATED_TO_COORDINATOR' }),
       );
     });
+  });
+  it.each([
+    ServiceRequestStatus.CANCELLED,
+    ServiceRequestStatus.COMPLETED,
+    ServiceRequestStatus.IN_PROGRESS,
+  ])('cannot revive a %s request by accepting an outstanding offer', async (status) => {
+    mockTransactionalManager.findOne.mockResolvedValue({
+      id: 'offer',
+      serviceRequestId: 'req',
+      status: VolunteerAssignmentStatus.OFFERED,
+      offerExpiresAt: new Date(Date.now() + 60000),
+    });
+    mockTransactionalManager.createQueryBuilder.mockReturnValue({
+      setLock: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue({ id: 'req', status }),
+    });
+    await expect(service.acceptOffer('org', 'offer', 'volunteer', {})).rejects.toThrow(
+      'Cannot assign volunteers',
+    );
+    expect(mockTransactionalManager.save).not.toHaveBeenCalled();
   });
 });

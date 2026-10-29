@@ -6,7 +6,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, Repository, LessThan } from 'typeorm';
+import { DataSource, Repository, LessThan, In } from 'typeorm';
 import {
   AccountStatus,
   GlobalRestrictionStatus,
@@ -489,7 +489,10 @@ export class MatchingService {
     }
 
     // Do not match beneficiary themselves as volunteer
-    query.andWhere('m.id != :benMemId', { benMemId: request.beneficiaryMembershipId });
+    query.andWhere(
+      'm.userId != (SELECT user_id FROM organization_memberships WHERE id = :benMemId)',
+      { benMemId: request.beneficiaryMembershipId },
+    );
 
     const eligibleMemberships = await query.getMany();
 
@@ -734,7 +737,7 @@ export class MatchingService {
           organizationId: orgId,
           volunteerMembershipId,
         },
-        relations: ['matchingRound'],
+        lock: { mode: 'pessimistic_write' },
       });
 
       if (!assignment) {
@@ -773,6 +776,8 @@ export class MatchingService {
       if (!request) {
         throw new NotFoundException('Associated service request not found');
       }
+
+      this.assertAssignableRequest(request);
 
       // 3. Count currently accepted assignments
       const acceptedCount = await manager.count(VolunteerAssignment, {
@@ -980,6 +985,8 @@ export class MatchingService {
         throw new NotFoundException(`Service request '${requestId}' not found`);
       }
 
+      this.assertAssignableRequest(request);
+
       const volunteerMem = await manager.findOne(OrganizationMembership, {
         where: { id: dto.volunteerMembershipId, organizationId: orgId },
       });
@@ -987,6 +994,17 @@ export class MatchingService {
       if (!volunteerMem || volunteerMem.status !== MembershipStatus.APPROVED) {
         throw new NotFoundException('Volunteer membership not found or not approved');
       }
+
+      // Check if volunteer already assigned
+      const existing = await manager.findOne(VolunteerAssignment, {
+        where: {
+          serviceRequestId: request.id,
+          volunteerMembershipId: dto.volunteerMembershipId,
+          status: In([VolunteerAssignmentStatus.OFFERED, VolunteerAssignmentStatus.ACCEPTED]),
+        },
+      });
+
+      if (existing?.status === VolunteerAssignmentStatus.ACCEPTED) return existing;
 
       const acceptedCount = await manager.count(VolunteerAssignment, {
         where: {
@@ -998,14 +1016,6 @@ export class MatchingService {
       if (acceptedCount >= request.preferredVolunteers) {
         throw new ConflictException('All positions for this service have already been filled');
       }
-
-      // Check if volunteer already assigned
-      const existing = await manager.findOne(VolunteerAssignment, {
-        where: {
-          serviceRequestId: request.id,
-          volunteerMembershipId: dto.volunteerMembershipId,
-        },
-      });
 
       let assignment: VolunteerAssignment;
       if (existing) {
@@ -1207,6 +1217,21 @@ export class MatchingService {
     }
 
     return saved;
+  }
+
+  private assertAssignableRequest(request: ServiceRequest): void {
+    if (
+      ![
+        ServiceRequestStatus.MATCHING_ACTIVE,
+        ServiceRequestStatus.PARTIALLY_ACCEPTED,
+        ServiceRequestStatus.FULLY_MATCHED,
+        ServiceRequestStatus.ESCALATED_TO_COORDINATOR,
+      ].includes(request.status)
+    ) {
+      throw new BadRequestException(
+        `Cannot assign volunteers to request in status '${request.status}'`,
+      );
+    }
   }
 
   private calculateHaversineDistance(

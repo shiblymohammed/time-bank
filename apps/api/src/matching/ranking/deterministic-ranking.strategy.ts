@@ -20,7 +20,7 @@ import {
 export class DeterministicCandidateRankingStrategy implements CandidateRankingStrategy {
   rankCandidates(
     candidates: CandidateMatchProfile[],
-    requestContext: {
+    _requestContext: {
       urgency: string;
       locationWardNumber: string;
       searchRadiusKm: number;

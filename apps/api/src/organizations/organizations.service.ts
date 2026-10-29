@@ -295,7 +295,9 @@ export class OrganizationsService {
         releaseStatus: dto.releaseStatus ?? 'DRAFT',
       });
     } else {
-      appBuild.organizationId = organizationId;
+      if (appBuild.organizationId !== organizationId) {
+        throw new ConflictException('Application ID is already registered to another organization');
+      }
       if (dto.buildVersion) appBuild.buildVersion = dto.buildVersion;
       if (dto.minSupportedVersion) appBuild.minSupportedVersion = dto.minSupportedVersion;
       if (dto.releaseStatus) appBuild.releaseStatus = dto.releaseStatus;

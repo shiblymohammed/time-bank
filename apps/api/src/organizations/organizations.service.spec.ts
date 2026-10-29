@@ -2,10 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { ConflictException } from '@nestjs/common';
-import {
-  OrganizationType,
-  OrganizationStatus,
-} from '@ktb/shared-types';
+import { OrganizationType, OrganizationStatus } from '@ktb/shared-types';
 import { OrganizationsService } from './organizations.service';
 import { Organization } from './entities/organization.entity';
 import { OrganizationBranding } from './entities/organization-branding.entity';
@@ -240,5 +237,13 @@ describe('OrganizationsService', () => {
         }),
       );
     });
+  });
+  it('does not transfer an existing application ID to another organization', async () => {
+    mockOrgRepo.findOne.mockResolvedValue({ id: 'other' });
+    mockAppBuildRepo.findOne.mockResolvedValue({ id: 'build', organizationId: 'owner' });
+    await expect(
+      service.createOrUpdateAppBuild('other', { applicationId: 'in.example.app' }, 'admin'),
+    ).rejects.toThrow(ConflictException);
+    expect(mockAppBuildRepo.save).not.toHaveBeenCalled();
   });
 });

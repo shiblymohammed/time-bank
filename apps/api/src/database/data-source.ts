@@ -21,6 +21,7 @@ export const AppDataSource = new DataSource({
   type: 'postgres',
   ...(process.env['DATABASE_URL'] ? { url: process.env['DATABASE_URL'] } : {}),
   entities: [path.resolve(__dirname, '../**/*.entity{.ts,.js}')],
-  migrations: [path.resolve(__dirname, './migrations/**/*{.ts,.js}')],
+  migrations: [path.resolve(__dirname, './migrations/[0-9]*{.ts,.js}')],
+  ssl: process.env['DATABASE_SSL'] === 'true' ? { rejectUnauthorized: true } : false,
   synchronize: false,
 });

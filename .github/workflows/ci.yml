@@ -10,6 +10,7 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  workflow_call:
   workflow_dispatch:
 
 concurrency:
@@ -18,7 +19,7 @@ concurrency:
 
 env:
   NODE_VERSION: '22'
-  PNPM_VERSION: '12.3.4'
+  PNPM_VERSION: '11.25.0'
 
 jobs:
   # ─── Job 1: Lint and type-check ───────────────────────────────────────────
@@ -136,14 +137,27 @@ jobs:
         run: pnpm --filter @ktb/shared-types build
 
       - name: Run migrations against test database
-        run: |
-          cd apps/api
-          npx ts-node -r tsconfig-paths/register \
-            ../../node_modules/.bin/typeorm migration:run \
-            -d src/database/data-source.ts
+        run: pnpm --filter @ktb/api migration:run
 
       - name: Run E2E / integration tests
         run: pnpm test:e2e
+
+      - name: Build API for live workflow checks
+        run: pnpm --filter @ktb/api build
+
+      - name: Exercise every API endpoint with PostgreSQL
+        run: |
+          API_PORT=3301 node apps/api/dist/main.js > "$RUNNER_TEMP/ktb-audit-api.log" 2>&1 &
+          audit_api_pid=$!
+          trap 'kill "$audit_api_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail --max-time 2 http://127.0.0.1:3301/api/health/ready > /dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --silent --fail --max-time 2 http://127.0.0.1:3301/api/health/ready > /dev/null
+          AUDIT_DATABASE_URL="$DATABASE_URL" AUDIT_API_URL=http://127.0.0.1:3301 node scripts/audit-live-api.cjs
 
   # ─── Job 4: Docker build validation ──────────────────────────────────────
   docker-build:
@@ -178,29 +192,4 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ─── Job 5: Flutter analysis (no build — Flutter SDK not in CI yet) ───────
-  flutter-analysis:
-    name: Flutter Lint & Analysis
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.44.5'
-          channel: stable
-          cache: true
-
-      - name: Get Flutter dependencies
-        working-directory: apps/mobile/time_bank
-        run: flutter pub get
-
-      - name: Analyze Flutter code
-        working-directory: apps/mobile/time_bank
-        run: flutter analyze
-
-      - name: Run Flutter tests
-        working-directory: apps/mobile/time_bank
-        run: flutter test
+  # Mobile is an independent, ignored repository with its own CI workflow.

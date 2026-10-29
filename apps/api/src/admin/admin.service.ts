@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
@@ -249,6 +250,10 @@ export class AdminService {
     adminId: string,
     ipAddress?: string,
   ): Promise<MembershipRoleGrant> {
+    if (dto.userId === adminId) {
+      throw new ForbiddenException('Cannot grant roles to yourself');
+    }
+
     const org = await this.orgRepo.findOne({ where: { id: orgId } });
     if (!org) {
       throw new NotFoundException('Organization not found');
@@ -291,7 +296,9 @@ export class AdminService {
     });
 
     if (activeGrant) {
-      throw new ConflictException('User already has an active grant for this role in this organization');
+      throw new ConflictException(
+        'User already has an active grant for this role in this organization',
+      );
     }
 
     const newGrant = this.roleGrantRepo.create({

@@ -7,6 +7,6 @@
     "^.+\\.(t|j)s$": "ts-jest"
   },
   "moduleNameMapper": {
-    "^@ktb/shared-types$": "<rootDir>/../../packages/shared-types/src/index.ts"
+    "^@ktb/shared-types$": "<rootDir>/../../../packages/shared-types/src/index.ts"
   }
 }

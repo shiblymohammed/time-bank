@@ -1,4 +1,5 @@
 import type { NextConfig } from 'next';
+import path from 'node:path';
 
 /**
  * Next.js configuration for Kottakkal Time Bank web dashboard.
@@ -7,6 +8,8 @@ import type { NextConfig } from 'next';
  * D#93: Browser dashboards for coordinators, admins, Super Admin and merchants
  */
 const nextConfig: NextConfig = {
+  output: 'standalone',
+  outputFileTracingRoot: path.join(__dirname, '../..'),
   async rewrites() {
     const apiUrl = (
       process.env.API_URL ||

@@ -2,7 +2,7 @@
   "name": "@ktb/api",
   "version": "0.0.1",
   "private": true,
-  "description": "Kottakkal Time Bank — NestJS TypeScript API (D#95: NestJS + TypeScript + PostgreSQL)",
+  "description": "Kottakkal Time Bank \u2014 NestJS TypeScript API (D#95: NestJS + TypeScript + PostgreSQL)",
   "scripts": {
     "prebuild": "rimraf dist",
     "build": "nest build",
@@ -73,7 +73,7 @@
     "rootDir": "src",
     "testRegex": ".*\\.spec\\.ts$",
     "transform": {
-      "^.+\\.(t|j)s$": "ts-jest"
+      "^.+\\.ts$": "ts-jest"
     },
     "collectCoverageFrom": [
       "**/*.(t|j)s"

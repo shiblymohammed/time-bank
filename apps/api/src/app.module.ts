@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import * as path from 'path';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TerminusModule } from '@nestjs/terminus';
@@ -35,6 +36,7 @@ import { MatchingModule } from './matching/matching.module';
     ConfigModule.forRoot({
       isGlobal: true,
       cache: true,
+      envFilePath: [path.resolve(process.cwd(), '.env'), path.resolve(__dirname, '../../../.env')],
       expandVariables: true,
       // In production, all values come from environment — no .env file needed
       ignoreEnvFile: process.env['NODE_ENV'] === 'production',
@@ -50,12 +52,12 @@ import { MatchingModule } from './matching/matching.module';
         type: 'postgres',
         url: config.getOrThrow<string>('DATABASE_URL'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        migrations: [__dirname + '/database/migrations/**/*{.ts,.js}'],
+        migrations: [__dirname + '/database/migrations/[0-9]*{.ts,.js}'],
         // CRITICAL: Never true — all schema changes go through migrations
         // (NFR-17: versioned migrations with rollback plans)
         synchronize: false,
         logging: config.get('NODE_ENV') !== 'production',
-        ssl: config.get('NODE_ENV') === 'production' ? { rejectUnauthorized: true } : false,
+        ssl: config.get('DATABASE_SSL') === 'true' ? { rejectUnauthorized: true } : false,
       }),
     }),
 

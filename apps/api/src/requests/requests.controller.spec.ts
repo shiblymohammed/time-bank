@@ -4,11 +4,7 @@ import { RequestsController } from './requests.controller';
 import { RequestsService } from './requests.service';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { OrganizationAccessGuard } from '../authorization/guards/organization-access.guard';
-import {
-  ServiceRequestStatus,
-  UrgencyType,
-  UserRole,
-} from '@ktb/shared-types';
+import { CreationChannel, ServiceRequestStatus, UrgencyType, UserRole } from '@ktb/shared-types';
 
 describe('RequestsController', () => {
   let controller: RequestsController;
@@ -182,5 +178,25 @@ describe('RequestsController', () => {
         '127.0.0.1',
       );
     });
+  });
+  it('denies a member spoofing the coordinator creation channel', async () => {
+    await expect(
+      controller.createRequest(
+        'org',
+        {
+          creationChannel: CreationChannel.COORDINATOR_ON_BEHALF,
+          beneficiaryMembershipId: 'other',
+          serviceCatalogId: 'cat',
+          urgency: UrgencyType.SCHEDULED,
+          scheduledStartTime: new Date().toISOString(),
+          locationAddressText: 'Address',
+          locationWardNumber: '1',
+          locationPostalCode: '676503',
+        },
+        'user',
+        mockRequest,
+      ),
+    ).rejects.toThrow('Coordinator or administrator role required');
+    expect(mockRequestsService.createRequest).not.toHaveBeenCalled();
   });
 });

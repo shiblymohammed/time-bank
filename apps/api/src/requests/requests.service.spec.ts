@@ -80,7 +80,9 @@ describe('RequestsService', () => {
   const mockBeneficiariesService = {
     checkEligibilityAndQuota: jest.fn().mockResolvedValue({ eligible: true, remainingQuota: 5 }),
     verifyCaregiverProxyAccess: jest.fn().mockResolvedValue({ id: 'auth-1' }),
-    listCareRecipientsForCaregiver: jest.fn().mockResolvedValue([{ beneficiaryMembershipId: 'ben-mem-1' }]),
+    listCareRecipientsForCaregiver: jest
+      .fn()
+      .mockResolvedValue([{ beneficiaryMembershipId: 'ben-mem-1' }]),
   };
 
   const mockMatchingService = {
@@ -143,6 +145,11 @@ describe('RequestsService', () => {
       });
 
       expect(result.status).toBe(ServiceRequestStatus.MATCHING_ACTIVE);
+      expect(mockMatchingService.findCandidatesAndDispatchOffers).toHaveBeenCalledWith(
+        expect.objectContaining({
+          serviceCatalog: expect.objectContaining({ globalService: { categoryId: 'cat-1' } }),
+        }),
+      );
       expect(result.locationAddressText).toBe('Taluk Hospital OP Counter, Kottakkal');
       expect(mockBeneficiariesService.checkEligibilityAndQuota).toHaveBeenCalledWith(
         'org-1',
@@ -158,7 +165,11 @@ describe('RequestsService', () => {
     });
 
     it('returns existing request idempotently when idempotencyKey is already present', async () => {
-      const existingReq = { id: 'existing-req', idempotencyKey: 'idem-1' };
+      const existingReq = {
+        id: 'existing-req',
+        idempotencyKey: 'idem-1',
+        createdByUserId: 'user-1',
+      };
       mockOrgRepo.findOne.mockResolvedValue({ id: 'org-1', code: 'KZK' });
       mockRequestRepo.findOne.mockResolvedValueOnce(existingReq);
 
@@ -413,13 +424,10 @@ describe('RequestsService', () => {
         roles: [UserRole.COORDINATOR],
       };
 
-      const cancelled = await service.cancelRequest(
-        'org-1',
-        'req-1',
-        'user-coord-1',
-        coordCtx,
-        { reasonCode: 'COORDINATOR_ACTION', notes: 'Administrative cancellation' },
-      );
+      const cancelled = await service.cancelRequest('org-1', 'req-1', 'user-coord-1', coordCtx, {
+        reasonCode: 'COORDINATOR_ACTION',
+        notes: 'Administrative cancellation',
+      });
 
       expect(cancelled.status).toBe(ServiceRequestStatus.CANCELLED);
       expect(mockCancellationRepo.create).toHaveBeenCalledWith(
@@ -451,13 +459,10 @@ describe('RequestsService', () => {
 
       mockBeneficiariesService.verifyCaregiverProxyAccess.mockResolvedValue({ id: 'auth-1' });
 
-      await service.cancelRequest(
-        'org-1',
-        'req-1',
-        'user-cg-1',
-        caregiverCtx,
-        { reasonCode: 'CAREGIVER_REQUESTED', notes: 'Beneficiary requested cancellation' },
-      );
+      await service.cancelRequest('org-1', 'req-1', 'user-cg-1', caregiverCtx, {
+        reasonCode: 'CAREGIVER_REQUESTED',
+        notes: 'Beneficiary requested cancellation',
+      });
 
       expect(mockCancellationRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -540,18 +545,13 @@ describe('RequestsService', () => {
       });
       mockAssignmentRepo.find.mockResolvedValue([
         { id: 'a-1', status: VolunteerAssignmentStatus.OFFERED },
+        { id: 'a-2', status: VolunteerAssignmentStatus.ACCEPTED },
       ]);
 
-      const result = await service.rescheduleRequest(
-        'org-1',
-        'req-1',
-        'user-1',
-        undefined,
-        {
-          newStartTime: newTime.toISOString(),
-          reason: 'Doctor rescheduled appointment to next day',
-        },
-      );
+      const result = await service.rescheduleRequest('org-1', 'req-1', 'user-1', undefined, {
+        newStartTime: newTime.toISOString(),
+        reason: 'Doctor rescheduled appointment to next day',
+      });
 
       expect(result.status).toBe(ServiceRequestStatus.MATCHING_ACTIVE);
       expect(mockRescheduleRepo.save).toHaveBeenCalledWith(
@@ -560,6 +560,9 @@ describe('RequestsService', () => {
         }),
       );
       expect(mockMatchingService.findCandidatesAndDispatchOffers).toHaveBeenCalled();
+      expect(mockAssignmentRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'a-2', status: VolunteerAssignmentStatus.CANCELLED }),
+      );
     });
 
     it('throws ForbiddenException if rescheduling caller is not authorized', async () => {
@@ -699,10 +702,9 @@ describe('RequestsService', () => {
       };
 
       await service.listRequests('org-1', 'user-ben', benCtx, {});
-      expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'req.beneficiaryMembershipId = :bId',
-        { bId: 'ben-mem-1' },
-      );
+      expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith('req.beneficiaryMembershipId = :bId', {
+        bId: 'ben-mem-1',
+      });
     });
 
     it('throws ForbiddenException if beneficiary attempts to query another beneficiary', async () => {
@@ -740,5 +742,21 @@ describe('RequestsService', () => {
         { recipientIds: ['recipient-1', 'cg-mem-1'] },
       );
     });
+  });
+  it('does not disclose another creator request through an idempotency key', async () => {
+    mockOrgRepo.findOne.mockResolvedValue({ id: 'org', code: 'ORG' });
+    mockRequestRepo.findOne.mockResolvedValue({ id: 'private', createdByUserId: 'other' });
+    await expect(
+      service.createRequest('org', 'actor', {
+        idempotencyKey: 'shared',
+        serviceCatalogId: 'cat',
+        urgency: UrgencyType.IMMEDIATE,
+        scheduledStartTime: new Date().toISOString(),
+        locationAddressText: 'Address',
+        locationWardNumber: '1',
+        locationPostalCode: '676503',
+      }),
+    ).rejects.toThrow(ConflictException);
+    expect(mockRequestRepo.save).not.toHaveBeenCalled();
   });
 });

@@ -23,7 +23,12 @@ export class AuthGuard implements CanActivate {
     const devUserId = request.headers['x-user-id'];
     const isDev = this.configService.get('NODE_ENV') !== 'production';
 
-    if (isDev && devUserId && typeof devUserId === 'string') {
+    if (
+      isDev &&
+      this.configService.get('ALLOW_DEV_AUTH_BYPASS') === 'true' &&
+      devUserId &&
+      typeof devUserId === 'string'
+    ) {
       request.user = {
         id: devUserId,
         phoneE164: request.headers['x-user-phone'] ?? '+919876543210',

@@ -19,6 +19,7 @@ interface AppBuild {
   releaseStatus: string;
 }
 interface Membership {
+  userId: string;
   id: string;
   organizationId: string;
   status: string;
@@ -269,7 +270,16 @@ export function ApiManagement({ target, onClose, onChanged, onError }: Props) {
             <form
               onSubmit={(event) => {
                 event.preventDefault();
-                void save(`${memberPath}/roles`, 'POST', values(event.currentTarget));
+                const data = values(event.currentTarget);
+                void save(
+                  ['SUPER_ADMIN', 'MUNICIPALITY_ADMIN', 'COORDINATOR'].includes(String(data.role))
+                    ? `/api/admin/organizations/${target.organizationId}/roles`
+                    : `${memberPath}/roles`,
+                  'POST',
+                  ['SUPER_ADMIN', 'MUNICIPALITY_ADMIN', 'COORDINATOR'].includes(String(data.role))
+                    ? { ...data, userId: membership.userId }
+                    : data,
+                );
               }}
             >
               <label>

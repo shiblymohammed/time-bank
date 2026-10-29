@@ -6,7 +6,7 @@
 # ─── Stage 1: base ────────────────────────────────────────────────────────────
 FROM node:22-alpine AS base
 # pnpm version must match engines.pnpm in root package.json
-RUN corepack enable && corepack prepare pnpm@12.3.4 --activate
+RUN corepack enable && corepack prepare pnpm@11.25.0 --activate
 WORKDIR /app
 
 # ─── Stage 2: dependencies ────────────────────────────────────────────────────
@@ -23,6 +23,7 @@ RUN pnpm install --frozen-lockfile
 # Used by docker-compose.yml for local dev with hot reload
 FROM deps AS development
 COPY . .
+RUN pnpm --filter @ktb/shared-types build
 EXPOSE 3001
 CMD ["pnpm", "--filter", "@ktb/api", "dev"]
 
@@ -37,7 +38,7 @@ RUN pnpm --filter @ktb/api build
 # ─── Stage 5: production ──────────────────────────────────────────────────────
 # Minimal production image — no dev tools or source files
 FROM node:22-alpine AS production
-RUN corepack enable && corepack prepare pnpm@12.3.4 --activate
+RUN corepack enable && corepack prepare pnpm@11.25.0 --activate
 WORKDIR /app
 
 # Non-root user for security (NFR-08: least privilege)
@@ -46,7 +47,8 @@ RUN addgroup --system --gid 1001 ktb && \
 
 COPY --from=builder --chown=ktb:ktb /app/apps/api/dist ./apps/api/dist
 COPY --from=builder --chown=ktb:ktb /app/apps/api/package.json ./apps/api/
-COPY --from=builder --chown=ktb:ktb /app/packages/shared-types/dist ./packages/shared-types/dist
+COPY --from=builder --chown=ktb:ktb /app/packages/shared-types ./packages/shared-types
+COPY --from=builder --chown=ktb:ktb /app/packages/tsconfig ./packages/tsconfig
 COPY --from=builder --chown=ktb:ktb /app/package.json ./
 COPY --from=builder --chown=ktb:ktb /app/pnpm-workspace.yaml ./
 COPY --from=builder --chown=ktb:ktb /app/pnpm-lock.yaml ./
@@ -59,6 +61,6 @@ ENV NODE_ENV=production
 
 # Health check matching docker-compose.yml
 HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=3 \
-  CMD wget -qO- http://localhost:3001/health/live || exit 1
+  CMD wget -qO- http://127.0.0.1:3001/api/health/live || exit 1
 
 CMD ["node", "apps/api/dist/main.js"]

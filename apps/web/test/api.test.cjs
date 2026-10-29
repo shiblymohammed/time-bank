@@ -109,3 +109,41 @@ test('does not retry a write after the user signs out during refresh', async () 
   await pending;
   assert.equal(calls.length, 2);
 });
+
+test('rejects an invalid successful response and malformed refresh token response', async () => {
+  handler = () => new Response('<html>proxy error</html>', { status: 200 });
+  await assert.rejects(client.api('/api/admin/overview'), { status: 502 });
+  calls = [];
+  client.setApiSession({ accessToken: 'old', refreshToken: 'refresh' });
+  handler = (url) => (url.endsWith('/refresh') ? response({}) : response({}, 401));
+  await assert.rejects(client.api('/api/admin/overview'), { status: 401 });
+  assert.equal(calls.length, 2);
+});
+
+test('a new sign-in does not inherit a pending refresh from the previous session', async () => {
+  let resolveOld, started;
+  const oldStarted = new Promise((resolve) => {
+    started = resolve;
+  });
+  client.setApiSession({ accessToken: 'old', refreshToken: 'old-refresh' });
+  handler = (url, options) => {
+    if (url.endsWith('/refresh')) {
+      if (JSON.parse(options.body).refreshToken === 'old-refresh') {
+        started();
+        return new Promise((resolve) => {
+          resolveOld = resolve;
+        });
+      }
+      return response({ accessToken: 'new-refreshed' });
+    }
+    return options.headers.get('Authorization') === 'Bearer new-refreshed'
+      ? response({ ok: true })
+      : response({}, 401);
+  };
+  const old = assert.rejects(client.api('/api/auth/me'), { status: 401 });
+  await oldStarted;
+  client.setApiSession({ accessToken: 'new', refreshToken: 'new-refresh' });
+  assert.equal((await client.api('/api/auth/me')).ok, true);
+  resolveOld(response({ accessToken: 'old-refreshed' }));
+  await old;
+});
