@@ -1,870 +1,1176 @@
 'use client';
+import React, { useEffect, useRef, useState } from 'react';
+import type { Action } from '@/lib/admin-types';
+import { CoordinatorRequests } from '@/components/coordinator-requests';
+import { ServiceCatalogue } from '@/components/service-catalogue';
+import { api, ApiError, backend } from '@/lib/api';
 
-import React, { useState, useEffect } from 'react';
-
-interface MetricOverview {
+type Tab =
+  | 'overview'
+  | 'organizations'
+  | 'memberships'
+  | 'requests'
+  | 'catalogue'
+  | 'restrictions'
+  | 'audit';
+type Grant = { id: string; role: string; status: string };
+type Membership = {
+  id: string;
+  userId: string;
+  organizationId: string;
+  status: string;
+  membershipNumber?: string | null;
+  user?: { phoneE164: string };
+  roleGrants: Grant[];
+  rejectionReason?: string | null;
+};
+type Profile = {
+  id: string;
+  phoneE164: string;
+  status: string;
+  memberships: { organizationId: string; status: string; roles: string[] }[];
+};
+type Organization = {
+  id: string;
+  code: string;
+  name: string;
+  district: string;
+  type: string;
+  status: string;
+  branding?: { appDisplayName: string; primaryColor: string; secondaryColor: string };
+};
+type Restriction = {
+  id: string;
+  userId: string;
+  user?: { phoneE164: string };
+  restrictionType: string;
+  reasonCode: string;
+  status: string;
+};
+type Audit = {
+  id: string;
+  eventType: string;
+  actorId?: string;
+  organizationId?: string;
+  createdAt: string;
+  payload: Record<string, unknown>;
+};
+type Document = { id: string; documentType: string; storageKey: string; reviewStatus: string };
+type Metrics = {
   totalUsers: number;
   totalOrganizations: number;
   activeOrganizations: number;
   totalUniversalWallets: number;
   totalBalanceCredits: number;
   pendingMemberships: number;
+};
+type View = {
+  memberships: Membership[];
+  restrictions: Restriction[];
+  events: Audit[];
+  metrics: Metrics | null;
+  total: number;
+};
+const empty = (): View => ({
+  memberships: [],
+  restrictions: [],
+  events: [],
+  metrics: null,
+  total: 0,
+});
+const OPERATIONS = ['VOLUNTEER', 'BENEFICIARY', 'CAREGIVER', 'MERCHANT'];
+const STAFF = ['COORDINATOR', 'MUNICIPALITY_ADMIN', 'SUPER_ADMIN'];
+const approved = (profile: Profile) =>
+  profile.memberships.filter((member) => member.status === 'APPROVED');
+const globalAdmin = (profile: Profile) =>
+  approved(profile).some((member) => member.roles.includes('SUPER_ADMIN'));
+const staffMemberships = (profile: Profile) =>
+  approved(profile).filter((member) => member.roles.some((role) => STAFF.includes(role)));
+const label = (value: string) =>
+  value
+    .replaceAll('_', ' ')
+    .toLowerCase()
+    .replace(/^./, (char) => char.toUpperCase());
+function Badge({ value }: { value: string }) {
+  const tone = ['ACTIVE', 'APPROVED', 'RESOLVED'].includes(value)
+    ? 'active'
+    : ['SUSPENDED', 'REJECTED', 'ARCHIVED'].includes(value)
+      ? 'suspended'
+      : 'pending';
+  return <span className={`badge badge-${tone}`}>{label(value)}</span>;
 }
-
-interface OrganizationItem {
-  id: string;
-  code: string;
-  name: string;
-  district: string;
-  type: string;
-  status: 'ACTIVE' | 'DRAFT' | 'SUSPENDED' | 'ARCHIVED';
-  branding?: {
-    appDisplayName: string;
-    primaryColor: string;
-    secondaryColor: string;
-  };
+function SignIn({ onSignedIn }: { onSignedIn: (profile: Profile) => void }) {
+  const [phone, setPhone] = useState(''),
+    [code, setCode] = useState(''),
+    [error, setError] = useState('');
+  const [sent, setSent] = useState(false),
+    [busy, setBusy] = useState(false),
+    [development, setDevelopment] = useState(false);
+  return (
+    <main className="login-shell">
+      <section className="glass-panel login-panel">
+        <div className="brand-icon">ITB</div>
+        <h1>Administration sign in</h1>
+        <p>
+          Use your registered mobile number. Your current organization permissions determine
+          dashboard access.
+        </p>
+        <form
+          className="stack"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            setBusy(true);
+            setError('');
+            const normalized = phone.startsWith('+') ? phone : `+91${phone}`;
+            try {
+              if (!sent) {
+                const result = await api<{ devOtp?: string }>('/api/session', 'POST', {
+                  action: 'request-code',
+                  phone: normalized,
+                });
+                setCode(result.devOtp ?? '');
+                setDevelopment(Boolean(result.devOtp));
+                setSent(true);
+              } else
+                onSignedIn(
+                  await api<Profile>('/api/session', 'POST', {
+                    action: 'verify',
+                    phone: normalized,
+                    code,
+                  }),
+                );
+            } catch (cause) {
+              setError(cause instanceof Error ? cause.message : 'Unable to sign in');
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          <label>
+            Mobile number
+            <input
+              className="form-input"
+              autoComplete="tel"
+              type="tel"
+              required
+              pattern="(\+[1-9][0-9]{7,14}|[6-9][0-9]{9})"
+              value={phone}
+              disabled={busy || sent}
+              onChange={(event) => setPhone(event.target.value.trim())}
+            />
+          </label>
+          {sent && (
+            <label>
+              Verification code
+              <input
+                className="form-input"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                required
+                pattern="[0-9]{6}"
+                value={code}
+                disabled={busy}
+                onChange={(event) => setCode(event.target.value)}
+              />
+            </label>
+          )}
+          {development && (
+            <p className="help-text">
+              Development code supplied by the local server. SMS delivery is not enabled here.
+            </p>
+          )}
+          {error && (
+            <p className="error-message" role="alert">
+              {error}
+            </p>
+          )}
+          <button className="btn btn-primary" disabled={busy}>
+            {busy ? 'Please wait…' : sent ? 'Verify and sign in' : 'Send code'}
+          </button>
+          {sent && (
+            <button
+              type="button"
+              className="btn btn-secondary"
+              disabled={busy}
+              onClick={() => {
+                setSent(false);
+                setCode('');
+                setDevelopment(false);
+                setError('');
+              }}
+            >
+              Change number or request another code
+            </button>
+          )}
+        </form>
+      </section>
+    </main>
+  );
 }
-
-interface RestrictionItem {
-  id: string;
-  userId: string;
-  userPhone?: string;
-  restrictionType: string;
-  reasonCode: string;
-  status: 'ACTIVE' | 'RESOLVED';
-  authorizedBy: string;
-  createdAt: string;
-}
-
-interface AuditItem {
-  id: string;
-  eventType: string;
-  actorId?: string;
-  organizationId?: string;
-  ipAddress?: string;
-  createdAt: string;
-  payload: Record<string, unknown>;
-}
-
-interface MembershipItem {
-  id: string;
-  organizationId: string;
-  userId: string;
-  userPhone?: string;
-  status: 'APPLIED' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED';
-  membershipNumber?: string;
-  appliedAt: string;
-  roleGrants?: { role: string; status: string }[];
-}
-
-export default function AdminDashboard(): React.JSX.Element {
-  const [activeTab, setActiveTab] = useState<'overview' | 'organizations' | 'restrictions' | 'audit' | 'memberships'>('overview');
-  const [selectedTenant, setSelectedTenant] = useState<string>('GLOBAL');
-
-  // Overview metrics state
-  const [metrics, setMetrics] = useState<MetricOverview>({
-    totalUsers: 142,
-    totalOrganizations: 3,
-    activeOrganizations: 2,
-    totalUniversalWallets: 142,
-    totalBalanceCredits: 3840.5,
-    pendingMemberships: 8,
-  });
-
-  // Organizations state
-  const [organizations, setOrganizations] = useState<OrganizationItem[]>([
-    {
-      id: 'org-ktb-01',
-      code: 'KOTTAKKAL',
-      name: 'Kottakkal Time Bank',
-      district: 'Malappuram',
-      type: 'MUNICIPALITY',
-      status: 'ACTIVE',
-      branding: {
-        appDisplayName: 'Kottakkal Time Bank',
-        primaryColor: '#0D5C75',
-        secondaryColor: '#F59E0B',
-      },
-    },
-    {
-      id: 'org-kzd-02',
-      code: 'KOZHIKODE',
-      name: 'Kozhikode Municipal Time Bank',
-      district: 'Kozhikode',
-      type: 'MUNICIPAL_CORPORATION',
-      status: 'ACTIVE',
-      branding: {
-        appDisplayName: 'Kozhikode Time Bank',
-        primaryColor: '#1E3A8A',
-        secondaryColor: '#10B981',
-      },
-    },
-    {
-      id: 'org-mlp-03',
-      code: 'MALAPPURAM',
-      name: 'Malappuram District Civic Bank',
-      district: 'Malappuram',
-      type: 'MUNICIPALITY',
-      status: 'DRAFT',
-      branding: {
-        appDisplayName: 'Malappuram Time Bank',
-        primaryColor: '#047857',
-        secondaryColor: '#FBBF24',
-      },
-    },
-  ]);
-
-  // Restrictions state
-  const [restrictions, setRestrictions] = useState<RestrictionItem[]>([
-    {
-      id: 'res-01',
-      userId: 'usr-9921',
-      userPhone: '+91 98765 11223',
-      restrictionType: 'TEMPORARY_SUSPENSION',
-      reasonCode: 'KYC_DISCREPANCY_HOLD',
-      status: 'ACTIVE',
-      authorizedBy: 'Super Admin',
-      createdAt: '2026-10-15T09:30:00Z',
-    },
-  ]);
-
-  // Audit logs state
-  const [auditLogs, setAuditLogs] = useState<AuditItem[]>([
-    {
-      id: 'aud-101',
-      eventType: 'AUTH_LOGIN',
-      actorId: 'usr-admin-01',
-      organizationId: 'org-ktb-01',
-      ipAddress: '192.168.1.10',
-      createdAt: '2026-10-17T08:15:00Z',
-      payload: { isNewUser: false, activeOrg: 'KOTTAKKAL' },
-    },
-    {
-      id: 'aud-102',
-      eventType: 'MEMBERSHIP_APPROVED',
-      actorId: 'usr-admin-01',
-      organizationId: 'org-ktb-01',
-      ipAddress: '192.168.1.10',
-      createdAt: '2026-10-17T08:00:00Z',
-      payload: { membershipNumber: 'KOTTAKKAL-2026-0042', role: 'VOLUNTEER' },
-    },
-    {
-      id: 'aud-103',
-      eventType: 'ORGANIZATION_STATUS_CHANGED',
-      actorId: 'usr-admin-01',
-      organizationId: 'org-kzd-02',
-      ipAddress: '192.168.1.10',
-      createdAt: '2026-10-16T14:20:00Z',
-      payload: { previousStatus: 'DRAFT', newStatus: 'ACTIVE' },
-    },
-  ]);
-
-  // Memberships state
-  const [memberships, setMemberships] = useState<MembershipItem[]>([
-    {
-      id: 'mem-001',
-      organizationId: 'org-ktb-01',
-      userId: 'usr-1049',
-      userPhone: '+91 94471 23456',
-      status: 'APPLIED',
-      appliedAt: '2026-10-17T04:12:00Z',
-      roleGrants: [],
-    },
-    {
-      id: 'mem-002',
-      organizationId: 'org-ktb-01',
-      userId: 'usr-1050',
-      userPhone: '+91 98460 78901',
-      status: 'APPLIED',
-      appliedAt: '2026-10-17T05:30:00Z',
-      roleGrants: [],
-    },
-    {
-      id: 'mem-003',
-      organizationId: 'org-kzd-02',
-      userId: 'usr-1049',
-      userPhone: '+91 94471 23456',
-      status: 'APPROVED',
-      membershipNumber: 'KOZHIKODE-2026-0018',
-      appliedAt: '2026-10-12T11:00:00Z',
-      roleGrants: [{ role: 'VOLUNTEER', status: 'ACTIVE' }],
-    },
-  ]);
-
-  // Modal states
-  const [showNewOrgModal, setShowNewOrgModal] = useState(false);
-  const [newOrgForm, setNewOrgForm] = useState({
-    code: '',
-    name: '',
-    district: 'Malappuram',
-    type: 'MUNICIPALITY',
-    primaryColor: '#0D5C75',
-    secondaryColor: '#F59E0B',
-  });
-
-  const [showImposeModal, setShowImposeModal] = useState(false);
-  const [imposeForm, setImposeForm] = useState({
-    userId: '',
-    restrictionType: 'TEMPORARY_SUSPENSION',
-    reasonCode: 'FRAUD_SUSPICION',
-    notes: '',
-  });
-
-  // Attempt live API fetch if API is reachable
+function ActionDialog({
+  action,
+  onClose,
+  onSaved,
+  onExpired,
+  setPending,
+}: {
+  action: Action;
+  onClose: () => void;
+  onSaved: (result: unknown) => void;
+  onExpired: () => void;
+  setPending: (value: boolean) => void;
+}) {
+  const [error, setError] = useState(''),
+    [busy, setBusy] = useState(false);
+  const title = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
-    const fetchApi = async () => {
-      try {
-        const res = await fetch('http://localhost:3001/api/v1/admin/overview', {
-          headers: {
-            'x-user-id': 'admin-preview-id',
-            'x-is-super-admin': 'true',
-          },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setMetrics(data);
-        }
-      } catch {
-        // Fallback demo seed remains active
-      }
-    };
-    fetchApi();
+    title.current?.focus();
   }, []);
-
-  // Handlers
-  const handleCreateOrg = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newOrgForm.code || !newOrgForm.name) return;
-
-    const newOrg: OrganizationItem = {
-      id: `org-${Date.now()}`,
-      code: newOrgForm.code.toUpperCase(),
-      name: newOrgForm.name,
-      district: newOrgForm.district,
-      type: newOrgForm.type,
-      status: 'ACTIVE',
-      branding: {
-        appDisplayName: newOrgForm.name,
-        primaryColor: newOrgForm.primaryColor,
-        secondaryColor: newOrgForm.secondaryColor,
-      },
-    };
-
-    setOrganizations((prev) => [newOrg, ...prev]);
-    setMetrics((prev) => ({
-      ...prev,
-      totalOrganizations: prev.totalOrganizations + 1,
-      activeOrganizations: prev.activeOrganizations + 1,
-    }));
-    setShowNewOrgModal(false);
-    setNewOrgForm({
-      code: '',
-      name: '',
-      district: 'Malappuram',
-      type: 'MUNICIPALITY',
-      primaryColor: '#0D5C75',
-      secondaryColor: '#F59E0B',
-    });
-  };
-
-  const handleToggleOrgStatus = (orgId: string) => {
-    setOrganizations((prev) =>
-      prev.map((org) => {
-        if (org.id === orgId) {
-          const nextStatus = org.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE';
-          return { ...org, status: nextStatus };
-        }
-        return org;
-      }),
+  return (
+    <div className="modal-backdrop">
+      <section
+        className="modal-content"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="action-title"
+        onKeyDown={(event) => {
+          if (event.key === 'Escape' && !busy) onClose();
+        }}
+      >
+        <h2 id="action-title" tabIndex={-1} ref={title}>
+          {action.title}
+        </h2>
+        {action.description && <p>{action.description}</p>}
+        <form
+          className="stack"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            const values = Object.fromEntries(
+              new FormData(event.currentTarget).entries(),
+            ) as Record<string, string>;
+            setBusy(true);
+            setPending(true);
+            setError('');
+            try {
+              const result = await action.submit(values);
+              onSaved(result);
+            } catch (cause) {
+              if (cause instanceof ApiError && cause.status === 401) onExpired();
+              else setError(cause instanceof Error ? cause.message : 'Unable to save');
+            } finally {
+              setBusy(false);
+              setPending(false);
+            }
+          }}
+        >
+          <fieldset disabled={busy} className="stack">
+            {action.fields.map((field) => (
+              <label key={field.key}>
+                {field.label}
+                {field.type === 'checkbox' ? (
+                  <input
+                    type="checkbox"
+                    name={field.key}
+                    required={!field.optional}
+                    defaultChecked={field.value === 'true'}
+                  />
+                ) : field.options || field.choices ? (
+                  <select
+                    name={field.key}
+                    className="form-input"
+                    defaultValue={field.value ?? field.choices?.[0]?.value ?? field.options?.[0]}
+                    required={!field.optional}
+                  >
+                    {field.choices
+                      ? field.choices.map((option) => (
+                          <option key={option.value} value={option.value}>
+                            {option.label}
+                          </option>
+                        ))
+                      : field.options?.map((value) => (
+                          <option key={value} value={value}>
+                            {label(value)}
+                          </option>
+                        ))}
+                  </select>
+                ) : (
+                  <input
+                    name={field.key}
+                    className="form-input"
+                    type={field.type ?? 'text'}
+                    required={!field.optional}
+                    defaultValue={field.value ?? ''}
+                    pattern={field.pattern}
+                    min={field.min}
+                    max={field.max}
+                    step={field.step}
+                    minLength={field.minLength}
+                    maxLength={field.maxLength}
+                  />
+                )}
+              </label>
+            ))}
+          </fieldset>
+          {error && (
+            <p role="alert" className="error-message">
+              {error}
+            </p>
+          )}
+          <div className="action-row">
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={onClose}>
+              Cancel
+            </button>
+            <button className="btn btn-primary" disabled={busy}>
+              {busy ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        </form>
+      </section>
+    </div>
+  );
+}
+export default function AdminDashboard(): React.JSX.Element {
+  const [profile, setProfile] = useState<Profile | null>(null),
+    [booting, setBooting] = useState(true);
+  const [tab, setTab] = useState<Tab>('overview'),
+    [tenant, setTenant] = useState('GLOBAL');
+  const [organizations, setOrganizations] = useState<Organization[]>([]),
+    [view, setView] = useState<View>(empty);
+  const [offset, setOffset] = useState(0),
+    [status, setStatus] = useState(''),
+    [eventType, setEventType] = useState(''),
+    [revision, setRevision] = useState(0);
+  const [loading, setLoading] = useState(false),
+    [pending, setPending] = useState(false),
+    [error, setError] = useState(''),
+    [notice, setNotice] = useState('');
+  const [action, setAction] = useState<Action | null>(null),
+    [detail, setDetail] = useState<{ membership: Membership; documents: Document[] } | null>(null);
+  const epoch = useRef(0);
+  const isGlobal = profile ? globalAdmin(profile) : false;
+  const localRoles = profile
+    ? (approved(profile).find((member) => member.organizationId === tenant)?.roles ?? [])
+    : [];
+  const canManageRoles = isGlobal || localRoles.includes('MUNICIPALITY_ADMIN');
+  const initialRoles = [
+    ...OPERATIONS,
+    ...(canManageRoles ? ['COORDINATOR'] : []),
+    ...(isGlobal ? ['MUNICIPALITY_ADMIN'] : []),
+  ];
+  const tabs: { id: Tab; text: string }[] = isGlobal
+    ? [
+        { id: 'overview', text: 'Overview' },
+        { id: 'organizations', text: 'Organizations' },
+        { id: 'memberships', text: 'Memberships' },
+        { id: 'requests', text: 'Requests & matching' },
+        { id: 'catalogue', text: 'Service catalogue' },
+        { id: 'restrictions', text: 'Global restrictions' },
+        { id: 'audit', text: 'Audit trail' },
+      ]
+    : [
+        { id: 'organizations', text: 'Organizations' },
+        { id: 'memberships', text: 'Memberships' },
+        { id: 'requests', text: 'Requests & matching' },
+        { id: 'catalogue', text: 'Service catalogue' },
+      ];
+  const selectedOrg = organizations.find((organization) => organization.id === tenant);
+  function signedIn(next: Profile) {
+    epoch.current++;
+    setProfile(next);
+    setView(empty());
+    setDetail(null);
+    setError('');
+    setNotice('');
+    const central = globalAdmin(next);
+    setTenant((previous) =>
+      central || staffMemberships(next).some((member) => member.organizationId === previous)
+        ? previous
+        : (staffMemberships(next)[0]?.organizationId ?? 'GLOBAL'),
     );
-  };
-
-  const handleApproveMembership = (id: string, orgCode: string) => {
-    const year = new Date().getFullYear();
-    const count = memberships.filter((m) => m.status === 'APPROVED').length + 1;
-    const genNumber = `${orgCode}-${year}-${String(count).padStart(4, '0')}`;
-
-    setMemberships((prev) =>
-      prev.map((m) => {
-        if (m.id === id) {
-          return {
-            ...m,
-            status: 'APPROVED',
-            membershipNumber: genNumber,
-            roleGrants: [{ role: 'VOLUNTEER', status: 'ACTIVE' }],
-          };
-        }
-        return m;
-      }),
+    if (!central)
+      setTab((current) =>
+        ['organizations', 'memberships', 'requests', 'catalogue'].includes(current)
+          ? current
+          : 'requests',
+      );
+  }
+  function expired() {
+    epoch.current++;
+    setProfile(null);
+    setOrganizations([]);
+    setView(empty());
+    setDetail(null);
+    setAction(null);
+    setTenant('GLOBAL');
+    setTab('overview');
+    setNotice('');
+    setError('');
+  }
+  useEffect(() => {
+    const controller = new AbortController();
+    api<Profile>('/api/session', 'GET', undefined, controller.signal)
+      .then((next) => {
+        if (!controller.signal.aborted) signedIn(next);
+      })
+      .catch((cause: unknown) => {
+        if (!controller.signal.aborted && (!(cause instanceof ApiError) || cause.status !== 401))
+          setError(cause instanceof Error ? cause.message : 'Unable to load the session');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setBooting(false);
+      });
+    return () => controller.abort();
+  }, []);
+  useEffect(() => {
+    if (!profile) return;
+    const controller = new AbortController();
+    setLoading(true);
+    setError('');
+    setView(empty());
+    setDetail(null);
+    async function load() {
+      const result = await backend<{ data: Organization[] }>(
+        '/v1/organizations',
+        'GET',
+        undefined,
+        controller.signal,
+      );
+      const allowed = new Set(staffMemberships(profile!).map((member) => member.organizationId));
+      if (controller.signal.aborted) return;
+      setOrganizations(
+        isGlobal ? result.data : result.data.filter((organization) => allowed.has(organization.id)),
+      );
+      let next = empty();
+      const query = new URLSearchParams({ limit: '20', offset: String(offset) });
+      if (tab === 'overview' && isGlobal)
+        next.metrics = await backend<Metrics>(
+          '/admin/overview',
+          'GET',
+          undefined,
+          controller.signal,
+        );
+      if (tab === 'memberships' && tenant !== 'GLOBAL') {
+        if (status) query.set('status', status);
+        next = {
+          ...next,
+          ...(await backend<{ memberships: Membership[]; total: number }>(
+            `/organizations/${tenant}/memberships?${query}`,
+            'GET',
+            undefined,
+            controller.signal,
+          )),
+        };
+      }
+      if (tab === 'restrictions' && isGlobal)
+        next.restrictions = await backend<Restriction[]>(
+          `/admin/restrictions${status ? `?status=${status}` : ''}`,
+          'GET',
+          undefined,
+          controller.signal,
+        );
+      if (tab === 'audit' && isGlobal) {
+        if (tenant !== 'GLOBAL') query.set('organizationId', tenant);
+        if (eventType) query.set('eventType', eventType);
+        next = {
+          ...next,
+          ...(await backend<{ events: Audit[]; total: number }>(
+            `/admin/audit-logs?${query}`,
+            'GET',
+            undefined,
+            controller.signal,
+          )),
+        };
+      }
+      if (!controller.signal.aborted) setView(next);
+    }
+    load()
+      .catch((cause: unknown) => {
+        if (controller.signal.aborted) return;
+        if (cause instanceof ApiError && cause.status === 401) expired();
+        else setError(cause instanceof Error ? cause.message : 'Unable to load records');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+    return () => controller.abort();
+  }, [profile, tab, tenant, offset, status, eventType, revision, isGlobal]);
+  function changeScope(value: string) {
+    setTenant(value);
+    setOffset(0);
+    setDetail(null);
+    setView(empty());
+    setNotice('');
+  }
+  function changeTab(value: Tab) {
+    setTab(value);
+    setStatus('');
+    setOffset(0);
+    setDetail(null);
+    setView(empty());
+    setNotice('');
+  }
+  function openAction(next: Action) {
+    setAction(next);
+    setError('');
+    setNotice('');
+  }
+  async function review(member: Membership) {
+    const current = epoch.current;
+    setPending(true);
+    setError('');
+    try {
+      const [membership, documents] = await Promise.all([
+        backend<Membership>(`/organizations/${member.organizationId}/memberships/${member.id}`),
+        backend<Document[]>(
+          `/organizations/${member.organizationId}/memberships/${member.id}/documents`,
+        ),
+      ]);
+      if (current === epoch.current) setDetail({ membership, documents });
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 401) expired();
+      else setError(cause instanceof Error ? cause.message : 'Unable to open membership');
+    } finally {
+      setPending(false);
+    }
+  }
+  const membershipBase = detail
+    ? `/organizations/${detail.membership.organizationId}/memberships/${detail.membership.id}`
+    : '';
+  if (booting)
+    return (
+      <main className="login-shell">
+        <p role="status">Checking your session…</p>
+      </main>
     );
-
-    setMetrics((prev) => ({
-      ...prev,
-      pendingMemberships: Math.max(0, prev.pendingMemberships - 1),
-    }));
-  };
-
-  const handleRejectMembership = (id: string) => {
-    setMemberships((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, status: 'REJECTED' } : m)),
+  if (!profile)
+    return (
+      <>
+        <SignIn onSignedIn={signedIn} />
+        {error && (
+          <p className="session-error" role="alert">
+            {error}
+          </p>
+        )}
+      </>
     );
-    setMetrics((prev) => ({
-      ...prev,
-      pendingMemberships: Math.max(0, prev.pendingMemberships - 1),
-    }));
-  };
-
-  const handleResolveRestriction = (id: string) => {
-    setRestrictions((prev) =>
-      prev.map((r) => (r.id === id ? { ...r, status: 'RESOLVED' } : r)),
-    );
-  };
-
-  const handleImposeRestriction = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!imposeForm.userId) return;
-
-    const newRes: RestrictionItem = {
-      id: `res-${Date.now()}`,
-      userId: imposeForm.userId,
-      userPhone: '+91 99999 88888',
-      restrictionType: imposeForm.restrictionType,
-      reasonCode: imposeForm.reasonCode,
-      status: 'ACTIVE',
-      authorizedBy: 'Super Admin',
-      createdAt: new Date().toISOString(),
-    };
-
-    setRestrictions((prev) => [newRes, ...prev]);
-    setShowImposeModal(false);
-    setImposeForm({
-      userId: '',
-      restrictionType: 'TEMPORARY_SUSPENSION',
-      reasonCode: 'FRAUD_SUSPICION',
-      notes: '',
-    });
-  };
-
   return (
     <div className="app-container">
-      {/* ─── SIDEBAR NAVIGATION ─── */}
-      <aside className="sidebar">
+      <aside className="sidebar" inert={action !== null}>
         <div className="brand-badge">
           <div className="brand-icon">ITB</div>
           <div>
             <div className="brand-title">Indian Time Bank</div>
-            <div className="brand-subtitle">Super Admin Portal</div>
+            <div className="brand-subtitle">Administration</div>
           </div>
         </div>
-
-        <nav className="nav-group">
-          <button
-            id="nav-overview"
-            className={`nav-item ${activeTab === 'overview' ? 'active' : ''}`}
-            onClick={() => setActiveTab('overview')}
-          >
-            <span>📊</span> Overview Metrics
-          </button>
-          <button
-            id="nav-orgs"
-            className={`nav-item ${activeTab === 'organizations' ? 'active' : ''}`}
-            onClick={() => setActiveTab('organizations')}
-          >
-            <span>🏛️</span> Organizations & Branding
-          </button>
-          <button
-            id="nav-memberships"
-            className={`nav-item ${activeTab === 'memberships' ? 'active' : ''}`}
-            onClick={() => setActiveTab('memberships')}
-          >
-            <span>👥</span> Multi-Tenant Memberships
-          </button>
-          <button
-            id="nav-restrictions"
-            className={`nav-item ${activeTab === 'restrictions' ? 'active' : ''}`}
-            onClick={() => setActiveTab('restrictions')}
-          >
-            <span>🛡️</span> Global Restrictions
-          </button>
-          <button
-            id="nav-audit"
-            className={`nav-item ${activeTab === 'audit' ? 'active' : ''}`}
-            onClick={() => setActiveTab('audit')}
-          >
-            <span>📜</span> Audit Explorer
-          </button>
+        <nav className="nav-group" aria-label="Dashboard">
+          {tabs.map((item) => (
+            <button
+              key={item.id}
+              id={`nav-${item.id}`}
+              className={`nav-item ${tab === item.id ? 'active' : ''}`}
+              aria-current={tab === item.id ? 'page' : undefined}
+              disabled={pending}
+              onClick={() => changeTab(item.id)}
+            >
+              {item.text}
+            </button>
+          ))}
         </nav>
-
-        <div style={{ padding: '16px 8px', borderTop: '1px solid var(--border-subtle)' }}>
-          <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>Architecture v2.0</div>
-          <div style={{ fontSize: '0.75rem', color: 'var(--success)', marginTop: '2px' }}>
-            ● Central Identity Active
-          </div>
+        <div className="sidebar-footer">
+          <p>{profile.phoneE164}</p>
+          <p>{isGlobal ? 'Central administrator' : 'Organization staff'}</p>
+          <button
+            className="btn btn-secondary"
+            disabled={pending}
+            onClick={async () => {
+              setPending(true);
+              try {
+                await api('/api/session', 'DELETE');
+                expired();
+              } catch (cause) {
+                if (cause instanceof ApiError && cause.status === 401) expired();
+                else setError(cause instanceof Error ? cause.message : 'Unable to sign out');
+              } finally {
+                setPending(false);
+              }
+            }}
+          >
+            Sign out
+          </button>
         </div>
       </aside>
-
-      {/* ─── MAIN CONTENT ─── */}
-      <div className="main-wrapper">
-        {/* Top Header */}
+      <div className="main-wrapper" inert={action !== null}>
         <header className="top-bar">
-          <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-            <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Tenant Scope:</span>
-            <div className="tenant-selector" id="tenant-dropdown">
-              <span className="tenant-dot" />
-              <select
-                id="tenant-select"
-                value={selectedTenant}
-                onChange={(e) => setSelectedTenant(e.target.value)}
-                style={{
-                  background: 'transparent',
-                  border: 'none',
-                  color: '#FFFFFF',
-                  fontSize: '0.88rem',
-                  fontWeight: 600,
-                  outline: 'none',
-                  cursor: 'pointer',
-                }}
-              >
-                <option value="GLOBAL" style={{ background: '#0E1626' }}>
-                  🌐 Central Super Admin (Global Scope)
-                </option>
-                {organizations.map((org) => (
-                  <option key={org.id} value={org.code} style={{ background: '#0E1626' }}>
-                    🏛️ {org.name} ({org.code})
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                padding: '6px 12px',
-                background: 'rgba(255, 255, 255, 0.04)',
-                border: '1px solid var(--border-subtle)',
-                borderRadius: 'var(--radius-full)',
-              }}
+          <label className="scope-label">
+            Organization scope
+            <select
+              id="tenant-select"
+              className="form-input"
+              value={tab === 'overview' || tab === 'restrictions' ? 'GLOBAL' : tenant}
+              disabled={pending || tab === 'overview' || tab === 'restrictions'}
+              onChange={(event) => changeScope(event.target.value)}
             >
-              <div
-                style={{
-                  width: '28px',
-                  height: '28px',
-                  borderRadius: '50%',
-                  background: 'var(--primary)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: '0.8rem',
-                  fontWeight: 700,
-                }}
-              >
-                SA
-              </div>
-              <div>
-                <div style={{ fontSize: '0.82rem', fontWeight: 600 }}>Super Admin</div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-dim)' }}>+91 98765 43210</div>
-              </div>
-            </div>
-          </div>
+              {isGlobal && <option value="GLOBAL">All organizations</option>}
+              {organizations.map((organization) => (
+                <option key={organization.id} value={organization.id}>
+                  {organization.name} ({organization.code})
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="btn btn-secondary"
+            disabled={pending || loading}
+            onClick={async () => {
+              setPending(true);
+              setNotice('');
+              try {
+                signedIn(await api<Profile>('/api/session'));
+                setRevision((value) => value + 1);
+              } catch (cause) {
+                if (cause instanceof ApiError && [401, 403].includes(cause.status)) expired();
+                else setError(cause instanceof Error ? cause.message : 'Unable to refresh');
+              } finally {
+                setPending(false);
+              }
+            }}
+          >
+            Refresh
+          </button>
         </header>
-
-        {/* Viewport Content */}
-        <main className="content-body">
-          {/* ────────────────── OVERVIEW TAB ────────────────── */}
-          {activeTab === 'overview' && (
-            <div>
-              <div style={{ marginBottom: '28px' }}>
-                <h1 style={{ fontSize: '1.8rem', fontWeight: 800, letterSpacing: '-0.02em' }}>
-                  Central Platform Overview
-                </h1>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', marginTop: '4px' }}>
-                  Indian Time Bank network health, universal wallet ledger supply, and cross-municipality memberships.
-                </p>
-              </div>
-
-              {/* Metrics Grid */}
-              <div className="metric-grid">
-                <div className="glass-panel metric-card" id="card-metric-users">
-                  <div className="metric-label">Registered Global Users</div>
-                  <div className="metric-value">{metrics.totalUsers}</div>
-                  <div className="metric-sub">Single lifetime verified identities (D#39)</div>
-                </div>
-
-                <div className="glass-panel metric-card" id="card-metric-orgs">
-                  <div className="metric-label">Civic Organizations</div>
-                  <div className="metric-value">
-                    {metrics.activeOrganizations}{' '}
-                    <span style={{ fontSize: '1rem', color: 'var(--text-dim)' }}>
-                      / {metrics.totalOrganizations}
-                    </span>
-                  </div>
-                  <div className="metric-sub">Active municipal / corporation tenants</div>
-                </div>
-
-                <div className="glass-panel metric-card" id="card-metric-supply">
-                  <div className="metric-label">Universal Credit Supply</div>
-                  <div className="metric-value">
-                    {metrics.totalBalanceCredits.toFixed(1)}{' '}
-                    <span style={{ fontSize: '1rem', color: 'var(--accent)' }}>hrs</span>
-                  </div>
-                  <div className="metric-sub">Across {metrics.totalUniversalWallets} non-org wallets (D#17)</div>
-                </div>
-
-                <div className="glass-panel metric-card" id="card-metric-pending">
-                  <div className="metric-label">Pending Memberships</div>
-                  <div className="metric-value" style={{ color: 'var(--accent)' }}>
-                    {metrics.pendingMemberships}
-                  </div>
-                  <div className="metric-sub">Applications awaiting coordinator review</div>
-                </div>
-              </div>
-
-              {/* Network Highlights */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '24px' }}>
-                <div className="glass-panel" style={{ padding: '24px' }}>
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '16px' }}>
-                    Active White-Label Tenants
-                  </h3>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    {organizations.map((org) => (
-                      <div
-                        key={org.id}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'space-between',
-                          padding: '14px 18px',
-                          background: 'rgba(255, 255, 255, 0.02)',
-                          border: '1px solid var(--border-subtle)',
-                          borderRadius: 'var(--radius-md)',
-                        }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-                          <div
-                            style={{
-                              width: '18px',
-                              height: '18px',
-                              borderRadius: '4px',
-                              backgroundColor: org.branding?.primaryColor ?? '#0D5C75',
-                              border: '1px solid rgba(255, 255, 255, 0.3)',
-                            }}
-                          />
-                          <div>
-                            <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{org.name}</div>
-                            <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>
-                              Code: <strong style={{ color: 'var(--text-main)' }}>{org.code}</strong> • {org.district}
-                            </div>
-                          </div>
-                        </div>
-                        <span className={`badge badge-${org.status.toLowerCase()}`}>{org.status}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="glass-panel" style={{ padding: '24px' }}>
-                  <h3 style={{ fontSize: '1.1rem', fontWeight: 700, marginBottom: '16px' }}>
-                    Multi-Organization Architecture (D#39 & ITB-004)
-                  </h3>
-                  <div style={{ fontSize: '0.88rem', color: 'var(--text-muted)', lineHeight: '1.6' }}>
-                    <p style={{ marginBottom: '12px' }}>
-                      ✓ <strong>One Universal Wallet:</strong> Each citizen holds exactly one lifetime time-credit balance
-                      that follows them across all municipal borders.
-                    </p>
-                    <p style={{ marginBottom: '12px' }}>
-                      ✓ <strong>Independent Tenant Approval:</strong> Applying to Kottakkal requires local coordinator
-                      approval and yields a branded municipal membership, without affecting existing Kozhikode access.
-                    </p>
-                    <p>
-                      ✓ <strong>Strict Auditability:</strong> Every role grant, restriction, and status transition is recorded
-                      in an immutable append-only ledger.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            </div>
+        <main className="content-body" aria-busy={loading || pending}>
+          <h1>{tabs.find((item) => item.id === tab)?.text}</h1>
+          {error && (
+            <p className="error-message" role="alert">
+              {error}
+            </p>
           )}
-
-          {/* ────────────────── ORGANIZATIONS TAB ────────────────── */}
-          {activeTab === 'organizations' && (
-            <div>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  marginBottom: '28px',
-                }}
-              >
-                <div>
-                  <h1 style={{ fontSize: '1.8rem', fontWeight: 800, letterSpacing: '-0.02em' }}>
-                    Civic Organizations & White-Label Theming
-                  </h1>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', marginTop: '4px' }}>
-                    Provision municipalities, manage visual branding assets, and configure mobile app package IDs.
-                  </p>
+          {notice && (
+            <p className="success-message" role="status">
+              {notice}
+            </p>
+          )}
+          {loading && <p role="status">Loading live records…</p>}
+          {tab === 'overview' && (
+            <>
+              <p className="section-description">Platform-wide totals across all organizations.</p>
+              {view.metrics && (
+                <div className="metric-grid">
+                  {[
+                    ['Registered users', view.metrics.totalUsers],
+                    ['Organizations', view.metrics.totalOrganizations],
+                    ['Active organizations', view.metrics.activeOrganizations],
+                    ['Time wallets', view.metrics.totalUniversalWallets],
+                    ['Time credits', view.metrics.totalBalanceCredits],
+                    ['Pending memberships', view.metrics.pendingMemberships],
+                  ].map(([name, value]) => (
+                    <section className="glass-panel metric-card" key={name}>
+                      <div className="metric-label">{name}</div>
+                      <div className="metric-value">{value}</div>
+                    </section>
+                  ))}
                 </div>
-                <button
-                  id="btn-new-org"
-                  className="btn btn-primary"
-                  onClick={() => setShowNewOrgModal(true)}
-                >
-                  <span>+</span> Onboard New Municipality
-                </button>
+              )}
+            </>
+          )}
+          {tab === 'requests' &&
+            (tenant === 'GLOBAL' ? (
+              <p className="empty-state">Select an organization to review requests and matching.</p>
+            ) : (
+              <CoordinatorRequests
+                key={tenant}
+                organizationId={tenant}
+                revision={revision}
+                pending={pending}
+                openAction={openAction}
+                onExpired={expired}
+              />
+            ))}
+          {tab === 'catalogue' && (
+            <ServiceCatalogue
+              key={tenant}
+              organizationId={tenant === 'GLOBAL' ? null : tenant}
+              isGlobal={isGlobal}
+              revision={revision}
+              pending={pending}
+              openAction={openAction}
+              onExpired={expired}
+            />
+          )}
+          {tab === 'organizations' && (
+            <>
+              <div className="section-heading">
+                <p>Organizations and their current branding.</p>
+                {isGlobal && (
+                  <button
+                    className="btn btn-primary"
+                    disabled={pending}
+                    onClick={() =>
+                      openAction({
+                        title: 'Create organization',
+                        fields: [
+                          { key: 'code', label: 'Organization code', pattern: '[A-Z0-9_-]{2,50}' },
+                          { key: 'name', label: 'Organization name' },
+                          { key: 'district', label: 'District' },
+                          {
+                            key: 'type',
+                            label: 'Organization type',
+                            options: [
+                              'MUNICIPALITY',
+                              'MUNICIPAL_CORPORATION',
+                              'GRAMA_PANCHAYAT',
+                              'SPECIAL_ADMINISTRATIVE_ZONE',
+                            ],
+                          },
+                          { key: 'appDisplayName', label: 'App display name' },
+                          {
+                            key: 'primaryColor',
+                            label: 'Primary color',
+                            type: 'color',
+                            value: '#0D5C75',
+                          },
+                          {
+                            key: 'secondaryColor',
+                            label: 'Secondary color',
+                            type: 'color',
+                            value: '#F59E0B',
+                          },
+                        ],
+                        submit: (values) =>
+                          backend('/v1/organizations', 'POST', {
+                            code: values['code'],
+                            name: values['name'],
+                            district: values['district'],
+                            type: values['type'],
+                            branding: {
+                              appDisplayName: values['appDisplayName'],
+                              primaryColor: values['primaryColor'],
+                              secondaryColor: values['secondaryColor'],
+                            },
+                          }),
+                      })
+                    }
+                  >
+                    Create organization
+                  </button>
+                )}
               </div>
-
-              <div className="glass-panel table-container">
-                <table className="custom-table" id="table-organizations">
+              <div className="table-container glass-panel">
+                <table className="custom-table">
                   <thead>
                     <tr>
                       <th>Organization</th>
-                      <th>Slug Code</th>
-                      <th>District & Type</th>
-                      <th>Brand Palette</th>
+                      <th>District</th>
                       <th>Status</th>
+                      <th>Branding</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {organizations.map((org) => (
-                      <tr key={org.id} id={`row-org-${org.code.toLowerCase()}`}>
-                        <td>
-                          <div style={{ fontWeight: 700 }}>{org.name}</div>
-                          <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>
-                            {org.branding?.appDisplayName}
-                          </div>
-                        </td>
-                        <td>
-                          <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--accent)' }}>
-                            {org.code}
-                          </code>
-                        </td>
-                        <td>
-                          <div>{org.district}</div>
-                          <div style={{ fontSize: '0.78rem', color: 'var(--text-dim)' }}>{org.type}</div>
-                        </td>
-                        <td>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                            <div
-                              style={{
-                                width: '22px',
-                                height: '22px',
-                                borderRadius: '4px',
-                                backgroundColor: org.branding?.primaryColor,
-                                border: '1px solid rgba(255, 255, 255, 0.2)',
-                              }}
-                              title={`Primary: ${org.branding?.primaryColor}`}
-                            />
-                            <div
-                              style={{
-                                width: '22px',
-                                height: '22px',
-                                borderRadius: '4px',
-                                backgroundColor: org.branding?.secondaryColor,
-                                border: '1px solid rgba(255, 255, 255, 0.2)',
-                              }}
-                              title={`Secondary: ${org.branding?.secondaryColor}`}
-                            />
-                          </div>
-                        </td>
-                        <td>
-                          <span className={`badge badge-${org.status.toLowerCase()}`}>{org.status}</span>
-                        </td>
-                        <td>
-                          <button
-                            id={`btn-toggle-${org.code.toLowerCase()}`}
-                            className="btn btn-secondary"
-                            style={{ padding: '6px 12px', fontSize: '0.78rem' }}
-                            onClick={() => handleToggleOrgStatus(org.id)}
-                          >
-                            {org.status === 'ACTIVE' ? 'Suspend' : 'Activate'}
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          {/* ────────────────── MEMBERSHIPS TAB ────────────────── */}
-          {activeTab === 'memberships' && (
-            <div>
-              <div style={{ marginBottom: '28px' }}>
-                <h1 style={{ fontSize: '1.8rem', fontWeight: 800, letterSpacing: '-0.02em' }}>
-                  Multi-Tenant Memberships & Role Grants
-                </h1>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', marginTop: '4px' }}>
-                  Review civic applications, generate sequential membership IDs, and assign coordinator/volunteer roles.
-                </p>
-              </div>
-
-              <div className="glass-panel table-container">
-                <table className="custom-table" id="table-memberships">
-                  <thead>
-                    <tr>
-                      <th>Citizen Contact</th>
-                      <th>Target Organization</th>
-                      <th>Status</th>
-                      <th>Membership Number</th>
-                      <th>Assigned Roles</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {memberships.map((m) => {
-                      const org = organizations.find((o) => o.id === m.organizationId);
-                      return (
-                        <tr key={m.id} id={`row-membership-${m.id}`}>
+                    {organizations
+                      .filter((organization) => tenant === 'GLOBAL' || organization.id === tenant)
+                      .map((organization) => (
+                        <tr key={organization.id}>
                           <td>
-                            <div style={{ fontWeight: 700 }}>{m.userPhone ?? 'Mobile Citizen'}</div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
-                              UID: {m.userId}
+                            {organization.name}
+                            <div className="help-text">{organization.code}</div>
+                          </td>
+                          <td>
+                            {organization.district}
+                            <div className="help-text">{label(organization.type)}</div>
+                          </td>
+                          <td>
+                            <Badge value={organization.status} />
+                          </td>
+                          <td>
+                            {organization.branding?.appDisplayName ?? 'Not configured'}
+                            <div>
+                              {organization.branding?.primaryColor} /{' '}
+                              {organization.branding?.secondaryColor}
                             </div>
                           </td>
                           <td>
-                            <div style={{ fontWeight: 600 }}>{org?.name ?? m.organizationId}</div>
-                            <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>
-                              Code: {org?.code}
+                            <div className="action-row">
+                              {isGlobal && (
+                                <button
+                                  className="btn btn-secondary"
+                                  disabled={pending}
+                                  onClick={() =>
+                                    openAction({
+                                      title: `Change status: ${organization.name}`,
+                                      fields: [
+                                        {
+                                          key: 'status',
+                                          label: 'Status',
+                                          options: ['ACTIVE', 'DRAFT', 'SUSPENDED', 'ARCHIVED'],
+                                          value: organization.status,
+                                        },
+                                        { key: 'reason', label: 'Reason' },
+                                      ],
+                                      submit: (values) =>
+                                        backend(
+                                          `/admin/organizations/${organization.id}/status`,
+                                          'PATCH',
+                                          values,
+                                        ),
+                                    })
+                                  }
+                                >
+                                  Change status
+                                </button>
+                              )}
+                              {(isGlobal ||
+                                (organization.id === tenant &&
+                                  localRoles.includes('MUNICIPALITY_ADMIN'))) && (
+                                <button
+                                  className="btn btn-secondary"
+                                  disabled={pending}
+                                  onClick={() =>
+                                    openAction({
+                                      title: `Edit branding: ${organization.name}`,
+                                      fields: [
+                                        {
+                                          key: 'appDisplayName',
+                                          label: 'App display name',
+                                          value:
+                                            organization.branding?.appDisplayName ??
+                                            organization.name,
+                                        },
+                                        {
+                                          key: 'primaryColor',
+                                          label: 'Primary color',
+                                          type: 'color',
+                                          value: organization.branding?.primaryColor ?? '#0D5C75',
+                                        },
+                                        {
+                                          key: 'secondaryColor',
+                                          label: 'Secondary color',
+                                          type: 'color',
+                                          value: organization.branding?.secondaryColor ?? '#F59E0B',
+                                        },
+                                      ],
+                                      submit: (values) =>
+                                        backend(
+                                          `/v1/organizations/${organization.id}/branding`,
+                                          'PUT',
+                                          values,
+                                        ),
+                                    })
+                                  }
+                                >
+                                  Edit branding
+                                </button>
+                              )}
                             </div>
-                          </td>
-                          <td>
-                            <span className={`badge badge-${m.status.toLowerCase()}`}>{m.status}</span>
-                          </td>
-                          <td>
-                            {m.membershipNumber ? (
-                              <code style={{ fontFamily: 'var(--font-mono)', color: 'var(--success)' }}>
-                                {m.membershipNumber}
-                              </code>
-                            ) : (
-                              <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>Pending Approval</span>
-                            )}
-                          </td>
-                          <td>
-                            {m.roleGrants && m.roleGrants.length > 0 ? (
-                              m.roleGrants.map((g, idx) => (
-                                <span
-                                  key={idx}
-                                  style={{
-                                    display: 'inline-block',
-                                    padding: '2px 8px',
-                                    borderRadius: '4px',
-                                    background: 'rgba(13, 92, 117, 0.4)',
-                                    color: '#E0F2FE',
-                                    fontSize: '0.75rem',
-                                    fontWeight: 600,
-                                    marginRight: '4px',
-                                  }}
-                                >
-                                  {g.role}
-                                </span>
-                              ))
-                            ) : (
-                              <span style={{ color: 'var(--text-dim)', fontSize: '0.8rem' }}>None</span>
-                            )}
-                          </td>
-                          <td>
-                            {m.status === 'APPLIED' && (
-                              <div style={{ display: 'flex', gap: '8px' }}>
-                                <button
-                                  id={`btn-approve-${m.id}`}
-                                  className="btn btn-success"
-                                  style={{ padding: '5px 10px', fontSize: '0.78rem' }}
-                                  onClick={() => handleApproveMembership(m.id, org?.code ?? 'KTB')}
-                                >
-                                  ✓ Approve
-                                </button>
-                                <button
-                                  id={`btn-reject-${m.id}`}
-                                  className="btn btn-danger"
-                                  style={{ padding: '5px 10px', fontSize: '0.78rem' }}
-                                  onClick={() => handleRejectMembership(m.id)}
-                                >
-                                  ✕ Reject
-                                </button>
-                              </div>
-                            )}
                           </td>
                         </tr>
-                      );
-                    })}
+                      ))}
                   </tbody>
                 </table>
               </div>
-            </div>
+            </>
           )}
-
-          {/* ────────────────── RESTRICTIONS TAB ────────────────── */}
-          {activeTab === 'restrictions' && (
-            <div>
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  marginBottom: '28px',
-                }}
-              >
-                <div>
-                  <h1 style={{ fontSize: '1.8rem', fontWeight: 800, letterSpacing: '-0.02em' }}>
-                    Global Account Restrictions & Fraud Holds
-                  </h1>
-                  <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', marginTop: '4px' }}>
-                    Platform-wide suspensions and permanent bans authorized by Central Super Admin (D#82, D#83).
+          {tab === 'memberships' && (
+            <>
+              {tenant === 'GLOBAL' ? (
+                <p className="empty-state">Select an organization to review its memberships.</p>
+              ) : (
+                <>
+                  <div className="section-heading">
+                    <p>Memberships in {selectedOrg?.name ?? 'the selected organization'}.</p>
+                    <label>
+                      Membership status
+                      <select
+                        className="form-input"
+                        disabled={pending}
+                        value={status}
+                        onChange={(event) => {
+                          setStatus(event.target.value);
+                          setOffset(0);
+                        }}
+                      >
+                        <option value="">All statuses</option>
+                        {['APPLIED', 'PENDING_REVIEW', 'APPROVED', 'REJECTED', 'SUSPENDED'].map(
+                          (value) => (
+                            <option key={value} value={value}>
+                              {label(value)}
+                            </option>
+                          ),
+                        )}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="table-container glass-panel">
+                    <table className="custom-table">
+                      <thead>
+                        <tr>
+                          <th>Member</th>
+                          <th>Status</th>
+                          <th>Membership number</th>
+                          <th>Active roles</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {view.memberships.map((member) => (
+                          <tr key={member.id}>
+                            <td>
+                              {member.user?.phoneE164 ?? member.userId}
+                              <div className="help-text">{member.userId}</div>
+                            </td>
+                            <td>
+                              <Badge value={member.status} />
+                            </td>
+                            <td>{member.membershipNumber ?? 'Awaiting approval'}</td>
+                            <td>
+                              {member.roleGrants
+                                .filter((grant) => grant.status === 'ACTIVE')
+                                .map((grant) => label(grant.role))
+                                .join(', ') || 'None'}
+                            </td>
+                            <td>
+                              <button
+                                className="btn btn-secondary"
+                                disabled={pending}
+                                onClick={() => review(member)}
+                              >
+                                Review membership
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  {!loading && !error && view.total === 0 && (
+                    <p className="empty-state">No memberships match this scope.</p>
+                  )}
+                </>
+              )}
+              {detail && (
+                <section className="glass-panel detail-panel">
+                  <div className="section-heading">
+                    <h2>Membership review</h2>
+                    <button
+                      className="btn btn-secondary"
+                      disabled={pending}
+                      onClick={() => setDetail(null)}
+                    >
+                      Close review
+                    </button>
+                  </div>
+                  <p>{detail.membership.user?.phoneE164 ?? detail.membership.userId}</p>
+                  <p>
+                    User ID: <code>{detail.membership.userId}</code>
                   </p>
-                </div>
+                  <p>
+                    <Badge value={detail.membership.status} /> {detail.membership.membershipNumber}
+                  </p>
+                  {detail.membership.rejectionReason && (
+                    <p>Rejection reason: {detail.membership.rejectionReason}</p>
+                  )}
+                  {['APPLIED', 'PENDING_REVIEW'].includes(detail.membership.status) && (
+                    <div className="action-row">
+                      <button
+                        className="btn btn-success"
+                        onClick={() =>
+                          openAction({
+                            title: 'Approve membership',
+                            description:
+                              'Choose the initial role after reviewing the application and supporting documents.',
+                            fields: [
+                              { key: 'initialRole', label: 'Initial role', options: initialRoles },
+                              { key: 'notes', label: 'Approval notes', optional: true },
+                            ],
+                            submit: (values) =>
+                              backend(`${membershipBase}/approve`, 'POST', values),
+                          })
+                        }
+                      >
+                        Approve membership
+                      </button>
+                      <button
+                        className="btn btn-danger"
+                        onClick={() =>
+                          openAction({
+                            title: 'Reject membership',
+                            fields: [{ key: 'reason', label: 'Rejection reason' }],
+                            submit: (values) => backend(`${membershipBase}/reject`, 'POST', values),
+                          })
+                        }
+                      >
+                        Reject membership
+                      </button>
+                    </div>
+                  )}
+                  <h3>Supporting documents</h3>
+                  {detail.documents.length === 0 && <p>No supporting documents submitted.</p>}
+                  {detail.documents.map((document) => (
+                    <div className="document-row" key={document.id}>
+                      <div>
+                        {label(document.documentType)} <Badge value={document.reviewStatus} />
+                        <div className="help-text">Storage reference: {document.storageKey}</div>
+                      </div>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() =>
+                          openAction({
+                            title: 'Review document',
+                            fields: [
+                              {
+                                key: 'status',
+                                label: 'Review decision',
+                                options: ['APPROVED', 'REJECTED'],
+                              },
+                              { key: 'notes', label: 'Review notes', optional: true },
+                            ],
+                            submit: (values) =>
+                              backend(
+                                `/organizations/${detail.membership.organizationId}/memberships/documents/${document.id}/review`,
+                                'PATCH',
+                                values,
+                              ),
+                          })
+                        }
+                      >
+                        Review document
+                      </button>
+                    </div>
+                  ))}
+                  <h3>Active roles</h3>
+                  {detail.membership.roleGrants
+                    .filter((grant) => grant.status === 'ACTIVE')
+                    .map((grant) => (
+                      <div className="document-row" key={grant.id}>
+                        {label(grant.role)}
+                        {canManageRoles &&
+                          grant.role !== 'SUPER_ADMIN' &&
+                          (isGlobal || grant.role !== 'MUNICIPALITY_ADMIN') && (
+                            <button
+                              className="btn btn-danger"
+                              onClick={() =>
+                                openAction({
+                                  title: `Revoke ${label(grant.role)} role`,
+                                  fields: [{ key: 'reason', label: 'Revocation reason' }],
+                                  submit: (values) =>
+                                    backend(
+                                      `${membershipBase}/roles/${grant.id}`,
+                                      'DELETE',
+                                      values,
+                                    ),
+                                })
+                              }
+                            >
+                              Revoke {label(grant.role)}
+                            </button>
+                          )}
+                      </div>
+                    ))}
+                  {canManageRoles && detail.membership.status === 'APPROVED' && (
+                    <button
+                      className="btn btn-secondary"
+                      onClick={() =>
+                        openAction({
+                          title: 'Grant organization role',
+                          fields: [{ key: 'role', label: 'Role', options: initialRoles }],
+                          submit: (values) => backend(`${membershipBase}/roles`, 'POST', values),
+                        })
+                      }
+                    >
+                      Grant role
+                    </button>
+                  )}
+                </section>
+              )}
+            </>
+          )}
+          {tab === 'restrictions' && (
+            <>
+              <div className="section-heading">
+                <p>Restrictions apply across the entire platform.</p>
                 <button
-                  id="btn-impose-restriction"
-                  className="btn btn-danger"
-                  onClick={() => setShowImposeModal(true)}
+                  className="btn btn-primary"
+                  disabled={pending}
+                  onClick={() =>
+                    openAction({
+                      title: 'Impose account restriction',
+                      fields: [
+                        { key: 'userId', label: 'Target user ID', pattern: '[0-9a-fA-F-]{36}' },
+                        {
+                          key: 'restrictionType',
+                          label: 'Restriction type',
+                          options: [
+                            'TEMPORARY_SUSPENSION',
+                            'PERMANENT_BAN',
+                            'DUPLICATE_FREEZE',
+                            'FRAUD_INVESTIGATION_HOLD',
+                          ],
+                        },
+                        { key: 'reasonCode', label: 'Reason code' },
+                      ],
+                      submit: (values) => backend('/admin/restrictions', 'POST', values),
+                    })
+                  }
                 >
-                  <span>⚠️</span> Impose Account Restriction
+                  Impose restriction
                 </button>
               </div>
-
-              <div className="glass-panel table-container">
-                <table className="custom-table" id="table-restrictions">
+              <label>
+                Restriction status
+                <select
+                  className="form-input compact-filter"
+                  value={status}
+                  disabled={pending}
+                  onChange={(event) => setStatus(event.target.value)}
+                >
+                  <option value="">All statuses</option>
+                  <option value="ACTIVE">Active</option>
+                  <option value="RESOLVED">Resolved</option>
+                </select>
+              </label>
+              <div className="table-container glass-panel">
+                <table className="custom-table">
                   <thead>
                     <tr>
-                      <th>Target Citizen</th>
-                      <th>Restriction Type</th>
-                      <th>Reason Code</th>
-                      <th>Authorized By</th>
+                      <th>Target account</th>
+                      <th>Restriction</th>
+                      <th>Reason</th>
                       <th>Status</th>
                       <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {restrictions.map((r) => (
-                      <tr key={r.id} id={`row-res-${r.id}`}>
+                    {view.restrictions.map((restriction) => (
+                      <tr key={restriction.id}>
                         <td>
-                          <div style={{ fontWeight: 700 }}>{r.userPhone ?? r.userId}</div>
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-dim)' }}>ID: {r.id}</div>
+                          {restriction.user?.phoneE164 ?? restriction.userId}
+                          <div className="help-text">{restriction.userId}</div>
+                        </td>
+                        <td>{label(restriction.restrictionType)}</td>
+                        <td>{restriction.reasonCode}</td>
+                        <td>
+                          <Badge value={restriction.status} />
                         </td>
                         <td>
-                          <span style={{ color: '#F87171', fontWeight: 600 }}>{r.restrictionType}</span>
-                        </td>
-                        <td>
-                          <code style={{ fontFamily: 'var(--font-mono)' }}>{r.reasonCode}</code>
-                        </td>
-                        <td>{r.authorizedBy}</td>
-                        <td>
-                          <span className={`badge badge-${r.status.toLowerCase()}`}>{r.status}</span>
-                        </td>
-                        <td>
-                          {r.status === 'ACTIVE' && (
+                          {restriction.status === 'ACTIVE' && (
                             <button
-                              id={`btn-resolve-${r.id}`}
                               className="btn btn-secondary"
-                              style={{ padding: '6px 12px', fontSize: '0.78rem' }}
-                              onClick={() => handleResolveRestriction(r.id)}
+                              disabled={pending}
+                              onClick={() =>
+                                openAction({
+                                  title: 'Resolve account restriction',
+                                  fields: [{ key: 'resolutionNotes', label: 'Resolution notes' }],
+                                  submit: (values) =>
+                                    backend(
+                                      `/admin/restrictions/${restriction.id}/resolve`,
+                                      'POST',
+                                      values,
+                                    ),
+                                })
+                              }
                             >
-                              Resolve Hold
+                              Resolve restriction
                             </button>
                           )}
                         </td>
@@ -873,291 +1179,111 @@ export default function AdminDashboard(): React.JSX.Element {
                   </tbody>
                 </table>
               </div>
-            </div>
+              {!loading && !error && view.restrictions.length === 0 && (
+                <p className="empty-state">No restrictions match this filter.</p>
+              )}
+            </>
           )}
-
-          {/* ────────────────── AUDIT EXPLORER TAB ────────────────── */}
-          {activeTab === 'audit' && (
-            <div>
-              <div style={{ marginBottom: '28px' }}>
-                <h1 style={{ fontSize: '1.8rem', fontWeight: 800, letterSpacing: '-0.02em' }}>
-                  Global Audit Trail Explorer
-                </h1>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.92rem', marginTop: '4px' }}>
-                  Immutable, append-only record of administrative, authentication, and civic operations.
-                </p>
-              </div>
-
-              <div className="glass-panel table-container">
-                <table className="custom-table" id="table-audit-logs">
+          {tab === 'audit' && (
+            <>
+              <p className="section-description">
+                Server-recorded events{' '}
+                {tenant === 'GLOBAL'
+                  ? 'across all organizations'
+                  : `for ${selectedOrg?.name ?? 'the selected organization'}`}
+                .
+              </p>
+              <label>
+                Event type
+                <input
+                  className="form-input compact-filter"
+                  value={eventType}
+                  placeholder="e.g. MEMBERSHIP_APPROVED"
+                  disabled={pending}
+                  onChange={(event) => {
+                    setEventType(event.target.value.trim().toUpperCase());
+                    setOffset(0);
+                  }}
+                />
+              </label>
+              <div className="table-container glass-panel">
+                <table className="custom-table">
                   <thead>
                     <tr>
-                      <th>Event Type</th>
-                      <th>Actor ID</th>
+                      <th>Event</th>
+                      <th>Actor</th>
                       <th>Organization</th>
-                      <th>IP Address</th>
-                      <th>Timestamp</th>
+                      <th>Time</th>
                       <th>Details</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {auditLogs.map((log) => (
-                      <tr key={log.id} id={`row-audit-${log.id}`}>
+                    {view.events.map((event) => (
+                      <tr key={event.id}>
+                        <td>{event.eventType}</td>
                         <td>
-                          <span
-                            style={{
-                              fontFamily: 'var(--font-mono)',
-                              fontSize: '0.8rem',
-                              color: 'var(--accent)',
-                              fontWeight: 700,
-                            }}
-                          >
-                            {log.eventType}
-                          </span>
+                          <code>{event.actorId ?? 'System'}</code>
                         </td>
                         <td>
-                          <div style={{ fontSize: '0.82rem', fontFamily: 'var(--font-mono)' }}>
-                            {log.actorId ?? 'SYSTEM'}
-                          </div>
+                          {organizations.find(
+                            (organization) => organization.id === event.organizationId,
+                          )?.name ??
+                            event.organizationId ??
+                            'Platform-wide'}
                         </td>
-                        <td>{log.organizationId ?? 'CENTRAL'}</td>
+                        <td>{new Date(event.createdAt).toLocaleString()}</td>
                         <td>
-                          <code style={{ fontSize: '0.78rem' }}>{log.ipAddress ?? '—'}</code>
-                        </td>
-                        <td style={{ fontSize: '0.82rem', color: 'var(--text-dim)' }}>
-                          {new Date(log.createdAt).toLocaleString()}
-                        </td>
-                        <td>
-                          <pre
-                            style={{
-                              fontFamily: 'var(--font-mono)',
-                              fontSize: '0.75rem',
-                              background: 'rgba(0, 0, 0, 0.3)',
-                              padding: '4px 8px',
-                              borderRadius: '4px',
-                              color: '#93C5FD',
-                            }}
-                          >
-                            {JSON.stringify(log.payload)}
-                          </pre>
+                          <details>
+                            <summary>View details</summary>
+                            <pre>{JSON.stringify(event.payload, null, 2)}</pre>
+                          </details>
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+              {!loading && !error && view.total === 0 && (
+                <p className="empty-state">No events match this scope and filter.</p>
+              )}
+            </>
+          )}
+          {(tab === 'audit' || (tab === 'memberships' && tenant !== 'GLOBAL')) && (
+            <div className="pagination">
+              <span>
+                {view.total} records · Page {Math.floor(offset / 20) + 1}
+              </span>
+              <button
+                className="btn btn-secondary"
+                disabled={loading || pending || offset === 0}
+                onClick={() => setOffset((value) => Math.max(0, value - 20))}
+              >
+                Previous
+              </button>
+              <button
+                className="btn btn-secondary"
+                disabled={loading || pending || offset + 20 >= view.total}
+                onClick={() => setOffset((value) => value + 20)}
+              >
+                Next
+              </button>
             </div>
           )}
         </main>
       </div>
-
-      {/* ─── NEW ORGANIZATION MODAL ─── */}
-      {showNewOrgModal && (
-        <div className="modal-backdrop">
-          <div className="modal-content">
-            <h2 style={{ fontSize: '1.3rem', fontWeight: 800, marginBottom: '6px' }}>
-              Onboard Civic Organization
-            </h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '20px' }}>
-              Create an administrative tenant with custom white-label colors and mobile branding.
-            </p>
-
-            <form onSubmit={handleCreateOrg}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
-                    Slug Code (Uppercase)
-                  </label>
-                  <input
-                    id="input-org-code"
-                    type="text"
-                    required
-                    placeholder="e.g. THRISSUR"
-                    className="form-input"
-                    value={newOrgForm.code}
-                    onChange={(e) => setNewOrgForm({ ...newOrgForm, code: e.target.value.toUpperCase() })}
-                  />
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
-                    Administrative Type
-                  </label>
-                  <select
-                    id="select-org-type"
-                    className="form-input"
-                    value={newOrgForm.type}
-                    onChange={(e) => setNewOrgForm({ ...newOrgForm, type: e.target.value })}
-                  >
-                    <option value="MUNICIPALITY">Municipality</option>
-                    <option value="MUNICIPAL_CORPORATION">Municipal Corporation</option>
-                    <option value="GRAMA_PANCHAYAT">Grama Panchayat</option>
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
-                  Full Organization Display Name
-                </label>
-                <input
-                  id="input-org-name"
-                  type="text"
-                  required
-                  placeholder="e.g. Thrissur Municipal Corporation Time Bank"
-                  className="form-input"
-                  value={newOrgForm.name}
-                  onChange={(e) => setNewOrgForm({ ...newOrgForm, name: e.target.value })}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '22px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
-                    Primary Brand Color
-                  </label>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <input
-                      id="input-org-primary"
-                      type="color"
-                      value={newOrgForm.primaryColor}
-                      onChange={(e) => setNewOrgForm({ ...newOrgForm, primaryColor: e.target.value })}
-                      style={{ width: '40px', height: '40px', border: 'none', background: 'transparent', cursor: 'pointer' }}
-                    />
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={newOrgForm.primaryColor}
-                      onChange={(e) => setNewOrgForm({ ...newOrgForm, primaryColor: e.target.value })}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
-                    Secondary Accent Color
-                  </label>
-                  <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                    <input
-                      id="input-org-secondary"
-                      type="color"
-                      value={newOrgForm.secondaryColor}
-                      onChange={(e) => setNewOrgForm({ ...newOrgForm, secondaryColor: e.target.value })}
-                      style={{ width: '40px', height: '40px', border: 'none', background: 'transparent', cursor: 'pointer' }}
-                    />
-                    <input
-                      type="text"
-                      className="form-input"
-                      value={newOrgForm.secondaryColor}
-                      onChange={(e) => setNewOrgForm({ ...newOrgForm, secondaryColor: e.target.value })}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setShowNewOrgModal(false)}
-                >
-                  Cancel
-                </button>
-                <button id="btn-submit-org" type="submit" className="btn btn-primary">
-                  Provision Organization
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* ─── IMPOSE RESTRICTION MODAL ─── */}
-      {showImposeModal && (
-        <div className="modal-backdrop">
-          <div className="modal-content">
-            <h2 style={{ fontSize: '1.3rem', fontWeight: 800, marginBottom: '6px' }}>
-              Impose Platform Restriction
-            </h2>
-            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '20px' }}>
-              Enforce a platform-wide suspension or permanent ban across all organization apps.
-            </p>
-
-            <form onSubmit={handleImposeRestriction}>
-              <div style={{ marginBottom: '14px' }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
-                  Target Citizen User ID
-                </label>
-                <input
-                  id="input-res-userid"
-                  type="text"
-                  required
-                  placeholder="e.g. 550e8400-e29b-41d4-a716-446655440000"
-                  className="form-input"
-                  value={imposeForm.userId}
-                  onChange={(e) => setImposeForm({ ...imposeForm, userId: e.target.value })}
-                />
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', marginBottom: '14px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
-                    Restriction Type
-                  </label>
-                  <select
-                    id="select-res-type"
-                    className="form-input"
-                    value={imposeForm.restrictionType}
-                    onChange={(e) => setImposeForm({ ...imposeForm, restrictionType: e.target.value })}
-                  >
-                    <option value="TEMPORARY_SUSPENSION">Temporary Suspension</option>
-                    <option value="PERMANENT_BAN">Permanent Ban</option>
-                    <option value="FRAUD_INVESTIGATION_HOLD">Fraud Hold</option>
-                  </select>
-                </div>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
-                    Reason Code
-                  </label>
-                  <input
-                    id="input-res-code"
-                    type="text"
-                    required
-                    placeholder="e.g. FRAUD_SUSPICION"
-                    className="form-input"
-                    value={imposeForm.reasonCode}
-                    onChange={(e) => setImposeForm({ ...imposeForm, reasonCode: e.target.value })}
-                  />
-                </div>
-              </div>
-
-              <div style={{ marginBottom: '22px' }}>
-                <label style={{ display: 'block', fontSize: '0.8rem', fontWeight: 600, marginBottom: '6px' }}>
-                  Administrative Justification Notes
-                </label>
-                <textarea
-                  id="input-res-notes"
-                  rows={3}
-                  className="form-input"
-                  placeholder="Detailed findings and evidence reference..."
-                  value={imposeForm.notes}
-                  onChange={(e) => setImposeForm({ ...imposeForm, notes: e.target.value })}
-                />
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  onClick={() => setShowImposeModal(false)}
-                >
-                  Cancel
-                </button>
-                <button id="btn-submit-restriction" type="submit" className="btn btn-danger">
-                  Authorize Restriction
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+      {action && (
+        <ActionDialog
+          action={action}
+          onClose={() => setAction(null)}
+          onExpired={expired}
+          setPending={setPending}
+          onSaved={(result) => {
+            setAction(null);
+            setDetail(null);
+            setNotice(action.successMessage?.(result) ?? 'Saved on the server.');
+            setRevision((value) => value + 1);
+          }}
+        />
       )}
     </div>
   );
