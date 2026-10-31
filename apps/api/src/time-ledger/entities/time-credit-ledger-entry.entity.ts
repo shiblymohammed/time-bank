@@ -10,9 +10,13 @@ import { UniversalTimeWallet } from '../../identity/entities/universal-time-wall
 import { Organization } from '../../organizations/entities/organization.entity';
 import { ServiceRequest } from '../../requests/entities/service-request.entity';
 import { VolunteerAssignment } from '../../matching/entities/volunteer-assignment.entity';
+import { CommunityCreditPool } from '../../donations/entities/community-credit-pool.entity';
+import { CreditDonation } from '../../donations/entities/credit-donation.entity';
 
 export enum TimeCreditTxType {
   SERVICE_EARNED = 'SERVICE_EARNED',
+  DONATION_SENT = 'DONATION_SENT',
+  DONATION_RECEIVED = 'DONATION_RECEIVED',
 }
 
 const credits = {
@@ -29,8 +33,9 @@ export class TimeCreditLedgerEntry {
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 
-  @Column({ name: 'wallet_id', type: 'uuid' })
-  walletId!: string;
+  /** Exactly one of wallet or pool is set. */
+  @Column({ name: 'wallet_id', type: 'uuid', nullable: true })
+  walletId?: string | null;
 
   @ManyToOne(() => UniversalTimeWallet, { onDelete: 'RESTRICT' })
   @JoinColumn({ name: 'wallet_id' })
@@ -69,6 +74,20 @@ export class TimeCreditLedgerEntry {
   @ManyToOne(() => VolunteerAssignment, { onDelete: 'RESTRICT', nullable: true })
   @JoinColumn({ name: 'volunteer_assignment_id' })
   volunteerAssignment?: VolunteerAssignment | null;
+
+  @Column({ name: 'pool_id', type: 'uuid', nullable: true })
+  poolId?: string | null;
+
+  @ManyToOne(() => CommunityCreditPool, { onDelete: 'RESTRICT', nullable: true })
+  @JoinColumn({ name: 'pool_id' })
+  pool?: CommunityCreditPool | null;
+
+  @Column({ name: 'donation_id', type: 'uuid', nullable: true })
+  donationId?: string | null;
+
+  @ManyToOne(() => CreditDonation, { onDelete: 'RESTRICT', nullable: true })
+  @JoinColumn({ name: 'donation_id' })
+  donation?: CreditDonation | null;
 
   @Column({ type: 'int', nullable: true })
   minutes?: number | null;

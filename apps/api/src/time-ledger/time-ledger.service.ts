@@ -146,6 +146,11 @@ export class TimeLedgerService {
         'serviceRequest',
         'serviceRequest.serviceCatalog',
         'serviceRequest.serviceCatalog.globalService',
+        'donation',
+        'donation.recipientPool',
+        'donation.recipientPool.organization',
+        'donation.recipientMembership',
+        'donation.recipientMembership.organization',
       ],
       order: { createdAt: 'DESC' },
       skip: (page - 1) * limit,
@@ -177,7 +182,37 @@ export class TimeLedgerService {
                 null,
             }
           : null,
+        donation: entry.donation ? this.donationView(entry) : null,
       })),
+    };
+  }
+
+  /**
+   * The donor sees who received the gift. A recipient sees only the note and
+   * the organization it came through, never the donor's identity.
+   */
+  private donationView(entry: TimeCreditLedgerEntry) {
+    const donation = entry.donation!;
+    if (entry.txType !== TimeCreditTxType.DONATION_SENT) {
+      return { id: donation.id, note: donation.note ?? null, recipient: null };
+    }
+    const pool = donation.recipientPool;
+    const member = donation.recipientMembership;
+    return {
+      id: donation.id,
+      note: donation.note ?? null,
+      recipient: pool
+        ? {
+            type: 'POOL',
+            id: pool.id,
+            name: pool.name,
+            organizationName: pool.organization?.name ?? null,
+          }
+        : {
+            type: 'MEMBER',
+            membershipNumber: member?.membershipNumber ?? null,
+            organizationName: member?.organization?.name ?? null,
+          },
     };
   }
 }

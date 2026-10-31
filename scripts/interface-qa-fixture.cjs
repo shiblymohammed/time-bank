@@ -70,6 +70,16 @@ const db = new DataSource({
     "INSERT INTO membership_documents(membership_id,storage_key,document_type) VALUES($1,'qa/fictional-reference.pdf','ADDRESS_PROOF')",
     [people.applicant.membership],
   );
+  // Credits can be given only to verified people (D#19); the beneficiary stays unverified.
+  for (const name of ['caregiver', 'volunteer'])
+    await db.query(
+      "INSERT INTO verified_identities(user_id,verification_status) VALUES($1,'VERIFIED')",
+      [people[name].user],
+    );
+  const pool = await id(
+    "INSERT INTO community_credit_pools(organization_id,name,description,created_by_user_id) VALUES($1,'QA Elder Care Pool','Fictional pool for interface QA',$2) RETURNING id",
+    [orgB, people.admin.user],
+  );
   const category = await id(
     "INSERT INTO service_categories(code,name_en,name_ml) VALUES('QA_HELP','QA Household Help','QA Help') RETURNING id",
   );
@@ -89,7 +99,7 @@ const db = new DataSource({
     "INSERT INTO global_service_definitions(category_id,code,name_en,name_ml,is_active) VALUES($1,'QA_RETIRED','QA Retired Help','QA Retired Help',false) RETURNING id",
     [category],
   );
-  const data = { org, orgB, catalogue, people, availableGlobal, inactiveGlobal };
+  const data = { org, orgB, catalogue, people, availableGlobal, inactiveGlobal, pool };
   require('node:fs').writeFileSync(
     path.resolve(__dirname, '../node_modules/.cache/interface-qa/fixture.json'),
     JSON.stringify(data, null, 2),

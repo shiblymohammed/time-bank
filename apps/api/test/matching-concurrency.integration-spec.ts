@@ -17,6 +17,10 @@ import { DeterministicCandidateRankingStrategy } from '../src/matching/ranking/d
 import { RescheduleConfirmation1729118400005 } from '../src/database/migrations/1729118400005-RescheduleConfirmation';
 import { ServiceCompletion1729118400006 } from '../src/database/migrations/1729118400006-ServiceCompletion';
 import { TimeCreditLedger1729118400007 } from '../src/database/migrations/1729118400007-TimeCreditLedger';
+import { CreditDonations1729118400008 } from '../src/database/migrations/1729118400008-CreditDonations';
+import { DonationsService } from '../src/donations/donations.service';
+import { CreditDonation } from '../src/donations/entities/credit-donation.entity';
+import { CommunityCreditPool } from '../src/donations/entities/community-credit-pool.entity';
 import { TimeLedgerService } from '../src/time-ledger/time-ledger.service';
 import { TimeCreditLedgerEntry } from '../src/time-ledger/entities/time-credit-ledger-entry.entity';
 import { UniversalTimeWallet } from '../src/identity/entities/universal-time-wallet.entity';
@@ -58,6 +62,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       RescheduleConfirmation1729118400005,
       ServiceCompletion1729118400006,
       TimeCreditLedger1729118400007,
+      CreditDonations1729118400008,
     ],
     synchronize: false,
     extra: {
@@ -71,6 +76,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
   let audit: AuditService;
   let authorization: AuthorizationService;
   let ledger: TimeLedgerService;
+  let donations: DonationsService;
   let orgA: string, orgB: string, volunteer: string, otherVolunteer: string, coordinator: string;
   let memberA: string,
     memberB: string,
@@ -97,6 +103,11 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
     ledger = new TimeLedgerService(
       db.getRepository(UniversalTimeWallet),
       db.getRepository(TimeCreditLedgerEntry),
+      audit,
+    );
+    donations = new DonationsService(
+      db.getRepository(CreditDonation),
+      db.getRepository(CommunityCreditPool),
       audit,
     );
     service = new MatchingService(
@@ -309,7 +320,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
     lockId = volunteer,
     ordered = false,
   ) {
-    if (!['users', 'service_requests'].includes(lockTable))
+    if (!['users', 'service_requests', 'universal_time_wallets'].includes(lockTable))
       throw new Error('Unexpected lock table');
     const blocker = db.createQueryRunner();
     await blocker.connect();
@@ -1205,6 +1216,217 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         "SELECT event_type FROM audit_events WHERE event_type LIKE 'TIME_CREDITS_%'",
       );
       expect(events).toEqual([{ event_type: 'TIME_CREDITS_HELD' }]);
+    });
+  });
+
+  describe('time credit donations', () => {
+    let key = 0;
+    const gift = (amount: number, extra: Record<string, unknown> = {}) =>
+      ({ amount, idempotencyKey: `gift-key-${++key}`, ...extra }) as any;
+    const toMember = (amount: number, extra: Record<string, unknown> = {}) =>
+      gift(amount, {
+        recipientOrganizationId: orgA,
+        recipientMembershipNumber: 'KTB-OTHER',
+        ...extra,
+      });
+    const balance = async (user: string) =>
+      (
+        await db.query(
+          'SELECT balance_credits::float AS balance FROM universal_time_wallets WHERE user_id=$1',
+          [user],
+        )
+      )[0]?.balance;
+    const walletOf = async (user: string) =>
+      (await db.query('SELECT id FROM universal_time_wallets WHERE user_id=$1', [user]))[0].id;
+    const fund = (user: string, credits: number) =>
+      db.query(
+        `INSERT INTO universal_time_wallets(user_id,balance_credits) VALUES($1,$2)
+         ON CONFLICT (user_id) DO UPDATE SET balance_credits=EXCLUDED.balance_credits`,
+        [user, credits],
+      );
+    const verify = (user: string) =>
+      db.query(
+        "INSERT INTO verified_identities(user_id,verification_status) VALUES($1,'VERIFIED')",
+        [user],
+      );
+    let pool: string;
+
+    beforeEach(async () => {
+      await db.query(
+        "UPDATE organization_memberships SET membership_number='KTB-OTHER' WHERE id=$1",
+        [otherMember],
+      );
+      await db.query(
+        "UPDATE organization_memberships SET membership_number='KTB-VOL' WHERE id=$1",
+        [memberA],
+      );
+      await verify(otherVolunteer);
+      await verify(volunteer);
+      await fund(volunteer, 3);
+      pool = await id(
+        "INSERT INTO community_credit_pools(organization_id,name) VALUES($1,'Elder care pool') RETURNING id",
+        [orgB],
+      );
+    });
+
+    it('moves credits to a verified member in two balanced ledger rows, once per key', async () => {
+      const dto = toMember(1.25, { note: 'For the ward' });
+      const sent = await donations.donate(orgA, volunteer, dto);
+      expect(sent).toMatchObject({
+        amount: 1.25,
+        balanceCredits: 1.75,
+        replayed: false,
+        recipient: { type: 'MEMBER', membershipNumber: 'KTB-OTHER' },
+      });
+      expect(await balance(volunteer)).toBe(1.75);
+      expect(await balance(otherVolunteer)).toBe(1.25);
+      const legs = await db.query(
+        'SELECT tx_type, amount::float AS amount, originating_org_id FROM time_credit_ledger WHERE donation_id=$1 ORDER BY amount',
+        [sent.id],
+      );
+      expect(legs).toEqual([
+        { tx_type: 'DONATION_SENT', amount: -1.25, originating_org_id: orgA },
+        { tx_type: 'DONATION_RECEIVED', amount: 1.25, originating_org_id: orgA },
+      ]);
+
+      // The same key is a replay, not a second gift; a different gift with it is refused.
+      const again = await donations.donate(orgA, volunteer, dto);
+      expect(again).toMatchObject({ id: sent.id, replayed: true });
+      expect(await balance(volunteer)).toBe(1.75);
+      await expect(donations.donate(orgA, volunteer, { ...dto, amount: 1 })).rejects.toThrow(
+        'already used for a different gift',
+      );
+
+      const mine = await ledger.listMyTransactions(volunteer);
+      expect(mine.data[0]).toMatchObject({
+        amount: -1.25,
+        txType: 'DONATION_SENT',
+        donation: {
+          note: 'For the ward',
+          recipient: { type: 'MEMBER', membershipNumber: 'KTB-OTHER' },
+        },
+      });
+      const theirs = await ledger.listMyTransactions(otherVolunteer);
+      expect(theirs.data[0]).toMatchObject({
+        amount: 1.25,
+        txType: 'DONATION_RECEIVED',
+        organization: { id: orgA },
+        donation: { note: 'For the ward', recipient: null },
+      });
+      expect(JSON.stringify(theirs)).not.toContain('KTB-VOL');
+      const events = await db.query(
+        "SELECT actor_id FROM audit_events WHERE event_type='CREDITS_DONATED'",
+      );
+      expect(events).toEqual([{ actor_id: volunteer }]);
+    });
+
+    it('gives across organizations into an approved community pool', async () => {
+      const sent = await donations.donate(orgA, volunteer, gift(2, { poolId: pool }));
+      expect(sent.recipient).toMatchObject({ type: 'POOL', id: pool, name: 'Elder care pool' });
+      const [row] = await db.query(
+        'SELECT balance_credits::float AS balance FROM community_credit_pools WHERE id=$1',
+        [pool],
+      );
+      expect(row.balance).toBe(2);
+      const [leg] = await db.query(
+        "SELECT pool_id, wallet_id, balance_after::float AS after FROM time_credit_ledger WHERE donation_id=$1 AND tx_type='DONATION_RECEIVED'",
+        [sent.id],
+      );
+      expect(leg).toEqual({ pool_id: pool, wallet_id: null, after: 2 });
+      const listed = await donations.listPools();
+      expect(listed.data).toEqual([
+        expect.objectContaining({
+          id: pool,
+          balanceCredits: 2,
+          organization: { id: orgB, name: expect.any(String) },
+        }),
+      ]);
+
+      await db.query("UPDATE community_credit_pools SET status='CLOSED' WHERE id=$1", [pool]);
+      await expect(donations.donate(orgA, volunteer, gift(1, { poolId: pool }))).rejects.toThrow(
+        'not accepting credits',
+      );
+      expect((await donations.listPools()).data).toEqual([]);
+    });
+
+    it('refuses unverified, unknown and self recipients, overspending and frozen wallets', async () => {
+      await db.query('DELETE FROM verified_identities WHERE user_id=$1', [otherVolunteer]);
+      await expect(donations.donate(orgA, volunteer, toMember(1))).rejects.toThrow(
+        'No verified member',
+      );
+      await verify(otherVolunteer);
+      await expect(
+        donations.donate(orgA, volunteer, toMember(1, { recipientMembershipNumber: 'KTB-NONE' })),
+      ).rejects.toThrow('No verified member');
+      await expect(
+        donations.donate(orgA, volunteer, toMember(1, { recipientMembershipNumber: 'KTB-VOL' })),
+      ).rejects.toThrow('cannot give credits to yourself');
+      await expect(
+        donations.donate(orgA, volunteer, toMember(1, { poolId: pool })),
+      ).rejects.toThrow('Choose one recipient');
+      await expect(donations.donate(orgA, volunteer, toMember(3.01))).rejects.toThrow(
+        'You have 3 credits',
+      );
+      await expect(donations.donate(orgA, coordinator, toMember(1))).rejects.toThrow(
+        'You have 0 credits',
+      );
+
+      await fund(otherVolunteer, 0);
+      await db.query("UPDATE universal_time_wallets SET status='FROZEN' WHERE user_id=$1", [
+        otherVolunteer,
+      ]);
+      await expect(donations.donate(orgA, volunteer, toMember(1))).rejects.toThrow(
+        'cannot receive credits right now',
+      );
+      await db.query("UPDATE universal_time_wallets SET status='FROZEN' WHERE user_id=$1", [
+        volunteer,
+      ]);
+      await expect(donations.donate(orgA, volunteer, gift(1, { poolId: pool }))).rejects.toThrow(
+        'wallet is frozen',
+      );
+      expect(await balance(volunteer)).toBe(3);
+      expect(await db.query('SELECT id FROM credit_donations')).toEqual([]);
+    });
+
+    it('lets only one of two simultaneous gifts spend the same credits', async () => {
+      await fund(volunteer, 1);
+      const results = await race(
+        [
+          () => donations.donate(orgA, volunteer, toMember(0.75)),
+          () => donations.donate(orgA, volunteer, gift(0.75, { poolId: pool })),
+        ],
+        'universal_time_wallets',
+        await walletOf(volunteer),
+      );
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      const failure = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+      expect(failure.reason.message).toContain('You have 0.25 credits');
+      expect(await balance(volunteer)).toBe(0.25);
+      const [{ total }] = await db.query(
+        'SELECT sum(amount)::float AS total FROM time_credit_ledger WHERE donation_id IS NOT NULL',
+      );
+      expect(total).toBe(0);
+    });
+
+    it('does not deadlock when two members give to each other at once', async () => {
+      await fund(otherVolunteer, 2);
+      const first = [await walletOf(volunteer), await walletOf(otherVolunteer)].sort()[0];
+      const results = await race(
+        [
+          () => donations.donate(orgA, volunteer, toMember(1)),
+          () =>
+            donations.donate(
+              orgA,
+              otherVolunteer,
+              gift(0.5, { recipientOrganizationId: orgA, recipientMembershipNumber: 'KTB-VOL' }),
+            ),
+        ],
+        'universal_time_wallets',
+        first,
+      );
+      expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
+      expect(await balance(volunteer)).toBe(2.5);
+      expect(await balance(otherVolunteer)).toBe(2.5);
     });
   });
 });

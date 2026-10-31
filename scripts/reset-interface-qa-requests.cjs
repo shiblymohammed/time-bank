@@ -11,10 +11,11 @@ const db = new Client({
 });
 (async () => {
   await db.connect();
-  await db.query('TRUNCATE service_requests CASCADE');
-  // Truncating requests also removes their credit ledger rows; keep wallets consistent.
+  // CASCADE empties the whole credit ledger, so gifts and balances are reset with it.
+  await db.query('TRUNCATE service_requests, credit_donations CASCADE');
   await db.query('UPDATE universal_time_wallets SET balance_credits=0, frozen_credits=0');
-  console.log('Cleared only disposable QA requests, their matching records and earned credits.');
+  await db.query('UPDATE community_credit_pools SET balance_credits=0');
+  console.log('Cleared only disposable QA requests, matching records, credits and gifts.');
 })()
   .catch((e) => {
     console.error(e);
