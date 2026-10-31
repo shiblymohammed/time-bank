@@ -107,6 +107,32 @@ describe('MembershipsService', () => {
     expect(service).toBeDefined();
   });
 
+  describe('getMembershipById', () => {
+    it('loads documents and review history within the requested organization', async () => {
+      const membership = {
+        id: 'member-1',
+        organizationId: 'org-1',
+        documents: [{ id: 'doc-1', reviewStatus: 'PENDING' }],
+        approvals: [],
+        roleGrants: [],
+      };
+      mockMembershipRepo.findOne.mockResolvedValue(membership);
+
+      await expect(service.getMembershipById('org-1', 'member-1')).resolves.toEqual(membership);
+      expect(mockMembershipRepo.findOne).toHaveBeenCalledWith({
+        where: { id: 'member-1', organizationId: 'org-1' },
+        relations: ['user', 'roleGrants', 'approvals', 'documents'],
+      });
+    });
+
+    it('rejects a membership absent from the requested organization', async () => {
+      mockMembershipRepo.findOne.mockResolvedValue(null);
+      await expect(service.getMembershipById('other-org', 'member-1')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
   describe('apply', () => {
     it('should throw NotFoundException if organization does not exist', async () => {
       mockOrgRepo.findOne.mockResolvedValueOnce(null);

@@ -73,6 +73,7 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: development
+      API_INTERNAL_URL: http://api:3001
       NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-3001}
       NEXT_PUBLIC_APP_ENV: development
     ports:

@@ -116,10 +116,42 @@ The launcher pins the gateway to the local test API even if deployment environme
 are in ignored `node_modules/.cache/interface-qa/fixture.json`. For normal web checks, run the installed Next.js build
 and the package's `test` script (`node --test test/*.test.cjs`) inside `apps/web`.
 
+## Merged service operations — 31 October 2026
+
+`main` gained a parallel dashboard integration (PR #1) that kept bearer tokens in browser JavaScript and forwarded any
+path through a Next.js rewrite. The merge keeps this branch's cookie session gateway and moves PR #1's extra screens
+onto it:
+
+- **Service operations** tab: central categories and global services (create, activate/deactivate, details), local
+  proposals and central review, beneficiary eligibility and caregiver authorization review, operational zones,
+  volunteer zone assignment, availability and skill verification, and the signed-in profile.
+- **Settings & app builds** on organization rows (super admin): edit name/district/status, register app builds, and
+  appoint organization roles.
+
+PR #1's request workspace and local catalogue form were dropped in favour of the existing, tested Requests & matching
+and Service catalogue sections. Central-only controls are hidden from local staff, and the API rejects them regardless.
+The `/backend` rewrite and the `API_URL` setting were removed; the gateway reads `API_INTERNAL_URL`. Each new route
+is allowlisted by method in the gateway.
+
+On the API side, this branch's authorization changes cover PR #1's. One existing bug was fixed while testing:
+`GET /organizations/:id/catalogue/proposals` was shadowed by the UUID-validated `:catalogId` route and always returned
+400.
+
+### Verification
+
+- API: 344 unit/security tests; type check and lint pass. 36 real-PostgreSQL booking/concurrency tests pass.
+- Dashboard: 20 tests, including per-method gateway allowlist checks; production build, lint and type check pass.
+- Browser run against a disposable `ktb_interface_qa_*` database, as the fictional super admin and coordinator. Every
+  ported action above saved and reloaded correctly, and read-only database queries confirmed it. The coordinator saw
+  only local controls; direct central writes returned 403 with readable messages.
+
+Open question: appointing a role from Settings & app builds approves the target membership if it is not approved, even
+from APPLIED, SUSPENDED or REJECTED, and assigns no membership number. This predates the merge.
+
 ## Remaining scope
 
 Coordinator requests and matching were connected and tested in the next implementation; see
 [Coordinator request dashboard](COORDINATOR_REQUESTS.md). Local catalogue settings and central skill rules followed;
-see [Service catalogue dashboard](SERVICE_CATALOGUE_DASHBOARD.md). Eligibility, caregiver authorization and
-operational zone management screens remain separate work. Historical member-assignment dates and native
-Android dependency availability remain as reported in the earlier interface QA. Nothing has been deployed or published.
+see [Service catalogue dashboard](SERVICE_CATALOGUE_DASHBOARD.md). Eligibility, caregiver authorization and zone
+screens arrived with the merge above. Historical member-assignment dates and native Android dependency availability
+remain as reported in the earlier interface QA. Nothing has been deployed or published.

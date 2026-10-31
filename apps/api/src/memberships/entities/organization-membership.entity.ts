@@ -13,6 +13,7 @@ import { MembershipStatus } from '@ktb/shared-types';
 import { User } from '../../identity/entities/user.entity';
 import { Organization } from '../../organizations/entities/organization.entity';
 import { MembershipRoleGrant } from './membership-role-grant.entity';
+import { MembershipDocument } from './membership-document.entity';
 import { MembershipApproval } from './membership-approval.entity';
 
 /**
@@ -66,6 +67,9 @@ export class OrganizationMembership {
 
   @OneToMany(() => MembershipApproval, (approval) => approval.membership)
   approvals!: MembershipApproval[];
+
+  @OneToMany(() => MembershipDocument, (document) => document.membership)
+  documents!: MembershipDocument[];
 
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;

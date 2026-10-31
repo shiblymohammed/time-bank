@@ -7,6 +7,8 @@ import type { NextConfig } from 'next';
  * D#93: Browser dashboards for coordinators, admins, Super Admin and merchants
  */
 const nextConfig: NextConfig = {
+  // API traffic goes through the allowlisted /api/backend gateway, not a blanket rewrite.
+
   // Strict mode helps surface concurrent rendering issues early
   reactStrictMode: true,
 

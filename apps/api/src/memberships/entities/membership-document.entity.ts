@@ -20,7 +20,7 @@ export class MembershipDocument {
   @Column({ name: 'membership_id', type: 'uuid' })
   membershipId!: string;
 
-  @ManyToOne(() => OrganizationMembership)
+  @ManyToOne(() => OrganizationMembership, (membership) => membership.documents)
   @JoinColumn({ name: 'membership_id' })
   membership!: OrganizationMembership;
 

@@ -3,6 +3,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import type { Action } from '@/lib/admin-types';
 import { CoordinatorRequests } from '@/components/coordinator-requests';
 import { ServiceCatalogue } from '@/components/service-catalogue';
+import { ServiceOperations } from '@/components/service-operations';
+import { ApiManagement } from '@/components/api-management';
 import { api, ApiError, backend } from '@/lib/api';
 
 type Tab =
@@ -11,6 +13,7 @@ type Tab =
   | 'memberships'
   | 'requests'
   | 'catalogue'
+  | 'operations'
   | 'restrictions'
   | 'audit';
 type Grant = { id: string; role: string; status: string };
@@ -339,7 +342,8 @@ export default function AdminDashboard(): React.JSX.Element {
   const [offset, setOffset] = useState(0),
     [status, setStatus] = useState(''),
     [eventType, setEventType] = useState(''),
-    [revision, setRevision] = useState(0);
+    [revision, setRevision] = useState(0),
+    [managed, setManaged] = useState<string | null>(null);
   const [loading, setLoading] = useState(false),
     [pending, setPending] = useState(false),
     [error, setError] = useState(''),
@@ -364,6 +368,7 @@ export default function AdminDashboard(): React.JSX.Element {
         { id: 'memberships', text: 'Memberships' },
         { id: 'requests', text: 'Requests & matching' },
         { id: 'catalogue', text: 'Service catalogue' },
+        { id: 'operations', text: 'Service operations' },
         { id: 'restrictions', text: 'Global restrictions' },
         { id: 'audit', text: 'Audit trail' },
       ]
@@ -372,6 +377,7 @@ export default function AdminDashboard(): React.JSX.Element {
         { id: 'memberships', text: 'Memberships' },
         { id: 'requests', text: 'Requests & matching' },
         { id: 'catalogue', text: 'Service catalogue' },
+        { id: 'operations', text: 'Service operations' },
       ];
   const selectedOrg = organizations.find((organization) => organization.id === tenant);
   function signedIn(next: Profile) {
@@ -389,7 +395,7 @@ export default function AdminDashboard(): React.JSX.Element {
     );
     if (!central)
       setTab((current) =>
-        ['organizations', 'memberships', 'requests', 'catalogue'].includes(current)
+        ['organizations', 'memberships', 'requests', 'catalogue', 'operations'].includes(current)
           ? current
           : 'requests',
       );
@@ -698,6 +704,27 @@ export default function AdminDashboard(): React.JSX.Element {
               onExpired={expired}
             />
           )}
+          {tab === 'operations' && (
+            <ServiceOperations
+              key={tenant}
+              organizationId={tenant === 'GLOBAL' ? null : tenant}
+              isGlobal={isGlobal}
+              onError={(cause) => {
+                if (cause instanceof ApiError && cause.status === 401) expired();
+              }}
+            />
+          )}
+          {tab === 'organizations' && managed && (
+            <ApiManagement
+              key={managed}
+              target={{ kind: 'organization', organizationId: managed, id: managed }}
+              onClose={() => setManaged(null)}
+              onChanged={() => setRevision((value) => value + 1)}
+              onError={(cause) => {
+                if (cause instanceof ApiError && cause.status === 401) expired();
+              }}
+            />
+          )}
           {tab === 'organizations' && (
             <>
               <div className="section-heading">
@@ -792,6 +819,15 @@ export default function AdminDashboard(): React.JSX.Element {
                           </td>
                           <td>
                             <div className="action-row">
+                              {isGlobal && (
+                                <button
+                                  className="btn btn-secondary"
+                                  disabled={pending}
+                                  onClick={() => setManaged(organization.id)}
+                                >
+                                  Settings & app builds
+                                </button>
+                              )}
                               {isGlobal && (
                                 <button
                                   className="btn btn-secondary"

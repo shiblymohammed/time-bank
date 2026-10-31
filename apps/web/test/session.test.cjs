@@ -190,27 +190,44 @@ test('the gateway is not an arbitrary proxy', async () => {
   );
 });
 
-test('catalogue gateway permits explicit configuration and skill routes while excluding other writes', async () => {
+test('service operation routes are allowed per method while other writes stay excluded', async () => {
   const signed = await login();
+  const org = ['organizations', 'abc-123'];
   for (const [method, path] of [
     ['GET', ['catalogue', 'global']],
+    ['POST', ['catalogue', 'global']],
     ['PATCH', ['catalogue', 'global', 'abc-123']],
-    ['POST', ['organizations', 'abc-123', 'catalogue', 'configure']],
+    ['GET', ['catalogue', 'categories']],
+    ['PATCH', ['catalogue', 'categories', 'abc-123']],
+    ['PATCH', ['catalogue', 'proposals', 'abc-123', 'review']],
+    ['POST', [...org, 'catalogue', 'configure']],
+    ['POST', [...org, 'catalogue', 'proposals']],
+    ['GET', [...org, 'beneficiaries', 'def-456', 'eligibility']],
+    ['PATCH', [...org, 'caregivers', 'def-456', 'review']],
+    ['PUT', [...org, 'zones', 'def-456']],
+    ['DELETE', [...org, 'zones', 'def-456', 'volunteers', 'fed-654']],
+    ['PUT', [...org, 'volunteers', 'def-456', 'availability']],
+    ['POST', [...org, 'volunteers', 'skills', 'verify']],
   ]) {
     const result = await proxy[method](
       request(method, method === 'GET' ? undefined : {}, jar(signed)),
       { params: Promise.resolve({ path }) },
     );
-    assert.equal(result.status, 200);
+    assert.equal(result.status, 200, `${method} ${path.join('/')}`);
   }
-  for (const path of [
-    ['catalogue', 'global'],
-    ['organizations', 'abc-123', 'catalogue', 'proposals'],
+  for (const [method, path] of [
+    ['DELETE', ['catalogue', 'global', 'abc-123']],
+    ['POST', ['catalogue', 'proposals']],
+    ['POST', [...org, 'caregivers', 'def-456', 'review']],
+    ['POST', [...org, 'volunteers', 'def-456', 'availability']],
+    ['GET', [...org, 'caregivers', 'mine']],
+    ['POST', [...org, 'assignments', 'def-456', 'accept']],
   ]) {
-    const result = await proxy.POST(request('POST', {}, jar(signed)), {
-      params: Promise.resolve({ path }),
-    });
-    assert.equal(result.status, 404);
+    const result = await proxy[method](
+      request(method, method === 'GET' ? undefined : {}, jar(signed)),
+      { params: Promise.resolve({ path }) },
+    );
+    assert.equal(result.status, 404, `${method} ${path.join('/')}`);
   }
 });
 
