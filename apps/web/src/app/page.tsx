@@ -26,7 +26,20 @@ type Membership = {
   user?: { phoneE164: string };
   roleGrants: Grant[];
   rejectionReason?: string | null;
+  requestedRole?: string | null;
+  applicationNotes?: string | null;
+  applicationDetails?: {
+    volunteer?: {
+      maxTravelRadiusKm: number;
+      availableAtShortNotice: boolean;
+      usualDays: string[];
+      usualTimes: string[];
+      skillCodes: string[];
+    };
+  };
 };
+const listed = (values: string[] = []) =>
+  values.length ? values.map((value) => label(value)).join(', ') : 'Not given';
 type Profile = {
   id: string;
   phoneE164: string;
@@ -1006,6 +1019,39 @@ export default function AdminDashboard(): React.JSX.Element {
                   {detail.membership.rejectionReason && (
                     <p>Rejection reason: {detail.membership.rejectionReason}</p>
                   )}
+                  <h3>Application</h3>
+                  <p>
+                    Asked to join as:{' '}
+                    {detail.membership.requestedRole
+                      ? label(detail.membership.requestedRole)
+                      : 'Not stated'}
+                  </p>
+                  {detail.membership.applicationNotes && (
+                    <p>Applicant note: {detail.membership.applicationNotes}</p>
+                  )}
+                  {detail.membership.applicationDetails?.volunteer && (
+                    <ul className="help-text">
+                      <li>
+                        Travels up to{' '}
+                        {detail.membership.applicationDetails.volunteer.maxTravelRadiusKm} km
+                        {detail.membership.applicationDetails.volunteer.availableAtShortNotice
+                          ? ', available at short notice'
+                          : ''}
+                      </li>
+                      <li>
+                        Usual days:{' '}
+                        {listed(detail.membership.applicationDetails.volunteer.usualDays)}
+                      </li>
+                      <li>
+                        Usual times:{' '}
+                        {listed(detail.membership.applicationDetails.volunteer.usualTimes)}
+                      </li>
+                      <li>
+                        Claimed skills (verify each after approval):{' '}
+                        {listed(detail.membership.applicationDetails.volunteer.skillCodes)}
+                      </li>
+                    </ul>
+                  )}
                   {['APPLIED', 'PENDING_REVIEW'].includes(detail.membership.status) && (
                     <div className="action-row">
                       <button
@@ -1016,7 +1062,15 @@ export default function AdminDashboard(): React.JSX.Element {
                             description:
                               'Choose the initial role after reviewing the application and supporting documents.',
                             fields: [
-                              { key: 'initialRole', label: 'Initial role', options: initialRoles },
+                              {
+                                key: 'initialRole',
+                                label: 'Initial role',
+                                options: initialRoles,
+                                ...(detail.membership.requestedRole &&
+                                initialRoles.includes(detail.membership.requestedRole)
+                                  ? { value: detail.membership.requestedRole }
+                                  : {}),
+                              },
                               { key: 'notes', label: 'Approval notes', optional: true },
                             ],
                             submit: (values) =>

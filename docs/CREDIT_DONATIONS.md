@@ -36,7 +36,7 @@ Pools only collect credits so far. Spending pool credits on assistance is not bu
 
 ## Checks
 
-- `scripts/test-matching-concurrency.ps1` applies all eight migrations. The donation tests cover a member gift with both
+- `scripts/test-matching-concurrency.ps1` applies all nine migrations. The donation tests cover a member gift with both
   ledger rows, replay and key reuse, privacy in both histories, cross-organization pool gifts, closed pools, every
   refusal above, two simultaneous gifts against one balance, and two members giving to each other at once.
 - On 1 November 2026, an HTTP walk-through against the disposable interface QA API passed all 18 of its checks. It ran

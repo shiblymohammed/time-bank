@@ -117,6 +117,13 @@ export class CatalogueController {
     return this.catalogueService.listGlobalServices(categoryId, isActiveOnly);
   }
 
+  @Get('catalogue/skills')
+  @ApiOperation({ summary: 'List skill codes that active global services require' })
+  @ApiResponse({ status: 200, description: 'Skills retrieved' })
+  async listSkills() {
+    return this.catalogueService.listSkills();
+  }
+
   @Get('catalogue/global/:id')
   @ApiOperation({ summary: 'Get global service definition by ID' })
   @ApiResponse({ status: 200, description: 'Service retrieved' })

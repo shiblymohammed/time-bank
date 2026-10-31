@@ -18,6 +18,11 @@ import { RescheduleConfirmation1729118400005 } from '../src/database/migrations/
 import { ServiceCompletion1729118400006 } from '../src/database/migrations/1729118400006-ServiceCompletion';
 import { TimeCreditLedger1729118400007 } from '../src/database/migrations/1729118400007-TimeCreditLedger';
 import { CreditDonations1729118400008 } from '../src/database/migrations/1729118400008-CreditDonations';
+import { MembershipApplications1729118400009 } from '../src/database/migrations/1729118400009-MembershipApplications';
+import { MembershipsService } from '../src/memberships/memberships.service';
+import { MembershipApproval } from '../src/memberships/entities/membership-approval.entity';
+import { MembershipDocument } from '../src/memberships/entities/membership-document.entity';
+import { RoleHierarchyService } from '../src/authorization/role-hierarchy.service';
 import { DonationsService } from '../src/donations/donations.service';
 import { CreditDonation } from '../src/donations/entities/credit-donation.entity';
 import { CommunityCreditPool } from '../src/donations/entities/community-credit-pool.entity';
@@ -63,6 +68,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       ServiceCompletion1729118400006,
       TimeCreditLedger1729118400007,
       CreditDonations1729118400008,
+      MembershipApplications1729118400009,
     ],
     synchronize: false,
     extra: {
@@ -1427,6 +1433,106 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
       expect(await balance(volunteer)).toBe(2.5);
       expect(await balance(otherVolunteer)).toBe(2.5);
+    });
+  });
+
+  describe('membership applications', () => {
+    const memberships = () =>
+      new MembershipsService(
+        db.getRepository(Organization),
+        db.getRepository(User),
+        db.getRepository(OrganizationMembership),
+        db.getRepository(MembershipRoleGrant),
+        db.getRepository(MembershipApproval),
+        db.getRepository(MembershipDocument),
+        audit,
+        authorization,
+        new RoleHierarchyService(),
+      );
+    const applicant = () =>
+      id("INSERT INTO users(phone_e164) VALUES('+919000000099') RETURNING id");
+    const requireFirstAid = () =>
+      db.query('UPDATE global_service_definitions SET required_skill_codes = \'["FIRST_AID"]\'');
+
+    it('stores a volunteer application and seeds availability and unverified skills on approval', async () => {
+      await requireFirstAid();
+      const user = await applicant();
+      const applied = await memberships().apply(orgA, user, {
+        requestedRole: 'VOLUNTEER' as any,
+        notes: 'Evenings near the market',
+        volunteer: {
+          maxTravelRadiusKm: 2.5,
+          availableAtShortNotice: true,
+          usualDays: ['SAT', 'SUN'],
+          usualTimes: ['EVENING'],
+          skillCodes: ['FIRST_AID'],
+        },
+      });
+      const [row] = await db.query(
+        'SELECT requested_role, application_notes, application_details FROM organization_memberships WHERE id=$1',
+        [applied.id],
+      );
+      expect(row.requested_role).toBe('VOLUNTEER');
+      expect(row.application_notes).toBe('Evenings near the market');
+      expect(row.application_details.volunteer.usualDays).toEqual(['SAT', 'SUN']);
+
+      await memberships().approveMembership(orgA, applied.id, coordinator, {});
+
+      const [grant] = await db.query(
+        'SELECT role FROM membership_role_grants WHERE membership_id=$1',
+        [applied.id],
+      );
+      expect(grant.role).toBe('VOLUNTEER');
+      const [availability] = await db.query(
+        'SELECT max_travel_radius_km, is_available_immediate FROM volunteer_availabilities WHERE membership_id=$1',
+        [applied.id],
+      );
+      expect(Number(availability.max_travel_radius_km)).toBe(2.5);
+      expect(availability.is_available_immediate).toBe(true);
+      const skills = await db.query(
+        'SELECT skill_code, status FROM volunteer_skills WHERE membership_id=$1',
+        [applied.id],
+      );
+      expect(skills).toEqual([{ skill_code: 'FIRST_AID', status: 'PENDING_VERIFICATION' }]);
+    });
+
+    it('grants the requested help role and leaves no volunteer profile', async () => {
+      const user = await applicant();
+      const applied = await memberships().apply(orgA, user, { requestedRole: 'CAREGIVER' as any });
+      await memberships().approveMembership(orgA, applied.id, coordinator, {});
+      const [grant] = await db.query(
+        'SELECT role FROM membership_role_grants WHERE membership_id=$1',
+        [applied.id],
+      );
+      expect(grant.role).toBe('CAREGIVER');
+      const availability = await db.query(
+        'SELECT 1 FROM volunteer_availabilities WHERE membership_id=$1',
+        [applied.id],
+      );
+      expect(availability).toHaveLength(0);
+    });
+
+    it('refuses unknown skills and keeps the database checks on requested roles', async () => {
+      await requireFirstAid();
+      const user = await applicant();
+      await expect(
+        memberships().apply(orgA, user, {
+          requestedRole: 'VOLUNTEER' as any,
+          volunteer: { skillCodes: ['SURGERY'] },
+        }),
+      ).rejects.toThrow('Unknown skill codes: SURGERY');
+      await expect(
+        db.query(
+          "INSERT INTO organization_memberships(organization_id,user_id,requested_role) VALUES($1,$2,'COORDINATOR')",
+          [orgA, user],
+        ),
+      ).rejects.toThrow(/chk_membership_requested_role/);
+      await expect(
+        db.query(
+          "INSERT INTO organization_memberships(organization_id,user_id,application_details) VALUES($1,$2,'[]')",
+          [orgA, user],
+        ),
+      ).rejects.toThrow(/chk_membership_application_details/);
     });
   });
 });

@@ -23,6 +23,12 @@ import { ConfigureOrgCatalogueDto } from './dto/configure-org-catalogue.dto';
 import { CreateOrgProposalDto } from './dto/create-proposal.dto';
 import { ReviewOrgProposalDto } from './dto/review-proposal.dto';
 
+/** FIRST_AID → "First aid". */
+export function skillLabel(code: string): string {
+  const words = code.replace(/[_-]+/g, ' ').trim().toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 @Injectable()
 export class CatalogueService {
   private skillPolicy(requiresSkills: boolean, codes: string[]): string[] {
@@ -276,6 +282,16 @@ export class CatalogueService {
     }
 
     return qb.getMany();
+  }
+
+  /** Skill codes that active services ask for, so applicants can say what they can do. */
+  async listSkills(): Promise<{ code: string; label: string }[]> {
+    const services = await this.globalServiceRepo.find({
+      where: { isActive: true },
+      select: { id: true, requiredSkillCodes: true },
+    });
+    const codes = [...new Set(services.flatMap((service) => service.requiredSkillCodes ?? []))];
+    return codes.sort().map((code) => ({ code, label: skillLabel(code) }));
   }
 
   async getGlobalService(id: string): Promise<GlobalServiceDefinition> {

@@ -37,12 +37,30 @@ describe('MembershipsService', () => {
     save: jest.fn(),
   };
 
+  // Repositories reached through membershipRepo.manager: services, availability, skills.
+  const mockServiceRepo = { find: jest.fn() };
+  const mockAvailabilityRepo = { findOne: jest.fn(), create: jest.fn(), save: jest.fn() };
+  const skillInsert = {
+    insert: jest.fn().mockReturnThis(),
+    into: jest.fn().mockReturnThis(),
+    values: jest.fn().mockReturnThis(),
+    orIgnore: jest.fn().mockReturnThis(),
+    execute: jest.fn().mockResolvedValue(undefined),
+  };
+  const mockManager = {
+    getRepository: jest.fn((entity: { name: string }) =>
+      entity.name === 'GlobalServiceDefinition' ? mockServiceRepo : mockAvailabilityRepo,
+    ),
+    createQueryBuilder: jest.fn(() => skillInsert),
+  };
+
   const mockMembershipRepo = {
     count: jest.fn(),
     findOne: jest.fn(),
     create: jest.fn(),
     save: jest.fn(),
     createQueryBuilder: jest.fn(),
+    manager: mockManager,
   };
 
   const mockRoleGrantRepo = {
@@ -188,6 +206,78 @@ describe('MembershipsService', () => {
         expect.objectContaining({ eventType: 'MEMBERSHIP_APPLIED' }),
       );
     });
+
+    const activeOrgAndNoMembership = () => {
+      mockOrgRepo.findOne.mockResolvedValueOnce({ id: 'org-1', status: OrganizationStatus.ACTIVE });
+      mockMembershipRepo.findOne.mockResolvedValueOnce(null);
+      mockMembershipRepo.create.mockImplementation((dto) => ({ id: 'm-new', ...dto }));
+      mockMembershipRepo.save.mockImplementation((m) => Promise.resolve(m));
+      mockUserRepo.findOne.mockResolvedValueOnce({ id: 'u-1', primaryOrgId: 'org-1' });
+    };
+
+    it('stores the requested role and volunteer answers with known skills', async () => {
+      activeOrgAndNoMembership();
+      mockServiceRepo.find.mockResolvedValueOnce([{ requiredSkillCodes: ['FIRST_AID'] }]);
+
+      const res = await service.apply('org-1', 'u-1', {
+        requestedRole: UserRole.VOLUNTEER,
+        notes: 'Weekends',
+        volunteer: { maxTravelRadiusKm: 3, usualDays: ['SAT'], skillCodes: ['FIRST_AID'] },
+      });
+
+      expect(res).toEqual(
+        expect.objectContaining({
+          requestedRole: UserRole.VOLUNTEER,
+          applicationNotes: 'Weekends',
+          applicationDetails: {
+            volunteer: {
+              maxTravelRadiusKm: 3,
+              availableAtShortNotice: false,
+              usualDays: ['SAT'],
+              usualTimes: [],
+              skillCodes: ['FIRST_AID'],
+            },
+          },
+        }),
+      );
+      expect(mockAuditService.logEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ requestedRole: 'VOLUNTEER' }),
+        }),
+      );
+    });
+
+    it('refuses volunteer answers for someone asking for help', async () => {
+      activeOrgAndNoMembership();
+      await expect(
+        service.apply('org-1', 'u-1', {
+          requestedRole: UserRole.BENEFICIARY,
+          volunteer: { maxTravelRadiusKm: 3 },
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('refuses skills no active service asks for', async () => {
+      activeOrgAndNoMembership();
+      mockServiceRepo.find.mockResolvedValueOnce([{ requiredSkillCodes: ['FIRST_AID'] }]);
+      await expect(
+        service.apply('org-1', 'u-1', {
+          requestedRole: UserRole.VOLUNTEER,
+          volunteer: { skillCodes: ['SURGERY'] },
+        }),
+      ).rejects.toThrow('Unknown skill codes: SURGERY');
+    });
+
+    it('lets a pending applicant change what they asked for', async () => {
+      mockOrgRepo.findOne.mockResolvedValueOnce({ id: 'org-1', status: OrganizationStatus.ACTIVE });
+      const pending = { id: 'm-1', status: MembershipStatus.APPLIED, requestedRole: null };
+      mockMembershipRepo.findOne.mockResolvedValueOnce(pending);
+      mockMembershipRepo.save.mockImplementation((m) => Promise.resolve(m));
+
+      const res = await service.apply('org-1', 'u-1', { requestedRole: UserRole.CAREGIVER });
+      expect(res.requestedRole).toBe(UserRole.CAREGIVER);
+      expect(res.status).toBe(MembershipStatus.APPLIED);
+    });
   });
 
   describe('approveMembership', () => {
@@ -245,6 +335,75 @@ describe('MembershipsService', () => {
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'MEMBERSHIP_APPROVED' }),
       );
+    });
+  });
+
+  describe('approveMembership with application answers', () => {
+    const approvable = (extra: object) => {
+      const membership = {
+        id: 'm-1',
+        organizationId: 'org-1',
+        userId: 'u-1',
+        status: MembershipStatus.APPLIED,
+        ...extra,
+      };
+      mockMembershipRepo.findOne
+        .mockResolvedValueOnce(membership)
+        .mockResolvedValueOnce({ ...membership, status: MembershipStatus.APPROVED });
+      mockOrgRepo.findOne.mockResolvedValueOnce({ id: 'org-1', code: 'KOTTAKKAL' });
+      mockMembershipRepo.count.mockResolvedValueOnce(0);
+      mockMembershipRepo.save.mockImplementation((m) => Promise.resolve(m));
+      mockRoleGrantRepo.findOne.mockResolvedValueOnce(null);
+      mockRoleGrantRepo.create.mockImplementation((dto) => dto);
+      mockRoleGrantRepo.save.mockImplementation((g) => Promise.resolve(g));
+      mockApprovalRepo.create.mockImplementation((dto) => dto);
+      mockApprovalRepo.save.mockImplementation((a) => Promise.resolve(a));
+    };
+    const volunteerAnswers = (skillCodes: string[]) => ({
+      volunteer: {
+        maxTravelRadiusKm: 3,
+        availableAtShortNotice: true,
+        usualDays: [],
+        usualTimes: [],
+        skillCodes,
+      },
+    });
+
+    it('grants the requested role when the approver names none', async () => {
+      approvable({ requestedRole: UserRole.BENEFICIARY, applicationDetails: {} });
+      await service.approveMembership('org-1', 'm-1', 'admin-1', {});
+      expect(mockRoleGrantRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ role: UserRole.BENEFICIARY }),
+      );
+      expect(mockAvailabilityRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('turns volunteer answers into availability and unverified skills', async () => {
+      approvable({
+        requestedRole: UserRole.VOLUNTEER,
+        applicationDetails: volunteerAnswers(['FIRST_AID']),
+      });
+      mockAvailabilityRepo.findOne.mockResolvedValueOnce(null);
+      mockAvailabilityRepo.create.mockImplementation((dto) => dto);
+      mockAvailabilityRepo.save.mockImplementation((a) => Promise.resolve(a));
+
+      await service.approveMembership('org-1', 'm-1', 'admin-1', {});
+
+      expect(mockAvailabilityRepo.save).toHaveBeenCalledWith(
+        expect.objectContaining({ maxTravelRadiusKm: 3, isAvailableImmediate: true }),
+      );
+      expect(skillInsert.values).toHaveBeenCalledWith([
+        expect.objectContaining({ skillCode: 'FIRST_AID', status: 'PENDING_VERIFICATION' }),
+      ]);
+      expect(skillInsert.orIgnore).toHaveBeenCalled();
+    });
+
+    it('keeps volunteer answers aside when the approver grants another role', async () => {
+      approvable({ requestedRole: UserRole.VOLUNTEER, applicationDetails: volunteerAnswers([]) });
+      await service.approveMembership('org-1', 'm-1', 'admin-1', {
+        initialRole: UserRole.BENEFICIARY,
+      });
+      expect(mockAvailabilityRepo.save).not.toHaveBeenCalled();
     });
   });
 

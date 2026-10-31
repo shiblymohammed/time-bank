@@ -38,7 +38,7 @@ this endpoint is not scoped to an organization.
 
 ## Checks
 
-- `scripts/test-matching-concurrency.ps1`: the PostgreSQL suite applies all eight migrations. It checks the rate and
+- `scripts/test-matching-concurrency.ps1`: the PostgreSQL suite applies all nine migrations. It checks the rate and
   multiplier, single payment, the append-only trigger and the unique key, whole-hours-only services, held credits for a
   frozen wallet, and the history endpoint's contents.
 - `src/time-ledger/time-ledger.service.spec.ts` covers the rounding.

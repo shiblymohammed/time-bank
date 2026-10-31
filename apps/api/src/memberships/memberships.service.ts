@@ -10,6 +10,7 @@ import { Repository } from 'typeorm';
 import {
   MembershipStatus,
   MembershipApprovalAction,
+  SkillVerificationStatus,
   RoleGrantStatus,
   UserRole,
   OrganizationStatus,
@@ -17,13 +18,19 @@ import {
 
 import { Organization } from '../organizations/entities/organization.entity';
 import { User } from '../identity/entities/user.entity';
-import { OrganizationMembership } from './entities/organization-membership.entity';
+import {
+  MembershipApplicationDetails,
+  OrganizationMembership,
+} from './entities/organization-membership.entity';
 import { MembershipRoleGrant } from './entities/membership-role-grant.entity';
 import { MembershipApproval } from './entities/membership-approval.entity';
 import { MembershipDocument } from './entities/membership-document.entity';
 import { AuditService } from '../audit/audit.service';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { RoleHierarchyService } from '../authorization/role-hierarchy.service';
+import { GlobalServiceDefinition } from '../catalogue/entities/global-service-definition.entity';
+import { VolunteerAvailability } from '../matching/entities/volunteer-availability.entity';
+import { VolunteerSkill } from '../matching/entities/volunteer-skill.entity';
 
 import { ApplyMembershipDto } from './dto/apply-membership.dto';
 import { ApproveMembershipDto } from './dto/approve-membership.dto';
@@ -86,7 +93,11 @@ export class MembershipsService {
         existing.status === MembershipStatus.APPLIED ||
         existing.status === MembershipStatus.PENDING_REVIEW
       ) {
-        return existing;
+        // A pending applicant may correct what they asked for; nothing else changes.
+        if (dto.requestedRole === undefined && dto.notes === undefined && !dto.volunteer)
+          return existing;
+        Object.assign(existing, await this.applicationFields(dto));
+        return this.membershipRepo.save(existing);
       }
 
       // Re-apply if previously rejected
@@ -94,6 +105,7 @@ export class MembershipsService {
         existing.status = MembershipStatus.APPLIED;
         existing.appliedAt = new Date();
         existing.rejectionReason = null;
+        Object.assign(existing, await this.applicationFields(dto));
         const reApplied = await this.membershipRepo.save(existing);
 
         await this.auditService.logEvent({
@@ -103,7 +115,11 @@ export class MembershipsService {
           targetType: 'ORGANIZATION_MEMBERSHIP',
           organizationId,
           ipAddress,
-          payload: { reapplication: true, notes: dto.notes ?? null },
+          payload: {
+            reapplication: true,
+            requestedRole: reApplied.requestedRole ?? null,
+            notes: dto.notes ?? null,
+          },
         });
 
         return reApplied;
@@ -115,6 +131,7 @@ export class MembershipsService {
       organizationId,
       userId,
       status: MembershipStatus.APPLIED,
+      ...(await this.applicationFields(dto)),
     });
     const saved = await this.membershipRepo.save(membership);
 
@@ -133,10 +150,77 @@ export class MembershipsService {
       targetType: 'ORGANIZATION_MEMBERSHIP',
       organizationId,
       ipAddress,
-      payload: { notes: dto.notes ?? null },
+      payload: { requestedRole: saved.requestedRole ?? null, notes: dto.notes ?? null },
     });
 
     return saved;
+  }
+
+  /** What the applicant asked for. Volunteer answers need the volunteer role and known skills. */
+  private async applicationFields(dto: ApplyMembershipDto): Promise<{
+    requestedRole: UserRole | null;
+    applicationNotes: string | null;
+    applicationDetails: MembershipApplicationDetails;
+  }> {
+    const requestedRole = dto.requestedRole ?? null;
+    if (dto.volunteer && requestedRole !== UserRole.VOLUNTEER)
+      throw new BadRequestException('Volunteer details need requestedRole VOLUNTEER');
+    const details: MembershipApplicationDetails = {};
+    if (dto.volunteer) {
+      const skillCodes = [...new Set(dto.volunteer.skillCodes ?? [])];
+      if (skillCodes.length) {
+        const services = await this.membershipRepo.manager
+          .getRepository(GlobalServiceDefinition)
+          .find({ where: { isActive: true }, select: { id: true, requiredSkillCodes: true } });
+        const known = new Set(services.flatMap((service) => service.requiredSkillCodes ?? []));
+        const unknown = skillCodes.filter((code) => !known.has(code));
+        if (unknown.length)
+          throw new BadRequestException(`Unknown skill codes: ${unknown.join(', ')}`);
+      }
+      details.volunteer = {
+        maxTravelRadiusKm: dto.volunteer.maxTravelRadiusKm ?? 5,
+        availableAtShortNotice: dto.volunteer.availableAtShortNotice ?? false,
+        usualDays: dto.volunteer.usualDays ?? [],
+        usualTimes: dto.volunteer.usualTimes ?? [],
+        skillCodes,
+      };
+    }
+    return { requestedRole, applicationNotes: dto.notes ?? null, applicationDetails: details };
+  }
+
+  /** Turns a volunteer's application answers into matching preferences and unverified skills. */
+  private async seedVolunteerProfile(membership: OrganizationMembership): Promise<void> {
+    const answers = membership.applicationDetails?.volunteer;
+    if (!answers) return;
+    const manager = this.membershipRepo.manager;
+    const availabilityRepo = manager.getRepository(VolunteerAvailability);
+    const existing = await availabilityRepo.findOne({
+      where: { organizationId: membership.organizationId, membershipId: membership.id },
+    });
+    if (!existing)
+      await availabilityRepo.save(
+        availabilityRepo.create({
+          organizationId: membership.organizationId,
+          membershipId: membership.id,
+          maxTravelRadiusKm: answers.maxTravelRadiusKm,
+          isAvailableImmediate: answers.availableAtShortNotice,
+        }),
+      );
+    if (answers.skillCodes.length)
+      await manager
+        .createQueryBuilder()
+        .insert()
+        .into(VolunteerSkill)
+        .values(
+          answers.skillCodes.map((skillCode) => ({
+            organizationId: membership.organizationId,
+            membershipId: membership.id,
+            skillCode,
+            status: SkillVerificationStatus.PENDING_VERIFICATION,
+          })),
+        )
+        .orIgnore()
+        .execute();
   }
 
   /**
@@ -162,7 +246,7 @@ export class MembershipsService {
       throw new BadRequestException('Membership is already approved');
     }
 
-    const initialRole = dto.initialRole ?? UserRole.VOLUNTEER;
+    const initialRole = dto.initialRole ?? membership.requestedRole ?? UserRole.VOLUNTEER;
     this.authorizationService.assertNoSelfEscalation(approverId, membership.userId, initialRole);
     await this.assertCanManageRole(organizationId, approverId, initialRole);
 
@@ -203,6 +287,7 @@ export class MembershipsService {
       });
       await this.roleGrantRepo.save(grant);
     }
+    if (initialRole === UserRole.VOLUNTEER) await this.seedVolunteerProfile(saved);
 
     // Record approval audit trail
     const approval = this.approvalRepo.create({
