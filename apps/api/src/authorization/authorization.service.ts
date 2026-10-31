@@ -50,6 +50,53 @@ export class AuthorizationService {
     userId: string,
     organizationId: string,
   ): Promise<EvaluatedMembershipContext> {
+    if (!organizationId) throw new ForbiddenException('Organization context required');
+    const { isSuperAdmin } = await this.evaluateGlobalAccess(userId);
+
+    const organization = await this.orgRepo.findOne({ where: { id: organizationId } });
+    if (!organization) {
+      throw new ForbiddenException('Organization not found');
+    }
+    if (organization.status !== OrganizationStatus.ACTIVE) {
+      throw new ForbiddenException(`Organization is ${organization.status.toLowerCase()}`);
+    }
+
+    const membership = await this.membershipRepo.findOne({
+      where: { userId, organizationId },
+      relations: ['roleGrants'],
+    });
+    if (!membership && !isSuperAdmin) {
+      throw new ForbiddenException('Not a member of this organization');
+    }
+    if (membership && membership.status !== MembershipStatus.APPROVED && !isSuperAdmin) {
+      throw new ForbiddenException(
+        `Membership in this organization is ${membership.status.toLowerCase()}`,
+      );
+    }
+
+    const activeRoles = (membership?.roleGrants ?? [])
+      .filter((grant) => grant.status === RoleGrantStatus.ACTIVE)
+      .map((grant) => grant.role);
+    if (isSuperAdmin && !activeRoles.includes(UserRole.SUPER_ADMIN)) {
+      activeRoles.push(UserRole.SUPER_ADMIN);
+    }
+    return {
+      userId,
+      organizationId,
+      membershipId: membership?.id ?? 'super-admin-bypass',
+      membershipStatus: membership?.status ?? MembershipStatus.APPROVED,
+      roles: activeRoles,
+      isSuperAdmin,
+    };
+  }
+
+  /** Privileged routes use current database authority, never cached JWT role claims. */
+  async evaluateGlobalAccess(
+    userId: string,
+  ): Promise<{ isSuperAdmin: boolean; roles: UserRole[] }> {
+    if (typeof userId !== 'string' || !userId.trim()) {
+      throw new ForbiddenException('Authentication required');
+    }
     const user = await this.userRepo.findOne({
       where: { id: userId },
     });
@@ -77,19 +124,6 @@ export class AuthorizationService {
       );
     }
 
-    // 3. Check organization exists and is ACTIVE
-    const organization = await this.orgRepo.findOne({
-      where: { id: organizationId },
-    });
-
-    if (!organization) {
-      throw new ForbiddenException('Organization not found');
-    }
-
-    if (organization.status !== OrganizationStatus.ACTIVE) {
-      throw new ForbiddenException(`Organization is ${organization.status.toLowerCase()}`);
-    }
-
     // 4. Check if user is a Super Admin (Super Admins have universal platform access)
     const superAdminGrant = await this.roleGrantRepo
       .createQueryBuilder('grant')
@@ -101,40 +135,31 @@ export class AuthorizationService {
       .getOne();
 
     const isSuperAdmin = Boolean(superAdminGrant);
+    return { isSuperAdmin, roles: isSuperAdmin ? [UserRole.SUPER_ADMIN] : [] };
+  }
 
-    // 5. Look up organization membership
-    const membership = await this.membershipRepo.findOne({
-      where: { userId, organizationId },
-      relations: ['roleGrants'],
+  async assertMembershipAccess(
+    userId: string,
+    organizationId: string,
+    membershipId: string,
+  ): Promise<void> {
+    if (!membershipId) throw new ForbiddenException('Target membership required');
+    const context = await this.evaluateOrganizationAccess(userId, organizationId);
+    const target = await this.membershipRepo.findOne({
+      where: { id: membershipId, organizationId },
     });
-
-    if (!membership && !isSuperAdmin) {
-      throw new ForbiddenException('Not a member of this organization');
+    if (!target) {
+      throw new ForbiddenException('Membership is not in this organization');
     }
-
-    if (membership && membership.status !== MembershipStatus.APPROVED && !isSuperAdmin) {
-      throw new ForbiddenException(
-        `Membership in this organization is ${membership.status.toLowerCase()}`,
-      );
+    if (
+      context.membershipId !== membershipId &&
+      !context.isSuperAdmin &&
+      !context.roles.some((role) =>
+        [UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN].includes(role),
+      )
+    ) {
+      throw new ForbiddenException('Cannot access another member’s private records');
     }
-
-    // 6. Collect active roles scoped to this organization
-    const activeRoles: UserRole[] = (membership?.roleGrants ?? [])
-      .filter((rg) => rg.status === RoleGrantStatus.ACTIVE)
-      .map((rg) => rg.role);
-
-    if (isSuperAdmin && !activeRoles.includes(UserRole.SUPER_ADMIN)) {
-      activeRoles.push(UserRole.SUPER_ADMIN);
-    }
-
-    return {
-      userId,
-      organizationId,
-      membershipId: membership?.id ?? 'super-admin-bypass',
-      membershipStatus: membership?.status ?? MembershipStatus.APPROVED,
-      roles: activeRoles,
-      isSuperAdmin,
-    };
   }
 
   /**

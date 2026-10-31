@@ -32,7 +32,7 @@ export class OrganizationsController {
    * Provisions a new organization (Super Admin only: D#1, D#52, ITB-010).
    */
   @Post()
-  @UseGuards(AuthGuard, OrganizationAccessGuard, RolesGuard)
+  @UseGuards(AuthGuard, RolesGuard)
   @Roles(UserRole.SUPER_ADMIN)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Provision new municipality/corporation organization (Super Admin)' })

@@ -25,6 +25,18 @@ import { ReviewOrgProposalDto } from './dto/review-proposal.dto';
 
 @Injectable()
 export class CatalogueService {
+  private skillPolicy(requiresSkills: boolean, codes: string[]): string[] {
+    const normalized = [...new Set(codes.map((code) => code.trim()))];
+    if (normalized.some((code) => !code || code.length > 50) || normalized.length > 50)
+      throw new BadRequestException(
+        'Provide at most 50 non-empty skill codes, each at most 50 characters',
+      );
+    if (requiresSkills && !normalized.length)
+      throw new BadRequestException(
+        'At least one required skill code is needed when skills are required',
+      );
+    return normalized;
+  }
   constructor(
     @InjectRepository(ServiceCategory)
     private readonly categoryRepo: Repository<ServiceCategory>,
@@ -134,7 +146,9 @@ export class CatalogueService {
     }
 
     if (dto.defaultPreferredVolunteers < dto.defaultMinVolunteers) {
-      throw new BadRequestException('Preferred volunteers must be greater than or equal to minimum volunteers');
+      throw new BadRequestException(
+        'Preferred volunteers must be greater than or equal to minimum volunteers',
+      );
     }
 
     const service = this.globalServiceRepo.create({
@@ -148,7 +162,10 @@ export class CatalogueService {
       defaultPreferredVolunteers: dto.defaultPreferredVolunteers,
       isHazardousPhysical: dto.isHazardousPhysical ?? false,
       requiresSkills: dto.requiresSkills ?? false,
-      requiredSkillCodes: dto.requiredSkillCodes ?? [],
+      requiredSkillCodes: this.skillPolicy(
+        dto.requiresSkills ?? false,
+        dto.requiredSkillCodes ?? [],
+      ),
       isEmergencyProhibited: dto.isEmergencyProhibited ?? true,
       baseCreditRateHourly: dto.baseCreditRateHourly ?? 1.0,
       creditMultiplier: dto.creditMultiplier ?? 1.0,
@@ -191,20 +208,28 @@ export class CatalogueService {
     const prefVol = dto.defaultPreferredVolunteers ?? service.defaultPreferredVolunteers;
 
     if (prefVol < minVol) {
-      throw new BadRequestException('Preferred volunteers must be greater than or equal to minimum volunteers');
+      throw new BadRequestException(
+        'Preferred volunteers must be greater than or equal to minimum volunteers',
+      );
     }
 
+    const skillCodes = this.skillPolicy(
+      dto.requiresSkills ?? service.requiresSkills ?? false,
+      dto.requiredSkillCodes ?? service.requiredSkillCodes ?? [],
+    );
     if (dto.nameEn !== undefined) service.nameEn = dto.nameEn;
     if (dto.nameMl !== undefined) service.nameMl = dto.nameMl;
     if (dto.descriptionEn !== undefined) service.descriptionEn = dto.descriptionEn ?? null;
     if (dto.descriptionMl !== undefined) service.descriptionMl = dto.descriptionMl ?? null;
-    if (dto.defaultMinVolunteers !== undefined) service.defaultMinVolunteers = dto.defaultMinVolunteers;
+    if (dto.defaultMinVolunteers !== undefined)
+      service.defaultMinVolunteers = dto.defaultMinVolunteers;
     if (dto.defaultPreferredVolunteers !== undefined) {
       service.defaultPreferredVolunteers = dto.defaultPreferredVolunteers;
     }
-    if (dto.isHazardousPhysical !== undefined) service.isHazardousPhysical = dto.isHazardousPhysical;
+    if (dto.isHazardousPhysical !== undefined)
+      service.isHazardousPhysical = dto.isHazardousPhysical;
     if (dto.requiresSkills !== undefined) service.requiresSkills = dto.requiresSkills;
-    if (dto.requiredSkillCodes !== undefined) service.requiredSkillCodes = dto.requiredSkillCodes;
+    if (dto.requiredSkillCodes !== undefined) service.requiredSkillCodes = skillCodes;
     if (dto.isEmergencyProhibited !== undefined) {
       service.isEmergencyProhibited = dto.isEmergencyProhibited;
     }
@@ -222,14 +247,22 @@ export class CatalogueService {
       actorId: actorId ?? null,
       targetId: saved.id,
       targetType: 'global_service_definitions',
-      payload: { code: saved.code, isActive: saved.isActive },
+      payload: {
+        code: saved.code,
+        isActive: saved.isActive,
+        requiresSkills: saved.requiresSkills,
+        requiredSkillCodes: saved.requiredSkillCodes,
+      },
       ipAddress: ipAddress ?? null,
     });
 
     return saved;
   }
 
-  async listGlobalServices(categoryId?: string, activeOnly = true): Promise<GlobalServiceDefinition[]> {
+  async listGlobalServices(
+    categoryId?: string,
+    activeOnly = true,
+  ): Promise<GlobalServiceDefinition[]> {
     const qb = this.globalServiceRepo
       .createQueryBuilder('gs')
       .leftJoinAndSelect('gs.category', 'cat')
@@ -275,8 +308,17 @@ export class CatalogueService {
       throw new NotFoundException(`Global service definition '${dto.globalServiceId}' not found`);
     }
 
-    const minVol = dto.minVolunteers ?? globalService.defaultMinVolunteers;
-    const prefVol = dto.preferredVolunteers ?? Math.max(minVol, globalService.defaultPreferredVolunteers);
+    let entry = await this.orgCatalogRepo.findOne({
+      where: { organizationId: orgId, globalServiceId: dto.globalServiceId },
+    });
+    const enabled = dto.isEnabled ?? entry?.isEnabled ?? true;
+    if (enabled && globalService.isActive === false)
+      throw new BadRequestException('An inactive central service cannot be enabled locally');
+    const minVol = dto.minVolunteers ?? entry?.minVolunteers ?? globalService.defaultMinVolunteers;
+    const prefVol =
+      dto.preferredVolunteers ??
+      entry?.preferredVolunteers ??
+      Math.max(minVol, globalService.defaultPreferredVolunteers);
 
     if (minVol < globalService.defaultMinVolunteers) {
       throw new BadRequestException(
@@ -285,12 +327,10 @@ export class CatalogueService {
     }
 
     if (prefVol < minVol) {
-      throw new BadRequestException('preferredVolunteers must be greater than or equal to minVolunteers');
+      throw new BadRequestException(
+        'preferredVolunteers must be greater than or equal to minVolunteers',
+      );
     }
-
-    let entry = await this.orgCatalogRepo.findOne({
-      where: { organizationId: orgId, globalServiceId: dto.globalServiceId },
-    });
 
     if (!entry) {
       entry = this.orgCatalogRepo.create({
@@ -335,6 +375,7 @@ export class CatalogueService {
         isEnabled: saved.isEnabled,
         minVolunteers: saved.minVolunteers,
         preferredVolunteers: saved.preferredVolunteers,
+        requiresCoordinatorDispatch: saved.requiresCoordinatorDispatch,
       },
       ipAddress: ipAddress ?? null,
     });
@@ -458,7 +499,9 @@ export class CatalogueService {
     }
 
     if (dto.status === ServiceProposalStatus.REJECTED && !dto.rejectionReason) {
-      throw new BadRequestException('A rejection reason must be provided when rejecting a proposal');
+      throw new BadRequestException(
+        'A rejection reason must be provided when rejecting a proposal',
+      );
     }
 
     proposal.status = dto.status;
@@ -472,7 +515,9 @@ export class CatalogueService {
         where: { id: dto.resultingGlobalServiceId },
       });
       if (!globalService) {
-        throw new NotFoundException(`Resulting global service '${dto.resultingGlobalServiceId}' not found`);
+        throw new NotFoundException(
+          `Resulting global service '${dto.resultingGlobalServiceId}' not found`,
+        );
       }
       proposal.resultingGlobalServiceId = dto.resultingGlobalServiceId;
 

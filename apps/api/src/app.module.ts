@@ -50,7 +50,7 @@ import { MatchingModule } from './matching/matching.module';
         type: 'postgres',
         url: config.getOrThrow<string>('DATABASE_URL'),
         entities: [__dirname + '/**/*.entity{.ts,.js}'],
-        migrations: [__dirname + '/database/migrations/**/*{.ts,.js}'],
+        migrations: [__dirname + '/database/migrations/[0-9]*{.ts,.js}'],
         // CRITICAL: Never true — all schema changes go through migrations
         // (NFR-17: versioned migrations with rollback plans)
         synchronize: false,

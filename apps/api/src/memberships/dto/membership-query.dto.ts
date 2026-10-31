@@ -1,19 +1,35 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, Max, Min } from 'class-validator';
-import { MembershipStatus } from '@ktb/shared-types';
+import { IsEnum, IsInt, IsOptional, IsString, MaxLength, Max, Min } from 'class-validator';
+import { MembershipStatus, UserRole } from '@ktb/shared-types';
 
 export class MembershipQueryDto {
   @ApiPropertyOptional({
     enum: MembershipStatus,
     example: MembershipStatus.APPLIED,
-    description: 'Filter memberships by status (APPLIED, PENDING_REVIEW, APPROVED, REJECTED, SUSPENDED)',
+    description:
+      'Filter memberships by status (APPLIED, PENDING_REVIEW, APPROVED, REJECTED, SUSPENDED)',
   })
   @IsOptional()
   @IsEnum(MembershipStatus)
   status?: MembershipStatus;
 
-  @ApiPropertyOptional({ example: 50, default: 50, description: 'Number of records to return (max 100)' })
+  @ApiPropertyOptional({ enum: UserRole, description: 'Filter by active role' })
+  @IsOptional()
+  @IsEnum(UserRole)
+  role?: UserRole;
+
+  @ApiPropertyOptional({ description: 'Search membership number or phone' })
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  search?: string;
+
+  @ApiPropertyOptional({
+    example: 50,
+    default: 50,
+    description: 'Number of records to return (max 100)',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()

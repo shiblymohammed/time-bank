@@ -19,15 +19,18 @@ export class AuthGuard implements CanActivate {
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
 
-    // 1. Check development/test bypass header
+    // Development impersonation requires an explicit opt-in and real database permissions.
     const devUserId = request.headers['x-user-id'];
-    const isDev = this.configService.get('NODE_ENV') !== 'production';
+    const environment = this.configService.get<string>('NODE_ENV');
+    const allowsDevHeaders =
+      (environment === 'development' || environment === 'test') &&
+      this.configService.get<string>('AUTH_ALLOW_DEV_HEADERS') === 'true';
 
-    if (isDev && devUserId && typeof devUserId === 'string') {
+    if (allowsDevHeaders && devUserId && typeof devUserId === 'string') {
       request.user = {
         id: devUserId,
         phoneE164: request.headers['x-user-phone'] ?? '+919876543210',
-        isSuperAdmin: request.headers['x-is-super-admin'] === 'true',
+        isSuperAdmin: false,
       };
       request.userId = devUserId;
       return true;

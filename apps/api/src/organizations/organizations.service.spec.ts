@@ -2,10 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { ConflictException } from '@nestjs/common';
-import {
-  OrganizationType,
-  OrganizationStatus,
-} from '@ktb/shared-types';
+import { OrganizationType, OrganizationStatus } from '@ktb/shared-types';
 import { OrganizationsService } from './organizations.service';
 import { Organization } from './entities/organization.entity';
 import { OrganizationBranding } from './entities/organization-branding.entity';
@@ -144,6 +141,7 @@ describe('OrganizationsService', () => {
           actorId: 'creator-uuid-1',
           targetId: 'new-org-uuid',
         }),
+        expect.objectContaining({ save: expect.any(Function) }),
       );
     });
   });

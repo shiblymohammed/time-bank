@@ -22,6 +22,8 @@ import { MembershipRoleGrant } from './entities/membership-role-grant.entity';
 import { MembershipApproval } from './entities/membership-approval.entity';
 import { MembershipDocument } from './entities/membership-document.entity';
 import { AuditService } from '../audit/audit.service';
+import { AuthorizationService } from '../authorization/authorization.service';
+import { RoleHierarchyService } from '../authorization/role-hierarchy.service';
 
 import { ApplyMembershipDto } from './dto/apply-membership.dto';
 import { ApproveMembershipDto } from './dto/approve-membership.dto';
@@ -48,6 +50,8 @@ export class MembershipsService {
     @InjectRepository(MembershipDocument)
     private readonly documentRepo: Repository<MembershipDocument>,
     private readonly auditService: AuditService,
+    private readonly authorizationService: AuthorizationService,
+    private readonly roleHierarchyService: RoleHierarchyService,
   ) {}
 
   /**
@@ -158,6 +162,10 @@ export class MembershipsService {
       throw new BadRequestException('Membership is already approved');
     }
 
+    const initialRole = dto.initialRole ?? UserRole.VOLUNTEER;
+    this.authorizationService.assertNoSelfEscalation(approverId, membership.userId, initialRole);
+    await this.assertCanManageRole(organizationId, approverId, initialRole);
+
     const org = await this.orgRepo.findOne({ where: { id: organizationId } });
     if (!org) {
       throw new NotFoundException('Organization not found');
@@ -178,7 +186,6 @@ export class MembershipsService {
     const saved = await this.membershipRepo.save(membership);
 
     // Grant initial role (default: VOLUNTEER)
-    const initialRole = dto.initialRole ?? UserRole.VOLUNTEER;
     const existingGrant = await this.roleGrantRepo.findOne({
       where: {
         membershipId: saved.id,
@@ -246,7 +253,9 @@ export class MembershipsService {
     }
 
     if (membership.status === MembershipStatus.APPROVED) {
-      throw new BadRequestException('Cannot reject an approved membership; suspend or revoke instead');
+      throw new BadRequestException(
+        'Cannot reject an approved membership; suspend or revoke instead',
+      );
     }
 
     membership.status = MembershipStatus.REJECTED;
@@ -367,6 +376,7 @@ export class MembershipsService {
   ): Promise<MembershipRoleGrant> {
     const membership = await this.membershipRepo.findOne({
       where: { id: membershipId, organizationId },
+      relations: ['user'],
     });
 
     if (!membership) {
@@ -376,6 +386,9 @@ export class MembershipsService {
     if (membership.status !== MembershipStatus.APPROVED) {
       throw new BadRequestException('Cannot grant roles to an unapproved membership');
     }
+
+    this.authorizationService.assertNoSelfEscalation(granterId, membership.userId, dto.role);
+    await this.assertCanManageRole(organizationId, granterId, dto.role, true);
 
     const existingGrant = await this.roleGrantRepo.findOne({
       where: {
@@ -433,6 +446,8 @@ export class MembershipsService {
       throw new NotFoundException('Role grant not found in this organization');
     }
 
+    await this.assertCanManageRole(organizationId, revokerId, grant.role, true);
+
     if (grant.status === RoleGrantStatus.REVOKED) {
       throw new BadRequestException('Role grant is already revoked');
     }
@@ -477,6 +492,16 @@ export class MembershipsService {
       qb.andWhere('m.status = :status', { status: query.status });
     }
 
+    if (query.role)
+      qb.andWhere(
+        'EXISTS (SELECT 1 FROM membership_role_grants selected_role WHERE selected_role.membership_id = m.id AND selected_role.role = :selectedRole AND selected_role.status = :activeRole)',
+        { selectedRole: query.role, activeRole: RoleGrantStatus.ACTIVE },
+      );
+    if (query.search?.trim())
+      qb.andWhere('(m.membershipNumber ILIKE :search OR user.phoneE164 ILIKE :search)', {
+        search: `%${query.search.trim()}%`,
+      });
+
     qb.orderBy('m.createdAt', 'DESC');
     qb.take(Math.min(query.limit ?? 50, 100));
     qb.skip(query.offset ?? 0);
@@ -502,5 +527,53 @@ export class MembershipsService {
     }
 
     return membership;
+  }
+
+  async listMembershipDocuments(
+    organizationId: string,
+    membershipId: string,
+  ): Promise<MembershipDocument[]> {
+    const membership = await this.membershipRepo.findOne({
+      where: { id: membershipId, organizationId },
+    });
+    if (!membership) throw new NotFoundException('Membership not found in this organization');
+    return this.documentRepo.find({ where: { membershipId }, order: { createdAt: 'DESC' } });
+  }
+
+  private async assertCanManageRole(
+    organizationId: string,
+    actorId: string,
+    role: UserRole,
+    requiresAdmin = false,
+  ): Promise<void> {
+    this.roleHierarchyService.assertValidMembershipRole(role);
+    const context = await this.authorizationService.evaluateOrganizationAccess(
+      actorId,
+      organizationId,
+    );
+    if (
+      requiresAdmin &&
+      !context.isSuperAdmin &&
+      !context.roles.includes(UserRole.MUNICIPALITY_ADMIN)
+    ) {
+      throw new ForbiddenException('Municipality administrator required to manage roles');
+    }
+    this.roleHierarchyService.assertCanGrantRole(this.getHighestRole(context.roles), role);
+  }
+
+  /**
+   * Helper: determines the highest privilege level from a set of roles.
+   * Role hierarchy: SUPER_ADMIN > MUNICIPALITY_ADMIN > COORDINATOR > VOLUNTEER/BENEFICIARY/CAREGIVER/MERCHANT
+   */
+  private getHighestRole(roles: UserRole[]): UserRole {
+    if (roles.includes(UserRole.SUPER_ADMIN)) return UserRole.SUPER_ADMIN;
+    if (roles.includes(UserRole.MUNICIPALITY_ADMIN)) return UserRole.MUNICIPALITY_ADMIN;
+    if (roles.includes(UserRole.COORDINATOR)) return UserRole.COORDINATOR;
+    if (roles.includes(UserRole.VOLUNTEER)) return UserRole.VOLUNTEER;
+    if (roles.includes(UserRole.BENEFICIARY)) return UserRole.BENEFICIARY;
+    if (roles.includes(UserRole.CAREGIVER)) return UserRole.CAREGIVER;
+    if (roles.includes(UserRole.MERCHANT)) return UserRole.MERCHANT;
+
+    throw new ForbiddenException('User has no recognized roles');
   }
 }

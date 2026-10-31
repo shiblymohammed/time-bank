@@ -2,7 +2,7 @@ import { Injectable, CanActivate, ExecutionContext, ForbiddenException } from '@
 import { Reflector } from '@nestjs/core';
 import { UserRole } from '@ktb/shared-types';
 import { ROLES_KEY } from '../decorators/roles.decorator';
-import { EvaluatedMembershipContext } from '../authorization.service';
+import { AuthorizationService, EvaluatedMembershipContext } from '../authorization.service';
 
 /**
  * RolesGuard
@@ -11,9 +11,12 @@ import { EvaluatedMembershipContext } from '../authorization.service';
  */
 @Injectable()
 export class RolesGuard implements CanActivate {
-  constructor(private readonly reflector: Reflector) {}
+  constructor(
+    private readonly reflector: Reflector,
+    private readonly authorizationService: AuthorizationService,
+  ) {}
 
-  canActivate(context: ExecutionContext): boolean {
+  async canActivate(context: ExecutionContext): Promise<boolean> {
     const requiredRoles = this.reflector.getAllAndOverride<UserRole[]>(ROLES_KEY, [
       context.getHandler(),
       context.getClass(),
@@ -26,17 +29,16 @@ export class RolesGuard implements CanActivate {
 
     const request = context.switchToHttp().getRequest();
 
-    // Central Super Admin override
-    if (request.user?.isSuperAdmin) {
-      return true;
-    }
-
     const membershipContext: EvaluatedMembershipContext | undefined =
       request.organizationMembership;
 
     if (!membershipContext) {
-      const userRoles: UserRole[] = request.user?.roles ?? [];
-      const hasRole = requiredRoles.some((role) => userRoles.includes(role));
+      const userId = request.user?.id;
+      if (!userId) {
+        throw new ForbiddenException('Authentication required');
+      }
+      const current = await this.authorizationService.evaluateGlobalAccess(userId);
+      const hasRole = requiredRoles.some((role) => current.roles.includes(role));
       if (hasRole) {
         return true;
       }

@@ -52,8 +52,9 @@ export class BeneficiariesController {
   async getEligibility(
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('membershipId', ParseUUIDPipe) membershipId: string,
+    @CurrentUserId() userId: string,
   ) {
-    return this.beneficiariesService.getEligibility(organizationId, membershipId);
+    return this.beneficiariesService.getEligibility(organizationId, membershipId, userId);
   }
 
   @Post('caregivers/authorize')
@@ -99,7 +100,22 @@ export class BeneficiariesController {
   async listCaregivers(
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('membershipId', ParseUUIDPipe) membershipId: string,
+    @CurrentUserId() userId: string,
   ) {
-    return this.beneficiariesService.listCaregiversForBeneficiary(organizationId, membershipId);
+    return this.beneficiariesService.listCaregiversForBeneficiary(
+      organizationId,
+      membershipId,
+      userId,
+    );
+  }
+
+  @Get('caregivers/mine')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @ApiOperation({ summary: 'List the signed-in caregiver’s approved request recipients' })
+  async listMyCareRecipients(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @CurrentUserId() userId: string,
+  ) {
+    return this.beneficiariesService.listMyCareRecipients(organizationId, userId);
   }
 }

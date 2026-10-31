@@ -11,6 +11,7 @@ import {
   BeneficiaryEligibilityStatus,
   CaregiverAuthorizationStatus,
   MembershipStatus,
+  UserRole,
 } from '@ktb/shared-types';
 
 import { BeneficiaryEligibility } from './entities/beneficiary-eligibility.entity';
@@ -18,6 +19,11 @@ import { CaregiverAuthorization } from './entities/caregiver-authorization.entit
 import { OrganizationMembership } from '../memberships/entities/organization-membership.entity';
 import { ServiceRequest } from '../requests/entities/service-request.entity';
 import { AuditService } from '../audit/audit.service';
+import {
+  AuthorizationService,
+  EvaluatedMembershipContext,
+} from '../authorization/authorization.service';
+import { MembershipDocument } from '../memberships/entities/membership-document.entity';
 
 import { GrantBeneficiaryEligibilityDto } from './dto/grant-beneficiary-eligibility.dto';
 import { CreateCaregiverAuthorizationDto } from './dto/create-caregiver-authorization.dto';
@@ -35,6 +41,9 @@ export class BeneficiariesService {
     @InjectRepository(ServiceRequest)
     private readonly requestRepo: Repository<ServiceRequest>,
     private readonly auditService: AuditService,
+    private readonly authorizationService: AuthorizationService,
+    @InjectRepository(MembershipDocument)
+    private readonly documentRepo: Repository<MembershipDocument>,
   ) {}
 
   // ─── Beneficiary Eligibility ────────────────────────────────────────────────
@@ -108,13 +117,19 @@ export class BeneficiariesService {
     return saved;
   }
 
-  async getEligibility(orgId: string, membershipId: string): Promise<BeneficiaryEligibility> {
+  async getEligibility(
+    orgId: string,
+    membershipId: string,
+    actorId: string,
+  ): Promise<BeneficiaryEligibility> {
+    await this.assertBeneficiaryAccess(orgId, membershipId, actorId);
     const eligibility = await this.eligibilityRepo.findOne({
       where: { organizationId: orgId, membershipId },
-      relations: ['approver'],
     });
     if (!eligibility) {
-      throw new NotFoundException(`Beneficiary eligibility not found for membership '${membershipId}'`);
+      throw new NotFoundException(
+        `Beneficiary eligibility not found for membership '${membershipId}'`,
+      );
     }
     return eligibility;
   }
@@ -133,7 +148,9 @@ export class BeneficiariesService {
     }
 
     if (new Date() > new Date(eligibility.reviewDueAt)) {
-      throw new ForbiddenException('Beneficiary eligibility has expired and requires coordinator review (D#25)');
+      throw new ForbiddenException(
+        'Beneficiary eligibility has expired and requires coordinator review (D#25)',
+      );
     }
 
     // Category restriction check (D#24, FR-BEN)
@@ -196,6 +213,33 @@ export class BeneficiariesService {
 
     if (dto.beneficiaryMembershipId === dto.caregiverMembershipId) {
       throw new BadRequestException('Beneficiary and caregiver cannot be the same membership');
+    }
+
+    const context = await this.authorizationService.evaluateOrganizationAccess(actorId, orgId);
+    if (
+      !this.isStaff(context) &&
+      context.membershipId !== beneficiaryMem.id &&
+      context.membershipId !== caregiverMem.id
+    ) {
+      throw new ForbiddenException(
+        'Only the beneficiary, caregiver, or staff can request authorization',
+      );
+    }
+    if (dto.authorizationDocumentId) {
+      const document = await this.documentRepo.findOne({
+        where: { id: dto.authorizationDocumentId },
+        relations: ['membership'],
+      });
+      if (
+        !document ||
+        document.membership?.organizationId !== orgId ||
+        ![beneficiaryMem.id, caregiverMem.id].includes(document.membershipId) ||
+        (!this.isStaff(context) && document.membershipId !== context.membershipId)
+      ) {
+        throw new ForbiddenException(
+          'Authorization document is not accessible for this relationship',
+        );
+      }
     }
 
     const existing = await this.caregiverAuthRepo.findOne({
@@ -305,10 +349,20 @@ export class BeneficiariesService {
   async listCaregiversForBeneficiary(
     orgId: string,
     beneficiaryMembershipId: string,
+    actorId: string,
   ): Promise<CaregiverAuthorization[]> {
+    const context = await this.assertBeneficiaryAccess(orgId, beneficiaryMembershipId, actorId);
     return this.caregiverAuthRepo.find({
-      where: { organizationId: orgId, beneficiaryMembershipId },
-      relations: ['caregiverMembership', 'caregiverMembership.user', 'authorizationDocument'],
+      where: {
+        organizationId: orgId,
+        beneficiaryMembershipId,
+        ...(!this.isStaff(context) && context.membershipId !== beneficiaryMembershipId
+          ? {
+              caregiverMembershipId: context.membershipId,
+              status: CaregiverAuthorizationStatus.APPROVED,
+            }
+          : {}),
+      },
     });
   }
 
@@ -324,5 +378,76 @@ export class BeneficiariesService {
       },
       relations: ['beneficiaryMembership', 'beneficiaryMembership.user'],
     });
+  }
+
+  async listMyCareRecipients(orgId: string, actorId: string) {
+    const context = await this.authorizationService.evaluateOrganizationAccess(actorId, orgId);
+    if (!context.roles.includes(UserRole.CAREGIVER)) {
+      throw new ForbiddenException('Approved caregiver role required');
+    }
+    const authorizations = await this.caregiverAuthRepo.find({
+      where: {
+        organizationId: orgId,
+        caregiverMembershipId: context.membershipId,
+        status: CaregiverAuthorizationStatus.APPROVED,
+        canInitiateRequests: true,
+      },
+      relations: ['beneficiaryMembership'],
+      order: { createdAt: 'DESC' },
+    });
+    return authorizations.map((authorization) => ({
+      id: authorization.id,
+      organizationId: authorization.organizationId,
+      beneficiaryMembershipId: authorization.beneficiaryMembershipId,
+      caregiverMembershipId: authorization.caregiverMembershipId,
+      relationshipType: authorization.relationshipType,
+      status: authorization.status,
+      canInitiateRequests: authorization.canInitiateRequests,
+      canVerifyCompletions: authorization.canVerifyCompletions,
+      beneficiaryMembership: authorization.beneficiaryMembership
+        ? {
+            id: authorization.beneficiaryMembership.id,
+            membershipNumber: authorization.beneficiaryMembership.membershipNumber,
+          }
+        : null,
+    }));
+  }
+
+  private isStaff(context: EvaluatedMembershipContext): boolean {
+    return (
+      context.isSuperAdmin ||
+      context.roles.some((role) =>
+        [UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN].includes(role),
+      )
+    );
+  }
+
+  private async assertBeneficiaryAccess(
+    orgId: string,
+    membershipId: string,
+    actorId: string,
+  ): Promise<EvaluatedMembershipContext> {
+    const context = await this.authorizationService.evaluateOrganizationAccess(actorId, orgId);
+    const membership = await this.membershipRepo.findOne({
+      where: { id: membershipId, organizationId: orgId },
+    });
+    if (!membership) {
+      throw new NotFoundException('Beneficiary membership not found in this organization');
+    }
+    if (this.isStaff(context) || context.membershipId === membershipId) return context;
+    const relationship = await this.caregiverAuthRepo.findOne({
+      where: {
+        organizationId: orgId,
+        beneficiaryMembershipId: membershipId,
+        caregiverMembershipId: context.membershipId,
+        status: CaregiverAuthorizationStatus.APPROVED,
+      },
+    });
+    if (!relationship) {
+      throw new ForbiddenException(
+        'Beneficiary records require ownership, staff authority, or an approved caregiver relationship',
+      );
+    }
+    return context;
   }
 }

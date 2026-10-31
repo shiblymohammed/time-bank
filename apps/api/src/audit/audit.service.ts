@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import { AuditEvent } from './entities/audit-event.entity';
 
 export interface CreateAuditEventInput {
@@ -35,8 +35,9 @@ export class AuditService {
   /**
    * Appends an immutable audit event to the database (BR-09, NFR-09).
    */
-  async logEvent(input: CreateAuditEventInput): Promise<AuditEvent> {
-    const event = this.auditRepo.create({
+  async logEvent(input: CreateAuditEventInput, manager?: EntityManager): Promise<AuditEvent> {
+    const repository = manager?.getRepository(AuditEvent) ?? this.auditRepo;
+    const event = repository.create({
       eventType: input.eventType,
       actorId: input.actorId ?? null,
       targetId: input.targetId ?? null,
@@ -47,13 +48,15 @@ export class AuditService {
       ipAddress: input.ipAddress ?? null,
     });
 
-    return this.auditRepo.save(event);
+    return repository.save(event);
   }
 
   /**
    * Search and paginate audit events with multi-criteria filtering (M2-13).
    */
-  async queryEvents(input: QueryAuditEventsInput): Promise<{ events: AuditEvent[]; total: number }> {
+  async queryEvents(
+    input: QueryAuditEventsInput,
+  ): Promise<{ events: AuditEvent[]; total: number }> {
     const qb = this.auditRepo.createQueryBuilder('audit');
 
     if (input.eventType) {
@@ -63,7 +66,9 @@ export class AuditService {
       qb.andWhere('audit.actorId = :actorId', { actorId: input.actorId });
     }
     if (input.organizationId) {
-      qb.andWhere('audit.organizationId = :organizationId', { organizationId: input.organizationId });
+      qb.andWhere('audit.organizationId = :organizationId', {
+        organizationId: input.organizationId,
+      });
     }
     if (input.targetId) {
       qb.andWhere('audit.targetId = :targetId', { targetId: input.targetId });
