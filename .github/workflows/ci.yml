@@ -136,11 +136,7 @@ jobs:
         run: pnpm --filter @ktb/shared-types build
 
       - name: Run migrations against test database
-        run: |
-          cd apps/api
-          npx ts-node -r tsconfig-paths/register \
-            ../../node_modules/.bin/typeorm migration:run \
-            -d src/database/data-source.ts
+        run: pnpm --filter @ktb/api migration:run
 
       - name: Run E2E / integration tests
         run: pnpm test:e2e
@@ -210,29 +206,5 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ─── Job 5: Flutter analysis (no build — Flutter SDK not in CI yet) ───────
-  flutter-analysis:
-    name: Flutter Lint & Analysis
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
-        with:
-          flutter-version: '3.44.5'
-          channel: stable
-          cache: true
-
-      - name: Get Flutter dependencies
-        working-directory: apps/mobile/time_bank
-        run: flutter pub get
-
-      - name: Analyze Flutter code
-        working-directory: apps/mobile/time_bank
-        run: flutter analyze
-
-      - name: Run Flutter tests
-        working-directory: apps/mobile/time_bank
-        run: flutter test
+# The Flutter member app lives in its own repository (apps/mobile/time_bank_flutter, git-ignored here)
+# and is analyzed and tested by that repository's CI.

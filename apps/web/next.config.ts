@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { NextConfig } from 'next';
 
 /**
@@ -8,6 +9,11 @@ import type { NextConfig } from 'next';
  */
 const nextConfig: NextConfig = {
   // API traffic goes through the allowlisted /api/backend gateway, not a blanket rewrite.
+
+  // Self-contained server for infra/docker/Dockerfile.web; trace from the monorepo root so
+  // pnpm workspace dependencies are included.
+  output: 'standalone',
+  outputFileTracingRoot: path.join(__dirname, '../..'),
 
   // Strict mode helps surface concurrent rendering issues early
   reactStrictMode: true,

@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication, ValidationPipe, VersioningType } from '@nestjs/common';
-import * as request from 'supertest';
+import request from 'supertest';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { ConfigModule } from '@nestjs/config';
 import { TerminusModule } from '@nestjs/terminus';
@@ -50,7 +50,7 @@ describe('Health Endpoints (e2e)', () => {
 
   describe('GET /health/live', () => {
     it('returns 200 with status ok', async () => {
-      const response = await request(app.getHttpServer()).get('/health/live').expect(200);
+      const response = await request(app.getHttpServer()).get('/api/health/live').expect(200);
 
       expect(response.body).toMatchObject({
         status: 'ok',
@@ -62,7 +62,7 @@ describe('Health Endpoints (e2e)', () => {
 
   describe('GET /health/ready', () => {
     it('returns 200 when database is reachable', async () => {
-      const response = await request(app.getHttpServer()).get('/health/ready').expect(200);
+      const response = await request(app.getHttpServer()).get('/api/health/ready').expect(200);
 
       expect(response.body.status).toBe('ok');
       expect(response.body.info?.database?.status).toBe('up');
