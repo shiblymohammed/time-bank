@@ -32,6 +32,7 @@ import {
   AuthorizationService,
   EvaluatedMembershipContext,
 } from '../authorization/authorization.service';
+import { TimeLedgerService } from '../time-ledger/time-ledger.service';
 
 describe('RequestsService', () => {
   let service: RequestsService;
@@ -129,6 +130,7 @@ describe('RequestsService', () => {
         { provide: BeneficiariesService, useValue: mockBeneficiariesService },
         { provide: MatchingService, useValue: mockMatchingService },
         { provide: AuditService, useValue: mockAuditService },
+        { provide: TimeLedgerService, useValue: {} },
         {
           provide: AuthorizationService,
           useValue: {

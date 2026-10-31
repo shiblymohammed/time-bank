@@ -15,6 +15,7 @@ import { AuditModule } from '../audit/audit.module';
 import { AuthorizationModule } from '../authorization/authorization.module';
 import { BeneficiariesModule } from '../beneficiaries/beneficiaries.module';
 import { MatchingModule } from '../matching/matching.module';
+import { TimeLedgerModule } from '../time-ledger/time-ledger.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { MatchingModule } from '../matching/matching.module';
     AuditModule,
     AuthorizationModule,
     BeneficiariesModule,
+    TimeLedgerModule,
     forwardRef(() => MatchingModule),
   ],
   controllers: [RequestsController],

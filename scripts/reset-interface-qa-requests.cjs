@@ -12,7 +12,9 @@ const db = new Client({
 (async () => {
   await db.connect();
   await db.query('TRUNCATE service_requests CASCADE');
-  console.log('Cleared only disposable QA requests and their dependent matching records.');
+  // Truncating requests also removes their credit ledger rows; keep wallets consistent.
+  await db.query('UPDATE universal_time_wallets SET balance_credits=0, frozen_credits=0');
+  console.log('Cleared only disposable QA requests, their matching records and earned credits.');
 })()
   .catch((e) => {
     console.error(e);

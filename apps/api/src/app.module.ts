@@ -14,6 +14,7 @@ import { CatalogueModule } from './catalogue/catalogue.module';
 import { BeneficiariesModule } from './beneficiaries/beneficiaries.module';
 import { RequestsModule } from './requests/requests.module';
 import { MatchingModule } from './matching/matching.module';
+import { TimeLedgerModule } from './time-ledger/time-ledger.module';
 
 /**
  * Root application module.
@@ -77,6 +78,9 @@ import { MatchingModule } from './matching/matching.module';
     BeneficiariesModule,
     RequestsModule,
     MatchingModule,
+
+    // ─── Milestone 4 Time Credits ─────────────────────────────────────
+    TimeLedgerModule,
   ],
 })
 export class AppModule {}

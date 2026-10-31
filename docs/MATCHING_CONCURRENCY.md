@@ -18,7 +18,7 @@ round counters, and their audit event share one transaction.
 
 ## Real PostgreSQL verification
 
-The integration suite applies all six migrations to a disposable database. It uses the real matching service, audit
+The integration suite applies all seven migrations to a disposable database. It uses the real matching service, audit
 service, TypeORM repositories, and independent database connections. A blocker transaction holds a row until the
 database reports both booking operations waiting; the race tests do not depend on a timing-only sleep.
 

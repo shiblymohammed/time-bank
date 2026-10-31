@@ -237,6 +237,7 @@ function fixture() {
     delivery as any,
     audit,
     authz,
+    {} as any,
   );
   const admin = new AdminService(
     users as any,

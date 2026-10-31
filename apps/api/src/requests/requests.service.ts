@@ -29,6 +29,7 @@ import { BeneficiariesService } from '../beneficiaries/beneficiaries.service';
 import { MatchingService } from '../matching/matching.service';
 import { VolunteerAssignment } from '../matching/entities/volunteer-assignment.entity';
 import { AuditService } from '../audit/audit.service';
+import { TimeLedgerService } from '../time-ledger/time-ledger.service';
 import {
   AuthorizationService,
   EvaluatedMembershipContext,
@@ -62,6 +63,7 @@ export class RequestsService {
     private readonly matchingService: MatchingService,
     private readonly auditService: AuditService,
     private readonly authorizationService: AuthorizationService,
+    private readonly timeLedgerService: TimeLedgerService,
   ) {}
 
   // ─── Create Service Request (D#8, D#59, D#60, D#61) ─────────────────────────
@@ -626,7 +628,7 @@ export class RequestsService {
     dto: ConfirmServiceCompletionDto,
     ipAddress?: string,
     now = new Date(),
-  ): Promise<VolunteerAssignment> {
+  ): Promise<VolunteerAssignment & { creditsEarned: number; creditsHeld: boolean }> {
     return this.requestRepo.manager.transaction('READ COMMITTED', async (manager) => {
       const request = await manager.getRepository(ServiceRequest).findOne({
         where: { id: requestId, organizationId: orgId },
@@ -689,6 +691,18 @@ export class RequestsService {
       assignment.confirmedMinutes = minutes;
       const saved = await manager.getRepository(VolunteerAssignment).save(assignment);
 
+      // Pay the volunteer in the same transaction, so a confirmation and its
+      // credits are never separated (FR-TIME-02).
+      const credit = await this.timeLedgerService.postServiceEarning(manager, {
+        volunteerUserId: volunteer!.userId,
+        organizationId: orgId,
+        serviceRequestId: request.id,
+        volunteerAssignmentId: saved.id,
+        minutes,
+        policy: await this.timeLedgerService.policyForRequest(manager, request.id),
+        reference: request.requestNumber,
+      });
+
       // The request is complete once no helper is still due, working or unconfirmed.
       const open = await manager
         .getRepository(VolunteerAssignment)
@@ -717,12 +731,17 @@ export class RequestsService {
             reportedMinutes: assignment.reportedMinutes,
             confirmedMinutes: minutes,
             requestCompleted: open === 0,
+            creditsEarned: credit?.amount ?? 0,
+            creditsHeld: credit?.held ?? false,
           },
           ipAddress: ipAddress ?? null,
         },
         manager,
       );
-      return saved;
+      return Object.assign(saved, {
+        creditsEarned: credit?.amount ?? 0,
+        creditsHeld: credit?.held ?? false,
+      });
     });
   }
 

@@ -16,6 +16,10 @@ import { MatchingConfigService } from '../src/matching/matching-config.service';
 import { DeterministicCandidateRankingStrategy } from '../src/matching/ranking/deterministic-ranking.strategy';
 import { RescheduleConfirmation1729118400005 } from '../src/database/migrations/1729118400005-RescheduleConfirmation';
 import { ServiceCompletion1729118400006 } from '../src/database/migrations/1729118400006-ServiceCompletion';
+import { TimeCreditLedger1729118400007 } from '../src/database/migrations/1729118400007-TimeCreditLedger';
+import { TimeLedgerService } from '../src/time-ledger/time-ledger.service';
+import { TimeCreditLedgerEntry } from '../src/time-ledger/entities/time-credit-ledger-entry.entity';
+import { UniversalTimeWallet } from '../src/identity/entities/universal-time-wallet.entity';
 import { VolunteerAssignmentStatus } from '@ktb/shared-types';
 import { MatchingService } from '../src/matching/matching.service';
 import { AuditService } from '../src/audit/audit.service';
@@ -53,6 +57,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       OperationalZonesAndMatchingRounds1729118400004,
       RescheduleConfirmation1729118400005,
       ServiceCompletion1729118400006,
+      TimeCreditLedger1729118400007,
     ],
     synchronize: false,
     extra: {
@@ -65,6 +70,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
   let requests: RequestsService;
   let audit: AuditService;
   let authorization: AuthorizationService;
+  let ledger: TimeLedgerService;
   let orgA: string, orgB: string, volunteer: string, otherVolunteer: string, coordinator: string;
   let memberA: string,
     memberB: string,
@@ -87,6 +93,11 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       db.getRepository(OrganizationMembership),
       db.getRepository(MembershipRoleGrant),
       db.getRepository(GlobalAccountRestriction),
+    );
+    ledger = new TimeLedgerService(
+      db.getRepository(UniversalTimeWallet),
+      db.getRepository(TimeCreditLedgerEntry),
+      audit,
     );
     service = new MatchingService(
       db.getRepository(VolunteerSkill),
@@ -116,6 +127,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       service,
       audit,
       authorization,
+      ledger,
     );
   });
 
@@ -1083,6 +1095,116 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
           cancellationReason: 'OTHER',
         } as any),
       ).rejects.toThrow('IN_PROGRESS');
+    });
+  });
+
+  describe('time credits paid on confirmation', () => {
+    const scheduled = '2030-01-01T10:00:00Z';
+    const at = (iso: string) => new Date(iso);
+    const wallet = async () =>
+      (
+        await db.query(
+          'SELECT balance_credits::float AS balance, frozen_credits::float AS frozen FROM universal_time_wallets WHERE user_id=$1',
+          [volunteer],
+        )
+      )[0];
+
+    // Accepted, started at the scheduled time and finished after `elapsed` minutes.
+    async function finished(elapsed: number, minutes?: number) {
+      const req = await request(scheduled);
+      const assignment = await offer(req);
+      await service.acceptOffer(orgA, assignment, memberA, {});
+      await service.startAssignment(orgA, assignment, memberA, undefined, at(scheduled));
+      const end = new Date(at(scheduled).getTime() + elapsed * 60_000);
+      await service.finishAssignment(
+        orgA,
+        assignment,
+        memberA,
+        minutes ? { minutes } : {},
+        undefined,
+        end,
+      );
+      return { req, assignment };
+    }
+
+    async function confirm(req: string, assignment: string) {
+      const staff = await authorization.evaluateOrganizationAccess(coordinator, orgA);
+      return requests.confirmCompletion(orgA, req, assignment, coordinator, staff, {});
+    }
+
+    it('pays the volunteer once, by the service rate, and records the origin community', async () => {
+      await db.query('UPDATE global_service_definitions SET credit_multiplier=1.5');
+      const { req, assignment } = await finished(90);
+      expect(await wallet()).toBeUndefined();
+
+      const confirmed = await confirm(req, assignment);
+      expect(confirmed.creditsEarned).toBe(2.25);
+      expect(confirmed.creditsHeld).toBe(false);
+      expect(await wallet()).toEqual({ balance: 2.25, frozen: 0 });
+      await expect(confirm(req, assignment)).rejects.toThrow('already been confirmed');
+      expect(await wallet()).toEqual({ balance: 2.25, frozen: 0 });
+
+      const history = await ledger.listMyTransactions(volunteer);
+      expect(history.balanceCredits).toBe(2.25);
+      expect(history.total).toBe(1);
+      expect(history.data[0]).toMatchObject({
+        amount: 2.25,
+        balanceAfter: 2.25,
+        held: false,
+        txType: 'SERVICE_EARNED',
+        minutes: 90,
+        organization: { id: orgA },
+        serviceRequest: { id: req, serviceName: 'Test' },
+      });
+      expect((await ledger.listMyTransactions(coordinator)).data).toEqual([]);
+
+      const events = await db.query(
+        "SELECT event_type FROM audit_events WHERE event_type LIKE 'TIME_CREDITS_%'",
+      );
+      expect(events).toEqual([{ event_type: 'TIME_CREDITS_EARNED' }]);
+    });
+
+    it('keeps the ledger append-only and each assignment paid at most once', async () => {
+      const { req, assignment } = await finished(60);
+      await confirm(req, assignment);
+      await expect(db.query('UPDATE time_credit_ledger SET amount=5')).rejects.toThrow(
+        'append-only',
+      );
+      await expect(db.query('DELETE FROM time_credit_ledger')).rejects.toThrow('append-only');
+      await expect(
+        db.query(
+          "INSERT INTO time_credit_ledger(wallet_id,amount,balance_after,tx_type,originating_org_id,service_request_id,volunteer_assignment_id,minutes) SELECT wallet_id,1,2,'SERVICE_EARNED',originating_org_id,service_request_id,volunteer_assignment_id,60 FROM time_credit_ledger",
+        ),
+      ).rejects.toThrow('uq_ledger_assignment_payment');
+      expect(await wallet()).toEqual({ balance: 1, frozen: 0 });
+    });
+
+    it('counts whole hours only when the service does not allow partial hours', async () => {
+      await db.query('UPDATE global_service_definitions SET allow_partial_hours=false');
+      const first = await finished(90);
+      expect((await confirm(first.req, first.assignment)).creditsEarned).toBe(1);
+      const short = await finished(60, 50);
+      expect((await confirm(short.req, short.assignment)).creditsEarned).toBe(0);
+      expect(await wallet()).toEqual({ balance: 1, frozen: 0 });
+      expect((await ledger.listMyTransactions(volunteer)).total).toBe(1);
+    });
+
+    it('holds credits for a frozen wallet without touching the spendable balance', async () => {
+      await db.query(
+        "INSERT INTO universal_time_wallets(user_id,balance_credits,status) VALUES($1,3,'FROZEN')",
+        [volunteer],
+      );
+      const { req, assignment } = await finished(60);
+      const confirmed = await confirm(req, assignment);
+      expect(confirmed.creditsHeld).toBe(true);
+      expect(await wallet()).toEqual({ balance: 3, frozen: 1 });
+      const history = await ledger.listMyTransactions(volunteer);
+      expect(history.status).toBe('FROZEN');
+      expect(history.data[0]).toMatchObject({ amount: 1, balanceAfter: 3, held: true });
+      const events = await db.query(
+        "SELECT event_type FROM audit_events WHERE event_type LIKE 'TIME_CREDITS_%'",
+      );
+      expect(events).toEqual([{ event_type: 'TIME_CREDITS_HELD' }]);
     });
   });
 });
