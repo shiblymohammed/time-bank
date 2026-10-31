@@ -94,7 +94,7 @@ const db = new DataSource({
     path.resolve(__dirname, '../node_modules/.cache/interface-qa/fixture.json'),
     JSON.stringify(data, null, 2),
   );
-  console.log('Five migrations applied; disposable interface fixtures created.');
+  console.log('All migrations applied; disposable interface fixtures created.');
 })()
   .finally(() => db.destroy())
   .catch((e) => {

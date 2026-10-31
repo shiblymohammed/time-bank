@@ -21,6 +21,7 @@ import { VerifyVolunteerSkillDto } from './dto/verify-volunteer-skill.dto';
 import { AcceptVolunteerOfferDto } from './dto/accept-volunteer-offer.dto';
 import { DeclineVolunteerOfferDto } from './dto/decline-volunteer-offer.dto';
 import { WithdrawVolunteerAssignmentDto } from './dto/withdraw-volunteer-assignment.dto';
+import { FinishVolunteerAssignmentDto } from './dto/finish-volunteer-assignment.dto';
 import { CoordinatorDispatchDto } from './dto/coordinator-dispatch.dto';
 import { DispatchVolunteerQueryDto } from './dto/dispatch-volunteer-query.dto';
 import { CreateOperationalZoneDto } from './dto/create-operational-zone.dto';
@@ -259,6 +260,51 @@ export class MatchingController {
     const membershipContext = (req as any).organizationMembership;
     const ip = req.ip ?? req.socket.remoteAddress;
     return this.matchingService.withdrawAssignment(
+      organizationId,
+      assignmentId,
+      membershipContext.membershipId,
+      dto,
+      ip,
+    );
+  }
+
+  @Post('assignments/:assignmentId/start')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @ApiOperation({ summary: 'Volunteer starts an accepted assignment' })
+  @ApiResponse({ status: 201, description: 'Service started' })
+  @ApiResponse({ status: 409, description: 'Not accepted, or too early to start' })
+  async startAssignment(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @Param('assignmentId', ParseUUIDPipe) assignmentId: string,
+    @Req() req: Request,
+  ) {
+    const membershipContext = (req as any).organizationMembership;
+    const ip = req.ip ?? req.socket.remoteAddress;
+    return this.matchingService.startAssignment(
+      organizationId,
+      assignmentId,
+      membershipContext.membershipId,
+      ip,
+    );
+  }
+
+  @Post('assignments/:assignmentId/finish')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @ApiOperation({
+    summary: 'Volunteer finishes a started assignment and reports the minutes given',
+    description: 'The service then waits for confirmation by someone other than the volunteer.',
+  })
+  @ApiResponse({ status: 201, description: 'Service finished, awaiting confirmation' })
+  @ApiResponse({ status: 409, description: 'The assignment was not started' })
+  async finishAssignment(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @Param('assignmentId', ParseUUIDPipe) assignmentId: string,
+    @Body() dto: FinishVolunteerAssignmentDto,
+    @Req() req: Request,
+  ) {
+    const membershipContext = (req as any).organizationMembership;
+    const ip = req.ip ?? req.socket.remoteAddress;
+    return this.matchingService.finishAssignment(
       organizationId,
       assignmentId,
       membershipContext.membershipId,

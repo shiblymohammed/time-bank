@@ -38,6 +38,7 @@ import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { CancelServiceRequestDto } from './dto/cancel-service-request.dto';
 import { RescheduleServiceRequestDto } from './dto/reschedule-service-request.dto';
 import { RequestQueryDto } from './dto/request-query.dto';
+import { ConfirmServiceCompletionDto } from './dto/confirm-service-completion.dto';
 
 @Injectable()
 export class RequestsService {
@@ -605,6 +606,118 @@ export class RequestsService {
           targetType: 'service_requests',
           organizationId: orgId,
           payload: { previousStartTime, newStartTime, reason: dto.reason },
+          ipAddress: ipAddress ?? null,
+        },
+        manager,
+      );
+      return saved;
+    });
+  }
+
+  // ─── Confirm Completed Service ──────────────────────────────────────────────
+  // The beneficiary, an authorized caregiver or staff confirms a finished
+  // assignment. A volunteer never confirms their own service, even as staff.
+  async confirmCompletion(
+    orgId: string,
+    requestId: string,
+    assignmentId: string,
+    callingUserId: string,
+    membershipContext: EvaluatedMembershipContext,
+    dto: ConfirmServiceCompletionDto,
+    ipAddress?: string,
+    now = new Date(),
+  ): Promise<VolunteerAssignment> {
+    return this.requestRepo.manager.transaction('READ COMMITTED', async (manager) => {
+      const request = await manager.getRepository(ServiceRequest).findOne({
+        where: { id: requestId, organizationId: orgId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!request) throw new NotFoundException(`Service request '${requestId}' not found`);
+
+      const isStaff =
+        membershipContext.isSuperAdmin ||
+        membershipContext.roles.includes(UserRole.COORDINATOR) ||
+        membershipContext.roles.includes(UserRole.MUNICIPALITY_ADMIN);
+      let confirmerRole = isStaff ? 'COORDINATOR' : 'BENEFICIARY';
+      if (!isStaff && request.beneficiaryMembershipId !== membershipContext.membershipId) {
+        const caregiver = await this.beneficiariesService
+          .verifyCaregiverProxyAccess(
+            orgId,
+            membershipContext.membershipId,
+            request.beneficiaryMembershipId,
+          )
+          .catch(() => null);
+        if (!caregiver) {
+          throw new ForbiddenException('You do not have permission to confirm this service');
+        }
+        confirmerRole = 'CAREGIVER';
+      }
+
+      const assignment = await manager.getRepository(VolunteerAssignment).findOne({
+        where: { id: assignmentId, serviceRequestId: request.id, organizationId: orgId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!assignment) throw new NotFoundException(`Assignment '${assignmentId}' not found`);
+      const volunteer = await manager.getRepository(OrganizationMembership).findOne({
+        where: { id: assignment.volunteerMembershipId },
+      });
+      if (
+        assignment.volunteerMembershipId === membershipContext.membershipId ||
+        volunteer?.userId === callingUserId
+      ) {
+        throw new ForbiddenException('A volunteer cannot confirm their own service');
+      }
+      if (assignment.confirmedAt) {
+        throw new ConflictException('This service has already been confirmed');
+      }
+      if (
+        assignment.status !== VolunteerAssignmentStatus.COMPLETED ||
+        !assignment.finishedAt ||
+        !assignment.reportedMinutes
+      ) {
+        throw new ConflictException('The volunteer has not finished this service yet');
+      }
+      const minutes = dto.minutes ?? assignment.reportedMinutes;
+      if (minutes > assignment.reportedMinutes) {
+        throw new BadRequestException(
+          `At most the ${assignment.reportedMinutes} reported minutes can be confirmed`,
+        );
+      }
+
+      assignment.confirmedAt = now;
+      assignment.confirmedByUserId = callingUserId;
+      assignment.confirmedMinutes = minutes;
+      const saved = await manager.getRepository(VolunteerAssignment).save(assignment);
+
+      // The request is complete once no helper is still due, working or unconfirmed.
+      const open = await manager
+        .getRepository(VolunteerAssignment)
+        .createQueryBuilder('a')
+        .where('a.serviceRequestId = :id', { id: request.id })
+        .andWhere('(a.status IN (:...active) OR (a.status = :done AND a.confirmedAt IS NULL))', {
+          active: [VolunteerAssignmentStatus.ACCEPTED, VolunteerAssignmentStatus.IN_PROGRESS],
+          done: VolunteerAssignmentStatus.COMPLETED,
+        })
+        .getCount();
+      if (open === 0) {
+        request.status = ServiceRequestStatus.COMPLETED;
+        await manager.getRepository(ServiceRequest).save(request);
+      }
+
+      await this.auditService.logEvent(
+        {
+          eventType: 'SERVICE_CONFIRMED',
+          actorId: callingUserId,
+          targetId: saved.id,
+          targetType: 'volunteer_assignments',
+          organizationId: orgId,
+          payload: {
+            serviceRequestId: request.id,
+            confirmerRole,
+            reportedMinutes: assignment.reportedMinutes,
+            confirmedMinutes: minutes,
+            requestCompleted: open === 0,
+          },
           ipAddress: ipAddress ?? null,
         },
         manager,

@@ -47,12 +47,18 @@ import { VerifyVolunteerSkillDto } from './dto/verify-volunteer-skill.dto';
 import { AcceptVolunteerOfferDto } from './dto/accept-volunteer-offer.dto';
 import { DeclineVolunteerOfferDto } from './dto/decline-volunteer-offer.dto';
 import { WithdrawVolunteerAssignmentDto } from './dto/withdraw-volunteer-assignment.dto';
+import { FinishVolunteerAssignmentDto } from './dto/finish-volunteer-assignment.dto';
 import { CoordinatorDispatchDto } from './dto/coordinator-dispatch.dto';
 import { DispatchVolunteerQueryDto } from './dto/dispatch-volunteer-query.dto';
 import { OrganizationServiceCatalog } from '../catalogue/entities/organization-service-catalog.entity';
 import { CreateOperationalZoneDto } from './dto/create-operational-zone.dto';
 import { UpdateOperationalZoneDto } from './dto/update-operational-zone.dto';
 import { AssignVolunteerZoneDto } from './dto/assign-volunteer-zone.dto';
+
+/** A volunteer may start this long before the scheduled time (travel, early arrival). */
+export const START_EARLY_MINUTES = 60;
+/** The longest single service a volunteer can report. */
+export const MAX_SERVICE_MINUTES = 720;
 
 @Injectable()
 export class MatchingService {
@@ -426,6 +432,11 @@ export class MatchingService {
       offeredAt: assignment.offeredAt,
       offerExpiresAt: assignment.offerExpiresAt,
       acceptedAt: assignment.acceptedAt,
+      startedAt: assignment.startedAt ?? null,
+      finishedAt: assignment.finishedAt ?? null,
+      reportedMinutes: assignment.reportedMinutes ?? null,
+      confirmedAt: assignment.confirmedAt ?? null,
+      confirmedMinutes: assignment.confirmedMinutes ?? null,
       scheduledStartTime: assignmentSchedule(assignment),
       reschedule: assignment.reschedule
         ? {
@@ -1233,6 +1244,151 @@ export class MatchingService {
       );
 
       return savedAssignment;
+    });
+  }
+
+  // ─── Service Start and Finish ───────────────────────────────────────────────
+  // Locks the request, then the volunteer's own assignment, in the same order
+  // as withdrawal and acceptance so concurrent changes cannot interleave.
+  private async lockOwnAssignment(
+    manager: EntityManager,
+    orgId: string,
+    assignmentId: string,
+    volunteerMembershipId: string,
+  ): Promise<{ assignment: VolunteerAssignment; request: ServiceRequest }> {
+    const found = await manager.findOne(VolunteerAssignment, {
+      where: { id: assignmentId, organizationId: orgId, volunteerMembershipId },
+    });
+    if (!found) throw new NotFoundException(`Assignment '${assignmentId}' not found`);
+    const request = await manager
+      .createQueryBuilder(ServiceRequest, 'req')
+      .setLock('pessimistic_write')
+      .where('req.id = :id AND req.organizationId = :orgId', {
+        id: found.serviceRequestId,
+        orgId,
+      })
+      .getOne();
+    if (!request) throw new NotFoundException('Associated service request not found');
+    const assignment = await manager.findOne(VolunteerAssignment, {
+      where: { id: assignmentId, organizationId: orgId, volunteerMembershipId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    if (!assignment) throw new NotFoundException('Assignment not found');
+    return { assignment, request };
+  }
+
+  async startAssignment(
+    orgId: string,
+    assignmentId: string,
+    volunteerMembershipId: string,
+    ipAddress?: string,
+    now = new Date(),
+  ): Promise<VolunteerAssignment> {
+    return this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const { assignment, request } = await this.lockOwnAssignment(
+        manager,
+        orgId,
+        assignmentId,
+        volunteerMembershipId,
+      );
+      if (assignment.status !== VolunteerAssignmentStatus.ACCEPTED) {
+        throw new ConflictException(
+          `Only an accepted assignment can be started (current: ${assignment.status})`,
+        );
+      }
+      if (
+        ![
+          ServiceRequestStatus.PARTIALLY_ACCEPTED,
+          ServiceRequestStatus.FULLY_MATCHED,
+          ServiceRequestStatus.IN_PROGRESS,
+        ].includes(request.status)
+      ) {
+        throw new ConflictException(`This request cannot be started (status: ${request.status})`);
+      }
+      const start = new Date(request.scheduledStartTime).getTime();
+      if (now.getTime() < start - START_EARLY_MINUTES * 60_000) {
+        throw new ConflictException(
+          `The service can be started from ${START_EARLY_MINUTES} minutes before its scheduled time`,
+        );
+      }
+
+      assignment.status = VolunteerAssignmentStatus.IN_PROGRESS;
+      assignment.startedAt = now;
+      const saved = await manager.save(VolunteerAssignment, assignment);
+      if (request.status !== ServiceRequestStatus.IN_PROGRESS) {
+        request.status = ServiceRequestStatus.IN_PROGRESS;
+        await manager.save(ServiceRequest, request);
+      }
+      await this.auditService.logEvent(
+        {
+          eventType: 'SERVICE_STARTED',
+          actorId: null,
+          targetId: saved.id,
+          targetType: 'volunteer_assignments',
+          organizationId: orgId,
+          payload: { serviceRequestId: request.id, volunteerMembershipId },
+          ipAddress: ipAddress ?? null,
+        },
+        manager,
+      );
+      return saved;
+    });
+  }
+
+  async finishAssignment(
+    orgId: string,
+    assignmentId: string,
+    volunteerMembershipId: string,
+    dto: FinishVolunteerAssignmentDto,
+    ipAddress?: string,
+    now = new Date(),
+  ): Promise<VolunteerAssignment> {
+    return this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const { assignment, request } = await this.lockOwnAssignment(
+        manager,
+        orgId,
+        assignmentId,
+        volunteerMembershipId,
+      );
+      if (assignment.status !== VolunteerAssignmentStatus.IN_PROGRESS || !assignment.startedAt) {
+        throw new ConflictException(
+          `Only a started assignment can be finished (current: ${assignment.status})`,
+        );
+      }
+      const elapsed = Math.max(
+        1,
+        Math.ceil((now.getTime() - new Date(assignment.startedAt).getTime()) / 60_000),
+      );
+      // A volunteer who pressed Start late may report up to the expected duration.
+      const allowed = Math.min(
+        MAX_SERVICE_MINUTES,
+        Math.max(elapsed, request.expectedDurationMinutes),
+      );
+      const minutes = dto.minutes ?? Math.min(elapsed, MAX_SERVICE_MINUTES);
+      if (minutes > allowed) {
+        throw new BadRequestException(
+          `At most ${allowed} minutes can be reported for this service`,
+        );
+      }
+
+      assignment.status = VolunteerAssignmentStatus.COMPLETED;
+      assignment.finishedAt = now;
+      assignment.reportedMinutes = minutes;
+      assignment.completionNotes = dto.notes?.trim() || null;
+      const saved = await manager.save(VolunteerAssignment, assignment);
+      await this.auditService.logEvent(
+        {
+          eventType: 'SERVICE_FINISHED',
+          actorId: null,
+          targetId: saved.id,
+          targetType: 'volunteer_assignments',
+          organizationId: orgId,
+          payload: { serviceRequestId: request.id, volunteerMembershipId, minutes },
+          ipAddress: ipAddress ?? null,
+        },
+        manager,
+      );
+      return saved;
     });
   }
 

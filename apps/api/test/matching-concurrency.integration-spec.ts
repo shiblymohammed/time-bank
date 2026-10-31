@@ -15,6 +15,7 @@ import { AuthorizationService } from '../src/authorization/authorization.service
 import { MatchingConfigService } from '../src/matching/matching-config.service';
 import { DeterministicCandidateRankingStrategy } from '../src/matching/ranking/deterministic-ranking.strategy';
 import { RescheduleConfirmation1729118400005 } from '../src/database/migrations/1729118400005-RescheduleConfirmation';
+import { ServiceCompletion1729118400006 } from '../src/database/migrations/1729118400006-ServiceCompletion';
 import { VolunteerAssignmentStatus } from '@ktb/shared-types';
 import { MatchingService } from '../src/matching/matching.service';
 import { AuditService } from '../src/audit/audit.service';
@@ -51,6 +52,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       ServiceCatalogueAndRequests1729118400003,
       OperationalZonesAndMatchingRounds1729118400004,
       RescheduleConfirmation1729118400005,
+      ServiceCompletion1729118400006,
     ],
     synchronize: false,
     extra: {
@@ -62,6 +64,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
   let service: MatchingService;
   let requests: RequestsService;
   let audit: AuditService;
+  let authorization: AuthorizationService;
   let orgA: string, orgB: string, volunteer: string, otherVolunteer: string, coordinator: string;
   let memberA: string,
     memberB: string,
@@ -78,7 +81,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
     await db.initialize();
     await db.runMigrations();
     audit = new AuditService(db.getRepository(AuditEvent));
-    const authorization = new AuthorizationService(
+    authorization = new AuthorizationService(
       db.getRepository(User),
       db.getRepository(Organization),
       db.getRepository(OrganizationMembership),
@@ -903,5 +906,183 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
     expect(
       (await db.getRepository(VolunteerAssignment).findOneByOrFail({ id: old })).status,
     ).not.toBe('ACCEPTED');
+  });
+
+  describe('service start, finish and confirmation', () => {
+    const scheduled = '2030-01-01T10:00:00Z';
+    const at = (iso: string) => new Date(iso);
+    const userOf = async (membership: string) =>
+      (await db.getRepository(OrganizationMembership).findOneByOrFail({ id: membership })).userId;
+    const statusOf = async (req: string) =>
+      (await db.getRepository(ServiceRequest).findOneByOrFail({ id: req })).status;
+
+    async function accepted() {
+      const req = await request(scheduled);
+      const assignment = await offer(req);
+      await service.acceptOffer(orgA, assignment, memberA, {});
+      return { req, assignment };
+    }
+
+    it('runs start, finish and beneficiary confirmation and completes the request', async () => {
+      const { req, assignment } = await accepted();
+      await expect(
+        service.startAssignment(orgA, assignment, memberA, undefined, at('2030-01-01T08:59:00Z')),
+      ).rejects.toThrow('60 minutes before');
+      await service.startAssignment(
+        orgA,
+        assignment,
+        memberA,
+        undefined,
+        at('2030-01-01T09:50:00Z'),
+      );
+      expect(await statusOf(req)).toBe('IN_PROGRESS');
+
+      const beneficiary = await userOf(beneficiaryA);
+      const context = await authorization.evaluateOrganizationAccess(beneficiary, orgA);
+      await expect(
+        requests.confirmCompletion(orgA, req, assignment, beneficiary, context, {}),
+      ).rejects.toThrow('has not finished');
+      // 70 minutes elapsed; the expected 60 does not cap time actually given.
+      const finished = await service.finishAssignment(
+        orgA,
+        assignment,
+        memberA,
+        { notes: ' Shopping done ' },
+        undefined,
+        at('2030-01-01T11:00:00Z'),
+      );
+      expect(finished.reportedMinutes).toBe(70);
+      expect(finished.completionNotes).toBe('Shopping done');
+      expect(await statusOf(req)).toBe('IN_PROGRESS');
+
+      await expect(
+        requests.confirmCompletion(orgA, req, assignment, beneficiary, context, { minutes: 71 }),
+      ).rejects.toThrow('At most the 70');
+      const confirmed = await requests.confirmCompletion(
+        orgA,
+        req,
+        assignment,
+        beneficiary,
+        context,
+        { minutes: 65 },
+      );
+      expect(confirmed.confirmedMinutes).toBe(65);
+      expect(confirmed.confirmedByUserId).toBe(beneficiary);
+      expect(await statusOf(req)).toBe('COMPLETED');
+      await expect(
+        requests.confirmCompletion(orgA, req, assignment, beneficiary, context, {}),
+      ).rejects.toThrow('already been confirmed');
+      const events = await db.query(
+        "SELECT event_type FROM audit_events WHERE target_id=$1 AND event_type LIKE 'SERVICE_%' ORDER BY created_at",
+        [assignment],
+      );
+      expect(events.map((e: { event_type: string }) => e.event_type)).toEqual([
+        'SERVICE_STARTED',
+        'SERVICE_FINISHED',
+        'SERVICE_CONFIRMED',
+      ]);
+    });
+
+    it('limits reported minutes and only lets the assigned volunteer finish', async () => {
+      const { assignment } = await accepted();
+      await expect(
+        service.finishAssignment(orgA, assignment, memberA, {}, undefined, at(scheduled)),
+      ).rejects.toThrow('Only a started assignment');
+      await service.startAssignment(orgA, assignment, memberA, undefined, at(scheduled));
+      await expect(
+        service.finishAssignment(orgA, assignment, otherMember, {}, undefined, at(scheduled)),
+      ).rejects.toThrow('not found');
+      // Ten minutes in, a late Start still allows the expected hour, but no more.
+      const later = at('2030-01-01T10:10:00Z');
+      await expect(
+        service.finishAssignment(orgA, assignment, memberA, { minutes: 61 }, undefined, later),
+      ).rejects.toThrow('At most 60 minutes');
+      const done = await service.finishAssignment(
+        orgA,
+        assignment,
+        memberA,
+        { minutes: 60 },
+        undefined,
+        later,
+      );
+      expect(done.reportedMinutes).toBe(60);
+      expect(done.status).toBe('COMPLETED');
+    });
+
+    it('never lets the volunteer confirm, even when they are also a coordinator', async () => {
+      const { req, assignment } = await accepted();
+      await service.startAssignment(orgA, assignment, memberA, undefined, at(scheduled));
+      await service.finishAssignment(orgA, assignment, memberA, {}, undefined, at(scheduled));
+      await db.query(
+        "INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,'COORDINATOR',$2)",
+        [memberA, coordinator],
+      );
+      const own = await authorization.evaluateOrganizationAccess(volunteer, orgA);
+      await expect(
+        requests.confirmCompletion(orgA, req, assignment, volunteer, own, {}),
+      ).rejects.toThrow('cannot confirm their own service');
+      const stranger = await authorization.evaluateOrganizationAccess(otherVolunteer, orgA);
+      (requests as any).beneficiariesService = {
+        verifyCaregiverProxyAccess: () => Promise.reject(new Error('no authorization')),
+      };
+      await expect(
+        requests.confirmCompletion(orgA, req, assignment, otherVolunteer, stranger, {}),
+      ).rejects.toThrow('permission to confirm');
+      const staff = await authorization.evaluateOrganizationAccess(coordinator, orgA);
+      const confirmed = await requests.confirmCompletion(
+        orgA,
+        req,
+        assignment,
+        coordinator,
+        staff,
+        {},
+      );
+      expect(confirmed.confirmedMinutes).toBe(1);
+    });
+
+    it('keeps a team request open until every finished helper is confirmed', async () => {
+      const req = await request(scheduled, orgA, 2);
+      await db.query('UPDATE service_requests SET min_volunteers=2 WHERE id=$1', [req]);
+      for (const member of [memberA, otherMember]) {
+        await service.coordinatorDispatch(
+          orgA,
+          req,
+          { volunteerMembershipId: member },
+          coordinator,
+        );
+      }
+      const team = await db
+        .getRepository(VolunteerAssignment)
+        .find({ where: { serviceRequestId: req } });
+      const first = team.find((a) => a.volunteerMembershipId === memberA)!.id;
+      const second = team.find((a) => a.volunteerMembershipId === otherMember)!.id;
+      expect(team.map((a) => a.status)).toEqual(['ACCEPTED', 'ACCEPTED']);
+      for (const [assignment, member] of [
+        [first, memberA],
+        [second, otherMember],
+      ] as const) {
+        await service.startAssignment(orgA, assignment, member, undefined, at(scheduled));
+        await service.finishAssignment(orgA, assignment, member, {}, undefined, at(scheduled));
+      }
+      const staff = await authorization.evaluateOrganizationAccess(coordinator, orgA);
+      await requests.confirmCompletion(orgA, req, first, coordinator, staff, {});
+      expect(await statusOf(req)).toBe('IN_PROGRESS');
+      await requests.confirmCompletion(orgA, req, second, coordinator, staff, {});
+      expect(await statusOf(req)).toBe('COMPLETED');
+    });
+
+    it('blocks withdrawing and cancelling once the service has started', async () => {
+      const { req, assignment } = await accepted();
+      await service.startAssignment(orgA, assignment, memberA, undefined, at(scheduled));
+      await expect(
+        service.withdrawAssignment(orgA, assignment, memberA, { withdrawalReason: 'Too late' }),
+      ).rejects.toThrow('ACCEPTED status');
+      const staff = await authorization.evaluateOrganizationAccess(coordinator, orgA);
+      await expect(
+        requests.cancelRequest(orgA, req, coordinator, staff, {
+          cancellationReason: 'OTHER',
+        } as any),
+      ).rejects.toThrow('IN_PROGRESS');
+    });
   });
 });

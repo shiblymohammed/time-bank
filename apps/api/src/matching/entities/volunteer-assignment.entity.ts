@@ -96,6 +96,32 @@ export class VolunteerAssignment {
   @Column({ name: 'withdrawal_reason', type: 'text', nullable: true })
   withdrawalReason?: string | null;
 
+  // Service completion: the volunteer starts and finishes; someone else confirms.
+  @Column({ name: 'started_at', type: 'timestamptz', nullable: true })
+  startedAt?: Date | null;
+
+  @Column({ name: 'finished_at', type: 'timestamptz', nullable: true })
+  finishedAt?: Date | null;
+
+  @Column({ name: 'reported_minutes', type: 'int', nullable: true })
+  reportedMinutes?: number | null;
+
+  @Column({ name: 'completion_notes', type: 'text', nullable: true })
+  completionNotes?: string | null;
+
+  @Column({ name: 'confirmed_at', type: 'timestamptz', nullable: true })
+  confirmedAt?: Date | null;
+
+  @Column({ name: 'confirmed_by_user_id', type: 'uuid', nullable: true })
+  confirmedByUserId?: string | null;
+
+  @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'confirmed_by_user_id' })
+  confirmedBy?: User | null;
+
+  @Column({ name: 'confirmed_minutes', type: 'int', nullable: true })
+  confirmedMinutes?: number | null;
+
   @Column({ name: 'replaced_by_assignment_id', type: 'uuid', nullable: true })
   replacedByAssignmentId?: string | null;
 
