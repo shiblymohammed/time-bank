@@ -43,9 +43,7 @@ describe('MatchingController (Milestone 3 Phase C)', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [MatchingController],
-      providers: [
-        { provide: MatchingService, useValue: mockMatchingService },
-      ],
+      providers: [{ provide: MatchingService, useValue: mockMatchingService }],
     })
       .overrideGuard(AuthGuard)
       .useValue({ canActivate: () => true })
@@ -130,19 +128,25 @@ describe('MatchingController (Milestone 3 Phase C)', () => {
     });
 
     it('evaluates round progression', async () => {
-      mockMatchingService.evaluateRoundProgression.mockResolvedValue({ id: 'req-1', matchingTier: 2 });
+      mockMatchingService.evaluateRoundProgression.mockResolvedValue({
+        id: 'req-1',
+        matchingTier: 2,
+      });
 
       const result = await controller.evaluateProgression('org-1', 'req-1');
       expect(result.matchingTier).toBe(2);
-      expect(mockMatchingService.evaluateRoundProgression).toHaveBeenCalledWith('req-1');
+      expect(mockMatchingService.evaluateRoundProgression).toHaveBeenCalledWith('org-1', 'req-1');
     });
 
     it('expands search radius', async () => {
-      mockMatchingService.expandSearchRadius.mockResolvedValue({ id: 'req-1', matchingRadiusKm: 7.0 });
+      mockMatchingService.expandSearchRadius.mockResolvedValue({
+        id: 'req-1',
+        matchingRadiusKm: 7.0,
+      });
 
       const result = await controller.expandRadius('org-1', 'req-1');
       expect(result.matchingRadiusKm).toBe(7.0);
-      expect(mockMatchingService.expandSearchRadius).toHaveBeenCalledWith('req-1');
+      expect(mockMatchingService.expandSearchRadius).toHaveBeenCalledWith('org-1', 'req-1');
     });
   });
 });

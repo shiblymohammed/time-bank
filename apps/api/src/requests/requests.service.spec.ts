@@ -28,7 +28,10 @@ import { VolunteerAssignment } from '../matching/entities/volunteer-assignment.e
 import { BeneficiariesService } from '../beneficiaries/beneficiaries.service';
 import { MatchingService } from '../matching/matching.service';
 import { AuditService } from '../audit/audit.service';
-import { EvaluatedMembershipContext } from '../authorization/authorization.service';
+import {
+  AuthorizationService,
+  EvaluatedMembershipContext,
+} from '../authorization/authorization.service';
 
 describe('RequestsService', () => {
   let service: RequestsService;
@@ -44,6 +47,20 @@ describe('RequestsService', () => {
   };
 
   const mockRequestRepo = {
+    manager: {
+      transaction: jest.fn(async (_isolation, action) =>
+        action({
+          getRepository: (entity: any) =>
+            entity === ServiceRequest
+              ? mockRequestRepo
+              : entity === VolunteerAssignment
+                ? mockAssignmentRepo
+                : entity === RequestCancellation
+                  ? mockCancellationRepo
+                  : mockRescheduleRepo,
+        }),
+      ),
+    },
     findOne: jest.fn(),
     create: jest.fn((dto) => ({ id: 'req-1', ...dto })),
     save: jest.fn((entity) => Promise.resolve(entity)),
@@ -80,10 +97,13 @@ describe('RequestsService', () => {
   const mockBeneficiariesService = {
     checkEligibilityAndQuota: jest.fn().mockResolvedValue({ eligible: true, remainingQuota: 5 }),
     verifyCaregiverProxyAccess: jest.fn().mockResolvedValue({ id: 'auth-1' }),
-    listCareRecipientsForCaregiver: jest.fn().mockResolvedValue([{ beneficiaryMembershipId: 'ben-mem-1' }]),
+    listCareRecipientsForCaregiver: jest
+      .fn()
+      .mockResolvedValue([{ beneficiaryMembershipId: 'ben-mem-1' }]),
   };
 
   const mockMatchingService = {
+    reopenForReschedule: jest.fn().mockResolvedValue(undefined),
     findCandidatesAndDispatchOffers: jest.fn().mockResolvedValue([]),
   };
 
@@ -94,6 +114,7 @@ describe('RequestsService', () => {
   beforeEach(async () => {
     jest.clearAllMocks();
     mockRequestRepo.createQueryBuilder.mockReturnValue(mockQueryBuilder);
+    mockAssignmentRepo.find.mockResolvedValue([]);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -108,6 +129,16 @@ describe('RequestsService', () => {
         { provide: BeneficiariesService, useValue: mockBeneficiariesService },
         { provide: MatchingService, useValue: mockMatchingService },
         { provide: AuditService, useValue: mockAuditService },
+        {
+          provide: AuthorizationService,
+          useValue: {
+            evaluateOrganizationAccess: jest.fn().mockResolvedValue({
+              isSuperAdmin: false,
+              roles: [UserRole.COORDINATOR],
+              membershipId: 'coord-1',
+            }),
+          },
+        },
       ],
     }).compile();
 
@@ -413,13 +444,10 @@ describe('RequestsService', () => {
         roles: [UserRole.COORDINATOR],
       };
 
-      const cancelled = await service.cancelRequest(
-        'org-1',
-        'req-1',
-        'user-coord-1',
-        coordCtx,
-        { reasonCode: 'COORDINATOR_ACTION', notes: 'Administrative cancellation' },
-      );
+      const cancelled = await service.cancelRequest('org-1', 'req-1', 'user-coord-1', coordCtx, {
+        reasonCode: 'COORDINATOR_ACTION',
+        notes: 'Administrative cancellation',
+      });
 
       expect(cancelled.status).toBe(ServiceRequestStatus.CANCELLED);
       expect(mockCancellationRepo.create).toHaveBeenCalledWith(
@@ -451,13 +479,10 @@ describe('RequestsService', () => {
 
       mockBeneficiariesService.verifyCaregiverProxyAccess.mockResolvedValue({ id: 'auth-1' });
 
-      await service.cancelRequest(
-        'org-1',
-        'req-1',
-        'user-cg-1',
-        caregiverCtx,
-        { reasonCode: 'CAREGIVER_REQUESTED', notes: 'Beneficiary requested cancellation' },
-      );
+      await service.cancelRequest('org-1', 'req-1', 'user-cg-1', caregiverCtx, {
+        reasonCode: 'CAREGIVER_REQUESTED',
+        notes: 'Beneficiary requested cancellation',
+      });
 
       expect(mockCancellationRepo.create).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -542,16 +567,10 @@ describe('RequestsService', () => {
         { id: 'a-1', status: VolunteerAssignmentStatus.OFFERED },
       ]);
 
-      const result = await service.rescheduleRequest(
-        'org-1',
-        'req-1',
-        'user-1',
-        undefined,
-        {
-          newStartTime: newTime.toISOString(),
-          reason: 'Doctor rescheduled appointment to next day',
-        },
-      );
+      const result = await service.rescheduleRequest('org-1', 'req-1', 'user-1', undefined, {
+        newStartTime: newTime.toISOString(),
+        reason: 'Doctor rescheduled appointment to next day',
+      });
 
       expect(result.status).toBe(ServiceRequestStatus.MATCHING_ACTIVE);
       expect(mockRescheduleRepo.save).toHaveBeenCalledWith(
@@ -559,7 +578,7 @@ describe('RequestsService', () => {
           reason: 'Doctor rescheduled appointment to next day',
         }),
       );
-      expect(mockMatchingService.findCandidatesAndDispatchOffers).toHaveBeenCalled();
+      expect(mockMatchingService.reopenForReschedule).toHaveBeenCalled();
     });
 
     it('throws ForbiddenException if rescheduling caller is not authorized', async () => {
@@ -581,6 +600,9 @@ describe('RequestsService', () => {
         roles: [UserRole.BENEFICIARY],
       };
 
+      (service as any).authorizationService.evaluateOrganizationAccess.mockResolvedValueOnce(
+        strangerCtx,
+      );
       mockBeneficiariesService.verifyCaregiverProxyAccess.mockRejectedValue(new Error());
 
       await expect(
@@ -699,10 +721,9 @@ describe('RequestsService', () => {
       };
 
       await service.listRequests('org-1', 'user-ben', benCtx, {});
-      expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith(
-        'req.beneficiaryMembershipId = :bId',
-        { bId: 'ben-mem-1' },
-      );
+      expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith('req.beneficiaryMembershipId = :bId', {
+        bId: 'ben-mem-1',
+      });
     });
 
     it('throws ForbiddenException if beneficiary attempts to query another beneficiary', async () => {

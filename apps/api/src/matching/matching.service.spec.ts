@@ -1,21 +1,21 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { ConflictException, NotFoundException, BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
-  AccountStatus,
   GlobalRestrictionStatus,
+  AccountStatus,
   MembershipStatus,
   RoleGrantStatus,
-  ServiceRequestStatus,
-  SkillVerificationStatus,
-  UrgencyType,
   UserRole,
+  ServiceRequestStatus,
+  UrgencyType,
   VolunteerAssignmentStatus,
   MatchingRoundStatus,
 } from '@ktb/shared-types';
 
+import { OrganizationServiceCatalog } from '../catalogue/entities/organization-service-catalog.entity';
 import { MatchingService } from './matching.service';
 import { VolunteerSkill } from './entities/volunteer-skill.entity';
 import { VolunteerAvailability } from './entities/volunteer-availability.entity';
@@ -26,7 +26,9 @@ import { MatchingRound } from './entities/matching-round.entity';
 import { ServiceRequest } from '../requests/entities/service-request.entity';
 import { OrganizationMembership } from '../memberships/entities/organization-membership.entity';
 import { GlobalAccountRestriction } from '../identity/entities/global-account-restriction.entity';
+import { User } from '../identity/entities/user.entity';
 import { AuditService } from '../audit/audit.service';
+import { AuthorizationService } from '../authorization/authorization.service';
 import { MatchingConfigService } from './matching-config.service';
 import { CANDIDATE_RANKING_STRATEGY } from './ranking/ranking-strategy.interface';
 import { DeterministicCandidateRankingStrategy } from './ranking/deterministic-ranking.strategy';
@@ -48,6 +50,7 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
   };
 
   const mockAssignmentRepo = {
+    update: jest.fn().mockResolvedValue({ affected: 0 }),
     findOne: jest.fn(),
     find: jest.fn(),
     count: jest.fn(),
@@ -104,8 +107,48 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
     logEvent: jest.fn().mockResolvedValue({ id: 'audit-1' }),
   };
 
+  const mockAssignmentLookup = jest.fn();
+  const mockScheduleQuery = {
+    innerJoin: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    getExists: jest.fn().mockResolvedValue(false),
+  };
+  const mockDispatchCatalogue = {
+    findOne: jest.fn().mockResolvedValue({
+      isEnabled: true,
+      globalService: { requiresSkills: false, requiredSkillCodes: [] },
+    }),
+  };
   const mockTransactionalManager = {
-    findOne: jest.fn(),
+    findOne: jest.fn(async (entity, options) => {
+      if (entity === OrganizationMembership)
+        return {
+          id: options.where.id,
+          userId: 'user-vol-1',
+          status: MembershipStatus.APPROVED,
+          roleGrants: [{ role: UserRole.VOLUNTEER, status: RoleGrantStatus.ACTIVE }],
+        };
+      if (entity === User) return { id: 'user-vol-1', status: AccountStatus.ACTIVE };
+      if (entity === GlobalAccountRestriction) return null;
+      return mockAssignmentLookup(entity, options);
+    }),
+    getRepository: jest.fn((entity) => {
+      const repositories = new Map<any, any>([
+        [ServiceRequest, mockRequestRepo],
+        [OrganizationServiceCatalog, mockDispatchCatalogue],
+        [MatchingRound, mockRoundRepo],
+        [OrganizationMembership, mockMembershipRepo],
+        [
+          VolunteerAssignment,
+          { ...mockAssignmentRepo, createQueryBuilder: () => mockScheduleQuery },
+        ],
+        [VolunteerSkill, mockSkillRepo],
+        [VolunteerAvailability, mockAvailabilityRepo],
+        [VolunteerZoneAssignment, mockZoneAssignRepo],
+      ]);
+      return repositories.get(entity);
+    }),
     count: jest.fn(),
     save: jest.fn((_, entity) => Promise.resolve(entity)),
     create: jest.fn((_, entity) => entity),
@@ -120,11 +163,31 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
   };
 
   const mockDataSource = {
-    transaction: jest.fn(async (callback) => callback(mockTransactionalManager)),
+    transaction: jest.fn(async (first, second?) =>
+      (typeof first === 'function' ? first : second)(mockTransactionalManager),
+    ),
   };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockScheduleQuery.getExists.mockResolvedValue(false);
+    mockDispatchCatalogue.findOne.mockResolvedValue({
+      isEnabled: true,
+      globalService: { requiresSkills: false, requiredSkillCodes: [] },
+    });
+    mockTransactionalManager.createQueryBuilder.mockImplementation(() => ({
+      setLock: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      getOne: jest.fn().mockResolvedValue({
+        id: 'req-1',
+        minVolunteers: 1,
+        preferredVolunteers: 1,
+        status: ServiceRequestStatus.MATCHING_ACTIVE,
+        scheduledStartTime: new Date('2030-01-01T10:00:00Z'),
+        expectedDurationMinutes: 60,
+      }),
+    }));
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -149,6 +212,7 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
         { provide: getRepositoryToken(GlobalAccountRestriction), useValue: mockRestrictionRepo },
         { provide: DataSource, useValue: mockDataSource },
         { provide: AuditService, useValue: mockAuditService },
+        { provide: AuthorizationService, useValue: { assertMembershipAccess: jest.fn() } },
       ],
     }).compile();
 
@@ -181,13 +245,20 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
       mockZoneRepo.findOne.mockResolvedValue({ id: 'existing-zone', code: 'ZONE_NORTH' });
 
       await expect(
-        service.createZone('org-1', { code: 'ZONE_NORTH', name: 'Zone', wardNumbers: [] }, 'coord-1'),
+        service.createZone(
+          'org-1',
+          { code: 'ZONE_NORTH', name: 'Zone', wardNumbers: [] },
+          'coord-1',
+        ),
       ).rejects.toThrow(ConflictException);
     });
 
     it('assigns approved volunteer to operational zone', async () => {
       mockZoneRepo.findOne.mockResolvedValue({ id: 'zone-1', organizationId: 'org-1' });
-      mockMembershipRepo.findOne.mockResolvedValue({ id: 'mem-1', status: MembershipStatus.APPROVED });
+      mockMembershipRepo.findOne.mockResolvedValue({
+        id: 'mem-1',
+        status: MembershipStatus.APPROVED,
+      });
       mockZoneAssignRepo.findOne.mockResolvedValue(null);
 
       const assigned = await service.assignVolunteerToZone(
@@ -207,6 +278,7 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
 
   describe('Candidate Filtering & Multi-Tier Matching (D#7, D#13, D#58, D#60)', () => {
     const mockRequest = {
+      status: ServiceRequestStatus.MATCHING_ACTIVE,
       id: 'req-1',
       organizationId: 'org-1',
       beneficiaryMembershipId: 'ben-mem-1',
@@ -243,6 +315,7 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
       });
       mockZoneAssignRepo.find.mockResolvedValue([]);
 
+      mockRequestRepo.findOne.mockResolvedValue(mockRequest);
       const dispatched = await service.findCandidatesAndDispatchOffers(mockRequest);
 
       expect(dispatched.length).toBe(1);
@@ -251,6 +324,7 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
       expect(mockRoundRepo.save).toHaveBeenCalled();
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'MATCHING_ROUND_DISPATCHED' }),
+        mockTransactionalManager,
       );
     });
 
@@ -268,6 +342,7 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
       ]);
       mockAssignmentRepo.find.mockResolvedValue([]);
 
+      mockRequestRepo.findOne.mockResolvedValue(mockRequest);
       const dispatched = await service.findCandidatesAndDispatchOffers(mockRequest);
       expect(dispatched.length).toBe(0);
     });
@@ -293,8 +368,29 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
       mockAssignmentRepo.find.mockResolvedValue([]);
       mockSkillRepo.find.mockResolvedValue([]); // zero verified skills
 
+      mockRequestRepo.findOne.mockResolvedValue(skilledRequest);
       const dispatched = await service.findCandidatesAndDispatchOffers(skilledRequest);
       expect(dispatched.length).toBe(0);
+    });
+
+    it('reloads required skills when the newly created request has no catalogue relation', async () => {
+      mockRequestRepo.findOne.mockResolvedValue({
+        ...mockRequest,
+        serviceCatalog: {
+          requiresCoordinatorDispatch: false,
+          globalService: { requiresSkills: true, requiredSkillCodes: ['FIRST_AID'] },
+        },
+      });
+      mockRoundRepo.find.mockResolvedValue([]);
+      mockMembershipQueryBuilder.getMany.mockResolvedValue([
+        { id: 'unskilled', userId: 'user', organizationId: 'org-1', user: { restrictions: [] } },
+      ]);
+      mockAssignmentRepo.find.mockResolvedValue([]);
+      mockSkillRepo.find.mockResolvedValue([]);
+      const fresh = { ...mockRequest };
+      delete fresh.serviceCatalog;
+      await expect(service.findCandidatesAndDispatchOffers(fresh)).resolves.toEqual([]);
+      expect(mockAssignmentRepo.save).not.toHaveBeenCalled();
     });
 
     it('skips automated dispatch for sensitive services requiring coordinator dispatch (D#7)', async () => {
@@ -302,14 +398,47 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
         ...mockRequest,
         serviceCatalog: {
           requiresCoordinatorDispatch: true,
+          globalService: { requiresSkills: false, requiredSkillCodes: [] },
         },
       } as unknown as ServiceRequest;
 
+      mockRequestRepo.findOne.mockResolvedValue(sensitiveRequest);
       const dispatched = await service.findCandidatesAndDispatchOffers(sensitiveRequest);
       expect(dispatched).toHaveLength(0);
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'MATCHING_SKIPPED_SENSITIVE_SERVICE' }),
+        mockTransactionalManager,
       );
+    });
+
+    it('reloads catalogue policies for a newly saved request before sensitive dispatch', async () => {
+      mockRequestRepo.findOne.mockResolvedValue({
+        ...mockRequest,
+        serviceCatalog: {
+          requiresCoordinatorDispatch: true,
+          globalService: { requiresSkills: false },
+        },
+      });
+      const fresh = { ...mockRequest };
+      delete fresh.serviceCatalog;
+      await expect(service.findCandidatesAndDispatchOffers(fresh)).resolves.toEqual([]);
+      expect(mockRequestRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'req-1', organizationId: 'org-1' },
+          relations: ['serviceCatalog', 'serviceCatalog.globalService'],
+        }),
+      );
+      expect(mockAssignmentRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('fails closed when catalogue policies cannot be loaded', async () => {
+      mockRequestRepo.findOne.mockResolvedValue(null).mockResolvedValueOnce(mockRequest);
+      const fresh = { ...mockRequest };
+      delete fresh.serviceCatalog;
+      await expect(service.findCandidatesAndDispatchOffers(fresh)).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(mockAssignmentRepo.save).not.toHaveBeenCalled();
     });
 
     it('filters out volunteers with overlapping active assignments (Schedule Conflict)', async () => {
@@ -340,6 +469,7 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
         return [];
       });
 
+      mockRequestRepo.findOne.mockResolvedValue(mockRequest);
       const dispatched = await service.findCandidatesAndDispatchOffers(mockRequest);
       expect(dispatched.length).toBe(0);
     });
@@ -368,6 +498,7 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
         },
       ]);
 
+      mockRequestRepo.findOne.mockResolvedValue(mockRequest);
       const dispatched = await service.findCandidatesAndDispatchOffers(mockRequest);
       expect(dispatched.length).toBe(1);
       expect(dispatched[0]!.volunteerMembershipId).toBe('vol-zone-matched');
@@ -396,6 +527,7 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
       });
       mockZoneAssignRepo.find.mockResolvedValue([]);
 
+      mockRequestRepo.findOne.mockResolvedValue(crossOrgRequest);
       const dispatched = await service.findCandidatesAndDispatchOffers(crossOrgRequest);
       expect(dispatched.length).toBe(1);
       expect(dispatched[0]!.volunteerMembershipId).toBe('vol-from-neighbor-org');
@@ -404,7 +536,7 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
 
   describe('Offer Acceptance & Idempotency (D#12, D#64, NFR-11)', () => {
     it('accepts offer atomically with clientOperationId and updates request', async () => {
-      mockTransactionalManager.findOne.mockResolvedValue({
+      mockAssignmentLookup.mockResolvedValue({
         id: 'assign-1',
         organizationId: 'org-1',
         serviceRequestId: 'req-1',
@@ -423,6 +555,8 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
           minVolunteers: 1,
           preferredVolunteers: 1,
           status: ServiceRequestStatus.MATCHING_ACTIVE,
+          scheduledStartTime: new Date('2030-01-01T10:00:00Z'),
+          expectedDurationMinutes: 60,
         }),
       });
 
@@ -442,11 +576,12 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
       );
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'VOLUNTEER_OFFER_ACCEPTED' }),
+        mockTransactionalManager,
       );
     });
 
     it('returns existing accepted assignment idempotently when retried with same clientOperationId', async () => {
-      mockTransactionalManager.findOne.mockResolvedValue({
+      mockAssignmentLookup.mockResolvedValue({
         id: 'assign-1',
         organizationId: 'org-1',
         serviceRequestId: 'req-1',
@@ -464,7 +599,7 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
     });
 
     it('marks assignment TIMED_OUT and throws ConflictException if offer has expired', async () => {
-      mockTransactionalManager.findOne.mockResolvedValue({
+      mockAssignmentLookup.mockResolvedValue({
         id: 'assign-1',
         organizationId: 'org-1',
         serviceRequestId: 'req-1',
@@ -473,9 +608,9 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
         offerExpiresAt: new Date(Date.now() - 5000), // Expired 5 seconds ago
       });
 
-      await expect(
-        service.acceptOffer('org-1', 'assign-1', 'vol-mem-1', {}),
-      ).rejects.toThrow(ConflictException);
+      await expect(service.acceptOffer('org-1', 'assign-1', 'vol-mem-1', {})).rejects.toThrow(
+        ConflictException,
+      );
 
       expect(mockTransactionalManager.save).toHaveBeenCalledWith(
         VolunteerAssignment,
@@ -485,6 +620,40 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
   });
 
   describe('Multi-Round Progression, Expiry & Escalation (D#7, D#13, FR-MATCH)', () => {
+    it('does not count a repeated coordinator assignment as another accepted volunteer', async () => {
+      const request = {
+        id: 'req-1',
+        status: ServiceRequestStatus.PARTIALLY_ACCEPTED,
+        minVolunteers: 2,
+        preferredVolunteers: 2,
+      };
+      mockTransactionalManager.createQueryBuilder.mockReturnValueOnce({
+        setLock: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(request),
+      });
+      const existing = {
+        id: 'accepted',
+        serviceRequestId: 'req-1',
+        volunteerMembershipId: 'vol-mem-1',
+        status: VolunteerAssignmentStatus.ACCEPTED,
+      };
+      mockAssignmentLookup.mockResolvedValueOnce(existing);
+      mockTransactionalManager.count.mockResolvedValueOnce(1);
+      await expect(
+        service.coordinatorDispatch(
+          'org-1',
+          'req-1',
+          { volunteerMembershipId: 'vol-mem-1' },
+          'coordinator',
+        ),
+      ).resolves.toBe(existing);
+      expect(request.status).toBe(ServiceRequestStatus.PARTIALLY_ACCEPTED);
+      expect(mockTransactionalManager.save).not.toHaveBeenCalled();
+      expect(mockTransactionalManager.count).not.toHaveBeenCalled();
+    });
+
     it('processes expired offers and transitions them to TIMED_OUT', async () => {
       const expiredOffer = {
         id: 'assign-expired',
@@ -493,10 +662,16 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
       };
       mockAssignmentRepo.find.mockResolvedValue([expiredOffer]);
 
+      mockAssignmentRepo.update.mockResolvedValueOnce({ affected: 1 });
       const count = await service.processExpiredOffers('req-1');
       expect(count).toBe(1);
-      expect(expiredOffer.status).toBe(VolunteerAssignmentStatus.TIMED_OUT);
-      expect(mockAssignmentRepo.save).toHaveBeenCalledWith(expiredOffer);
+      expect(mockAssignmentRepo.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: VolunteerAssignmentStatus.OFFERED,
+          serviceRequestId: 'req-1',
+        }),
+        { status: VolunteerAssignmentStatus.TIMED_OUT },
+      );
     });
 
     it('evaluates progression and advances from Tier 1 to Tier 2 when offers are exhausted', async () => {
@@ -509,7 +684,10 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
         urgency: UrgencyType.IMMEDIATE,
         organizationId: 'org-1',
         beneficiaryMembershipId: 'ben-1',
-        serviceCatalog: { requiresCoordinatorDispatch: false },
+        serviceCatalog: {
+          requiresCoordinatorDispatch: false,
+          globalService: { requiresSkills: false },
+        },
       });
 
       mockAssignmentRepo.find.mockResolvedValue([]); // zero expired currently
@@ -530,7 +708,7 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
       mockRoundRepo.find.mockResolvedValue([]);
       mockMembershipQueryBuilder.getMany.mockResolvedValue([]);
 
-      const progressed = await service.evaluateRoundProgression('req-1');
+      const progressed = await service.evaluateRoundProgression('org-1', 'req-1');
       expect(progressed.matchingTier).toBe(2);
       expect(mockRoundRepo.save).toHaveBeenCalledWith(
         expect.objectContaining({ status: MatchingRoundStatus.EXPIRED }),
@@ -547,7 +725,10 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
         urgency: UrgencyType.IMMEDIATE,
         organizationId: 'org-1',
         beneficiaryMembershipId: 'ben-1',
-        serviceCatalog: { requiresCoordinatorDispatch: false },
+        serviceCatalog: {
+          requiresCoordinatorDispatch: false,
+          globalService: { requiresSkills: false },
+        },
       });
 
       mockAssignmentRepo.find.mockResolvedValue([]);
@@ -560,7 +741,7 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
       });
       mockAssignmentRepo.count.mockResolvedValue(0);
 
-      const escalated = await service.evaluateRoundProgression('req-1');
+      const escalated = await service.evaluateRoundProgression('org-1', 'req-1');
       expect(escalated.status).toBe(ServiceRequestStatus.ESCALATED_TO_COORDINATOR);
       expect(escalated.escalatedAt).toBeDefined();
       expect(mockRoundRepo.save).toHaveBeenCalledWith(
@@ -568,6 +749,7 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
       );
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'REQUEST_ESCALATED_TO_COORDINATOR' }),
+        mockTransactionalManager,
       );
     });
   });

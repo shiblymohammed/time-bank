@@ -1,0 +1,10 @@
+{
+  "rootDir": "..",
+  "testEnvironment": "node",
+  "testMatch": ["<rootDir>/test/matching-concurrency.integration-spec.ts"],
+  "testTimeout": 30000,
+  "transform": { "^.+\\.ts$": ["ts-jest", { "tsconfig": { "rootDir": "." } }] },
+  "moduleNameMapper": {
+    "^@ktb/shared-types$": "<rootDir>/../../packages/shared-types/src/index.ts"
+  }
+}

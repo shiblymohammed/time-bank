@@ -145,6 +145,38 @@ jobs:
       - name: Run E2E / integration tests
         run: pnpm test:e2e
 
+  matching-concurrency:
+    name: Matching Concurrency (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ktb_matching
+          POSTGRES_PASSWORD: ktb_matching_ci
+          POSTGRES_DB: ktb_matching_test_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ktb_matching -d ktb_matching_test_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      MATCHING_TEST_DATABASE_URL: postgresql://ktb_matching:ktb_matching_ci@localhost:5432/ktb_matching_test_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @ktb/shared-types build
+      - run: pnpm --filter @ktb/api test:matching:integration
+
   # ─── Job 4: Docker build validation ──────────────────────────────────────
   docker-build:
     name: Docker Build Validation
