@@ -29,7 +29,10 @@ export class GrantBeneficiaryEligibilityDto {
   @IsOptional()
   approvedAssistanceCategories?: string[];
 
-  @ApiProperty({ example: '2027-10-18T00:00:00.000Z', description: 'Mandatory review due date (D#25)' })
+  @ApiProperty({
+    example: '2027-10-18T00:00:00.000Z',
+    description: 'Mandatory review due date (D#25)',
+  })
   @IsISO8601()
   @IsNotEmpty()
   reviewDueAt!: string;

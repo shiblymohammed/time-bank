@@ -51,20 +51,20 @@ The dashboard was exercised in a browser through the Next.js gateway against the
 
 1. Coordinator view: local settings only, no central skill controls. The centrally inactive, unconfigured service had
    its set-up button disabled.
-2. Configured QA Household Help with staffing 2/3, coordinator dispatch only and a local English name. The row
-   reloaded from the server with those values.
+2. Configured QA Household Help with staffing 2/3, coordinator dispatch only and a local English name. The row reloaded
+   from the server with those values.
 3. Preferred staffing below the minimum kept the dialog open with the validation error, and nothing was saved.
 4. Disabling the service kept its staffing, dispatch policy and name. The request screen's create button became
    unavailable. A direct `POST /organizations/:id/requests` through the gateway returned 400: "Selected service is not
    enabled in this organization (D#10)".
 5. Re-enabling reopened the dialog with the saved values. A new request then saved with minimum 2 and preferred 3.
-   Because the service is dispatch-only, no automatic offers were created: the database had zero volunteer
-   assignments and one `MATCHING_SKIPPED_SENSITIVE_SERVICE` audit event.
+   Because the service is dispatch-only, no automatic offers were created: the database had zero volunteer assignments
+   and one `MATCHING_SKIPPED_SENSITIVE_SERVICE` audit event.
 6. Three `ORG_CATALOGUE_CONFIGURED` audit events recorded enablement, staffing and the dispatch policy.
 7. A coordinator calling `PATCH /catalogue/global/:id` directly received 403.
 8. The super admin's central view showed only central skill controls. With an organization selected, it showed both
    local and central controls.
-9. The dialog rejected "required" with no codes. ` FIRST_AID, FIRST_AID ,  driving ` saved as `FIRST_AID, driving`.
+9. The dialog rejected "required" with no codes. `FIRST_AID, FIRST_AID ,  driving` saved as `FIRST_AID, driving`.
 10. Direct API calls with an empty required list, a blank code, or a 51-character code each returned 400.
 
 ![Super admin catalogue view after the skill edit](qa-evidence/catalogue-admin-skills-2026-10-31.jpg)

@@ -1,18 +1,18 @@
 # Kottakkal Time Bank — Milestones
 
-Source of truth: PRD §11 (Delivery strategy for solo developer).
-This document tracks planned scope per milestone. **Do not implement future milestone
-scope during an earlier milestone** — each milestone ends with complete tests and
+Source of truth: PRD §11 (Delivery strategy for solo developer). This document tracks planned scope per milestone. **Do
+not implement future milestone scope during an earlier milestone** — each milestone ends with complete tests and
 documented limitations.
 
 ---
 
 ## Milestone 1: Foundation ✅ IN PROGRESS
 
-**Goal:** Repository, CI, isolated dev+prod config, API conventions, Flutter/Next.js shells,
-health endpoints, audit foundation.
+**Goal:** Repository, CI, isolated dev+prod config, API conventions, Flutter/Next.js shells, health endpoints, audit
+foundation.
 
 **Scope:**
+
 - [x] Monorepo structure (pnpm workspace + Turborepo)
 - [x] `@ktb/shared-types` — core enums (UserRole, AccountStatus, WalletType)
 - [x] NestJS API shell with health endpoints (`/health/live`, `/health/ready`)
@@ -28,11 +28,13 @@ health endpoints, audit foundation.
 - [x] `docs/ARCHITECTURE.md` — 6 ADRs with PRD traceability
 
 **Not in this milestone:**
+
 - OTP authentication (Milestone 2)
 - Any business workflows (Milestone 3+)
 - Wallets or ledger (Milestone 4)
 
 **Milestone 1 sign-off checklist:**
+
 - [ ] All 5 CI jobs pass on GitHub Actions
 - [ ] `docker compose up` → all containers healthy
 - [ ] `curl http://localhost:3001/health/ready` → `{"status":"ok"}`
@@ -49,10 +51,11 @@ health endpoints, audit foundation.
 
 ## Milestone 2: Identity and municipality administration
 
-**Goal:** Verification, role grants, municipality setup, beneficiary eligibility, caregivers,
-permissions, account recovery.
+**Goal:** Verification, role grants, municipality setup, beneficiary eligibility, caregivers, permissions, account
+recovery.
 
 **Planned scope:**
+
 - AuthModule: OTP authentication (FR-IDENT-01, D#103)
   - OTP rate limiting, single-use, short expiry (NFR-07)
   - JWT access + refresh tokens
@@ -70,35 +73,45 @@ permissions, account recovery.
 
 ## Milestone 3: Core service catalogue & request matching ✅ IMPLEMENTED
 
-**Goal:** Centrally managed catalogue, municipal enablement/proposals, beneficiary eligibility,
-caregiver proxy, manual service location, immediate and scheduled candidate matching,
-volunteer assignment lifecycle, concurrency locks, and coordinator escalation.
+**Goal:** Centrally managed catalogue, municipal enablement/proposals, beneficiary eligibility, caregiver proxy, manual
+service location, immediate and scheduled candidate matching, volunteer assignment lifecycle, concurrency locks, and
+coordinator escalation.
 
 **Implemented scope:**
-- [x] `@ktb/shared-types` — Core M3 enums (`UrgencyType`, `CreationChannel`, `ServiceRequestStatus`, `VolunteerAssignmentStatus`, `CaregiverAuthorizationStatus`, `BeneficiaryEligibilityType`, `SkillVerificationStatus`, `MatchingRoundStatus`, `MatchingEscalationReason`)
-- [x] TypeORM Migration 0003: `1729118400003-ServiceCatalogueAndRequests.ts` (12 core catalogue & request tables + indexes)
-- [x] TypeORM Migration 0004: `1729118400004-OperationalZonesAndMatchingRounds.ts` (`operational_zones`, `volunteer_zone_assignments`, `matching_rounds`, residential address & GPS consent columns)
-- [x] `CatalogueModule`: Global service categories, master definitions, municipal catalogue enablement, municipal proposals (FR-SVC, D#10, ITB-002)
-- [x] `BeneficiariesModule`: Beneficiary ongoing/temporary eligibility, review dates, monthly request quotas, caregiver authorization (FR-BEN, D#8, D#24, D#25, D#26, D#37)
-- [x] `RequestsModule`: Immediate & scheduled requests, mandatory manual location entry, cancellation audit, rescheduling history (FR-SVC-01, FR-SVC-02, D#59, D#60, D#61, D#62)
+
+- [x] `@ktb/shared-types` — Core M3 enums (`UrgencyType`, `CreationChannel`, `ServiceRequestStatus`,
+      `VolunteerAssignmentStatus`, `CaregiverAuthorizationStatus`, `BeneficiaryEligibilityType`,
+      `SkillVerificationStatus`, `MatchingRoundStatus`, `MatchingEscalationReason`)
+- [x] TypeORM Migration 0003: `1729118400003-ServiceCatalogueAndRequests.ts` (12 core catalogue & request tables +
+      indexes)
+- [x] TypeORM Migration 0004: `1729118400004-OperationalZonesAndMatchingRounds.ts` (`operational_zones`,
+      `volunteer_zone_assignments`, `matching_rounds`, residential address & GPS consent columns)
+- [x] `CatalogueModule`: Global service categories, master definitions, municipal catalogue enablement, municipal
+      proposals (FR-SVC, D#10, ITB-002)
+- [x] `BeneficiariesModule`: Beneficiary ongoing/temporary eligibility, review dates, monthly request quotas, caregiver
+      authorization (FR-BEN, D#8, D#24, D#25, D#26, D#37)
+- [x] `RequestsModule`: Immediate & scheduled requests, mandatory manual location entry, cancellation audit,
+      rescheduling history (FR-SVC-01, FR-SVC-02, D#59, D#60, D#61, D#62)
 - [x] `MatchingModule` (Phase C):
   - Coordinator-managed operational zones and volunteer zone assignments (D#9, D#13)
   - Verified residential address base location with optional fresh, consented GPS (D#58)
-  - Policy candidate filtering: role grants, verified skill prerequisites, active account restrictions, schedule conflict avoidance, sensitive service checks, cross-org participation toggle (ITB-006, D#7, D#11, D#79)
-  - `DeterministicCandidateRankingStrategy`: ward/zone match, distance proximity, skills, workload balancing, home org affinity, and deterministic lexical tie-breaking
+  - Policy candidate filtering: role grants, verified skill prerequisites, active account restrictions, schedule
+    conflict avoidance, sensitive service checks, cross-org participation toggle (ITB-006, D#7, D#11, D#79)
+  - `DeterministicCandidateRankingStrategy`: ward/zone match, distance proximity, skills, workload balancing, home org
+    affinity, and deterministic lexical tie-breaking
   - Configurable `MatchingConfigService` (tiers, search radii 3/7/15km, timeouts)
   - Durable `MatchingRound` records and multi-round progression (Tier 1 -> Tier 2 -> Tier 3 -> Escalation)
-  - Atomic offer acceptance with offline retry idempotency (`clientOperationId`), expiry handling, and concurrency locks (D#12, D#64, NFR-11)
+  - Atomic offer acceptance with offline retry idempotency (`clientOperationId`), expiry handling, and concurrency locks
+    (D#12, D#64, NFR-11)
 - [x] Multi-tenant isolation guards & cross-organization community drive authorization rules (ITB-005, ITB-006, ITB-007)
 - [x] Test suite: 24 test suites, 238 unit and integration tests passing with zero regressions
 
-
 ## Milestone 4: Universal time-credit ledger
 
-**Goal:** Atomic awards, redemption for assistance, cross-municipality donations,
-freeze/correction rules.
+**Goal:** Atomic awards, redemption for assistance, cross-municipality donations, freeze/correction rules.
 
 **Planned scope:**
+
 - TimeLedgerModule: wallet, ledger entries, holds (FR-TIME)
 - Idempotent credit issuance after verification (FR-TIME-02, NFR-10)
 - Cross-municipality donations (FR-TIME-03, UC-12, UC-13)
@@ -110,10 +123,10 @@ freeze/correction rules.
 
 ## Milestone 5: Team and transfer workflows
 
-**Goal:** Team-size rules, invitation matching, separate timers, transfer rewards,
-cancellations.
+**Goal:** Team-size rules, invitation matching, separate timers, transfer rewards, cancellations.
 
 **Planned scope:**
+
 - Team positions: minimum safe + preferred (FR-TEAM-01, D#64)
 - Team invitation and auto-matching (FR-TEAM-02, D#65)
 - Separate timer per team member (FR-TEAM-04, D#66)
@@ -124,10 +137,10 @@ cancellations.
 
 ## Milestone 6: Loyalty and merchants
 
-**Goal:** Coin rules, merchant offers, publication approval, QR/manual redemption,
-recognition.
+**Goal:** Coin rules, merchant offers, publication approval, QR/manual redemption, recognition.
 
 **Planned scope:**
+
 - LoyaltyLedgerModule: separate wallet, earning rules (FR-LOY)
 - MerchantsModule: offer management, Municipality Admin approval (FR-LOY-03, D#20)
 - QR code + one-time code redemption (FR-LOY-04, D#21, AT-15)
@@ -137,10 +150,10 @@ recognition.
 
 ## Milestone 7: Governance and reporting
 
-**Goal:** Alerts, complaints, suspensions, bans, appeals, account closure, analytics/exports,
-external sponsor reports.
+**Goal:** Alerts, complaints, suspensions, bans, appeals, account closure, analytics/exports, external sponsor reports.
 
 **Planned scope:**
+
 - SafetyModule: alerts, pause/resume (FR-SAFE)
 - ComplaintsModule: escalation hierarchy (FR-SAFE-04, D#75, D#76)
 - AppealModule: appeals to Super Admin (D#77, D#78, BR-11)
@@ -153,10 +166,10 @@ external sponsor reports.
 
 ## Milestone 8: Offline reliability
 
-**Goal:** Local secure queue, automatic sync, conflict handling, delivery states,
-on-device field tests.
+**Goal:** Local secure queue, automatic sync, conflict handling, delivery states, on-device field tests.
 
 **Planned scope:**
+
 - Flutter encrypted local queue (FR-OFF-01, D#47)
 - Idempotency key / operation ID on all mutations (FR-OFF-03)
 - Sync state: pending/success/failed (FR-OFF-02, D#99)
@@ -167,10 +180,11 @@ on-device field tests.
 
 ## Milestone 9: Production hardening
 
-**Goal:** Pen-test/review, realistic load tests, backup restoration, PITR drill, admin
-audit review, accessibility and Malayalam validation.
+**Goal:** Pen-test/review, realistic load tests, backup restoration, PITR drill, admin audit review, accessibility and
+Malayalam validation.
 
 **Planned scope:**
+
 - Security review: access controls, ledger, auth (NFR-18)
 - Load test: 300 concurrent users (D#98, AT-26, NFR-03)
 - PITR backup restore drill (D#100, UC-29, NFR-05)

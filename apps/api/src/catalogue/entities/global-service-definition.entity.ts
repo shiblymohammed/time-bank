@@ -62,7 +62,13 @@ export class GlobalServiceDefinition {
   isEmergencyProhibited!: boolean;
 
   // Future Credit Calculation Metadata (PRD D#14, D#15, D#63)
-  @Column({ name: 'base_credit_rate_hourly', type: 'numeric', precision: 4, scale: 2, default: 1.0 })
+  @Column({
+    name: 'base_credit_rate_hourly',
+    type: 'numeric',
+    precision: 4,
+    scale: 2,
+    default: 1.0,
+  })
   baseCreditRateHourly!: number;
 
   @Column({ name: 'credit_multiplier', type: 'numeric', precision: 3, scale: 2, default: 1.0 })

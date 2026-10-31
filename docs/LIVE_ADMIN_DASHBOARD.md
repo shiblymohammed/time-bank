@@ -123,19 +123,19 @@ path through a Next.js rewrite. The merge keeps this branch's cookie session gat
 onto it:
 
 - **Service operations** tab: central categories and global services (create, activate/deactivate, details), local
-  proposals and central review, beneficiary eligibility and caregiver authorization review, operational zones,
-  volunteer zone assignment, availability and skill verification, and the signed-in profile.
+  proposals and central review, beneficiary eligibility and caregiver authorization review, operational zones, volunteer
+  zone assignment, availability and skill verification, and the signed-in profile.
 - **Settings & app builds** on organization rows (super admin): edit name/district/status, register app builds, and
   appoint organization roles.
 
 PR #1's request workspace and local catalogue form were dropped in favour of the existing, tested Requests & matching
 and Service catalogue sections. Central-only controls are hidden from local staff, and the API rejects them regardless.
-The `/backend` rewrite and the `API_URL` setting were removed; the gateway reads `API_INTERNAL_URL`. Each new route
-is allowlisted by method in the gateway.
+The `/backend` rewrite and the `API_URL` setting were removed; the gateway reads `API_INTERNAL_URL`. Each new route is
+allowlisted by method in the gateway.
 
 On the API side, this branch's authorization changes cover PR #1's. One existing bug was fixed while testing:
-`GET /organizations/:id/catalogue/proposals` was shadowed by the UUID-validated `:catalogId` route and always returned
-400.
+`GET /organizations/:id/catalogue/proposals` was shadowed by the UUID-validated `:catalogId` route and always
+returned 400.
 
 ### Verification
 
@@ -151,7 +151,7 @@ from APPLIED, SUSPENDED or REJECTED, and assigns no membership number. This pred
 ## Remaining scope
 
 Coordinator requests and matching were connected and tested in the next implementation; see
-[Coordinator request dashboard](COORDINATOR_REQUESTS.md). Local catalogue settings and central skill rules followed;
-see [Service catalogue dashboard](SERVICE_CATALOGUE_DASHBOARD.md). Eligibility, caregiver authorization and zone
-screens arrived with the merge above. Historical member-assignment dates and native Android dependency availability
-remain as reported in the earlier interface QA. Nothing has been deployed or published.
+[Coordinator request dashboard](COORDINATOR_REQUESTS.md). Local catalogue settings and central skill rules followed; see
+[Service catalogue dashboard](SERVICE_CATALOGUE_DASHBOARD.md). Eligibility, caregiver authorization and zone screens
+arrived with the merge above. Historical member-assignment dates and native Android dependency availability remain as
+reported in the earlier interface QA. Nothing has been deployed or published.

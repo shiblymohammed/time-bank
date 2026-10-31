@@ -180,7 +180,9 @@ export class AuthService {
     }
 
     if (challenge.attemptCount >= challenge.maxAttempts) {
-      throw new BadRequestException('Maximum verification attempts exceeded. Please request a new code');
+      throw new BadRequestException(
+        'Maximum verification attempts exceeded. Please request a new code',
+      );
     }
 
     // 2. Validate code

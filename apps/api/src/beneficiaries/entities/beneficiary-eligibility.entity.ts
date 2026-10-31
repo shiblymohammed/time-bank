@@ -8,10 +8,7 @@ import {
   JoinColumn,
   Unique,
 } from 'typeorm';
-import {
-  BeneficiaryEligibilityStatus,
-  BeneficiaryEligibilityType,
-} from '@ktb/shared-types';
+import { BeneficiaryEligibilityStatus, BeneficiaryEligibilityType } from '@ktb/shared-types';
 import { Organization } from '../../organizations/entities/organization.entity';
 import { OrganizationMembership } from '../../memberships/entities/organization-membership.entity';
 import { User } from '../../identity/entities/user.entity';

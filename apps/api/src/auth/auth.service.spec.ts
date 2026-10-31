@@ -136,9 +136,7 @@ describe('AuthService', () => {
     it('should throw 429 when recent challenge exists within cooldown', async () => {
       mockOtpRepo.findOne.mockResolvedValueOnce({ id: 'existing-id' });
 
-      await expect(
-        service.requestOtp({ phone: '9876543210' }),
-      ).rejects.toThrow(HttpException);
+      await expect(service.requestOtp({ phone: '9876543210' })).rejects.toThrow(HttpException);
     });
 
     it('should create challenge, call SMS service, and record audit event', async () => {
@@ -162,9 +160,9 @@ describe('AuthService', () => {
     it('should throw BadRequestException if no active challenge exists', async () => {
       mockOtpRepo.findOne.mockResolvedValueOnce(null);
 
-      await expect(
-        service.verifyOtp({ phone: '9876543210', code: '123456' }),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.verifyOtp({ phone: '9876543210', code: '123456' })).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('should throw BadRequestException if maximum attempts exceeded', async () => {
@@ -174,9 +172,9 @@ describe('AuthService', () => {
         codeHash: sha256('123456'),
       });
 
-      await expect(
-        service.verifyOtp({ phone: '9876543210', code: '123456' }),
-      ).rejects.toThrow(BadRequestException);
+      await expect(service.verifyOtp({ phone: '9876543210', code: '123456' })).rejects.toThrow(
+        BadRequestException,
+      );
     });
 
     it('should throw UnauthorizedException on wrong code', async () => {
@@ -188,9 +186,9 @@ describe('AuthService', () => {
       mockOtpRepo.findOne.mockResolvedValueOnce(challenge);
       mockOtpRepo.save.mockResolvedValueOnce(challenge);
 
-      await expect(
-        service.verifyOtp({ phone: '9876543210', code: '111111' }),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.verifyOtp({ phone: '9876543210', code: '111111' })).rejects.toThrow(
+        UnauthorizedException,
+      );
 
       expect(challenge.attemptCount).toBe(1);
       expect(mockOtpRepo.save).toHaveBeenCalledWith(challenge);
@@ -272,9 +270,9 @@ describe('AuthService', () => {
       };
       mockQueryRunner.manager.getRepository.mockReturnValue(mockTransactionalUserRepo);
 
-      await expect(
-        service.verifyOtp({ phone: '9876543210', code: '123456' }),
-      ).rejects.toThrow(ForbiddenException);
+      await expect(service.verifyOtp({ phone: '9876543210', code: '123456' })).rejects.toThrow(
+        ForbiddenException,
+      );
     });
   });
 
@@ -282,9 +280,9 @@ describe('AuthService', () => {
     it('should throw UnauthorizedException if session is invalid or revoked', async () => {
       mockSessionRepo.findOne.mockResolvedValueOnce(null);
 
-      await expect(
-        service.refreshToken({ refreshToken: 'invalid-token' }),
-      ).rejects.toThrow(UnauthorizedException);
+      await expect(service.refreshToken({ refreshToken: 'invalid-token' })).rejects.toThrow(
+        UnauthorizedException,
+      );
     });
 
     it('should issue new access token for valid session', async () => {
@@ -364,9 +362,7 @@ describe('AuthService', () => {
             status: MembershipStatus.APPROVED,
             appliedAt: new Date(),
             approvedAt: new Date(),
-            roleGrants: [
-              { role: UserRole.VOLUNTEER, status: RoleGrantStatus.ACTIVE },
-            ],
+            roleGrants: [{ role: UserRole.VOLUNTEER, status: RoleGrantStatus.ACTIVE }],
           },
         ],
       };

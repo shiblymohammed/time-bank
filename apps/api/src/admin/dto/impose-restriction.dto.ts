@@ -3,7 +3,10 @@ import { IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validato
 import { GlobalRestrictionType } from '@ktb/shared-types';
 
 export class ImposeRestrictionDto {
-  @ApiProperty({ description: 'Target user ID to restrict', example: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d' })
+  @ApiProperty({
+    description: 'Target user ID to restrict',
+    example: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d',
+  })
   @IsNotEmpty()
   @IsUUID()
   userId!: string;
@@ -22,7 +25,10 @@ export class ImposeRestrictionDto {
   @IsString()
   reasonCode!: string;
 
-  @ApiPropertyOptional({ example: 'Suspended pending identity reverification', description: 'Administrative notes' })
+  @ApiPropertyOptional({
+    example: 'Suspended pending identity reverification',
+    description: 'Administrative notes',
+  })
   @IsOptional()
   @IsString()
   notes?: string;

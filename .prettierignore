@@ -9,3 +9,5 @@ coverage/
 .env.*.local
 apps/mobile/build/
 apps/mobile/.dart_tool/
+apps/mobile/time_bank_flutter/
+apps/web/next-env.d.ts
