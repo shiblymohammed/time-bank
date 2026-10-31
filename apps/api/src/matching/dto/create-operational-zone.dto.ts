@@ -17,10 +17,15 @@ export class CreateOperationalZoneDto {
   @IsString()
   @IsNotEmpty()
   @Length(2, 50)
-  @Matches(/^[A-Z0-9_]+$/, { message: 'Zone code must contain uppercase letters, numbers, and underscores only' })
+  @Matches(/^[A-Z0-9_]+$/, {
+    message: 'Zone code must contain uppercase letters, numbers, and underscores only',
+  })
   code!: string;
 
-  @ApiProperty({ example: 'North Coastal Ward Cluster', description: 'Display name of operational zone' })
+  @ApiProperty({
+    example: 'North Coastal Ward Cluster',
+    description: 'Display name of operational zone',
+  })
   @IsString()
   @IsNotEmpty()
   @Length(2, 100)
@@ -31,7 +36,10 @@ export class CreateOperationalZoneDto {
   @IsOptional()
   description?: string;
 
-  @ApiProperty({ example: ['1', '2', '3', '4', '5'], description: 'Civic ward numbers belonging to this zone' })
+  @ApiProperty({
+    example: ['1', '2', '3', '4', '5'],
+    description: 'Civic ward numbers belonging to this zone',
+  })
   @IsArray()
   @IsString({ each: true })
   wardNumbers!: string[];
@@ -50,7 +58,11 @@ export class CreateOperationalZoneDto {
   @IsOptional()
   centerLng?: number;
 
-  @ApiPropertyOptional({ example: 5.0, default: 5.0, description: 'Operational coverage radius in km' })
+  @ApiPropertyOptional({
+    example: 5.0,
+    default: 5.0,
+    description: 'Operational coverage radius in km',
+  })
   @IsNumber()
   @Min(0.5)
   @Max(50.0)

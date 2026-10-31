@@ -1,11 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsBoolean,
-  IsEnum,
-  IsNotEmpty,
-  IsOptional,
-  IsUUID,
-} from 'class-validator';
+import { IsBoolean, IsEnum, IsNotEmpty, IsOptional, IsUUID } from 'class-validator';
 import { CaregiverRelationshipType } from '@ktb/shared-types';
 
 export class CreateCaregiverAuthorizationDto {
@@ -27,7 +21,9 @@ export class CreateCaregiverAuthorizationDto {
   @IsNotEmpty()
   relationshipType!: CaregiverRelationshipType;
 
-  @ApiPropertyOptional({ description: 'UUID of supporting document (power of attorney / ration card)' })
+  @ApiPropertyOptional({
+    description: 'UUID of supporting document (power of attorney / ration card)',
+  })
   @IsUUID()
   @IsOptional()
   authorizationDocumentId?: string;

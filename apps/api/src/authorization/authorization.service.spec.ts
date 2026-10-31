@@ -57,15 +57,15 @@ describe('AuthorizationService', () => {
   const kozhikodeOrgId = 'org-kozhikode-uuid';
   const kottakkalOrgId = 'org-kottakkal-uuid';
 
-  describe('assertGlobalSuperAdmin()', () => {
+  describe('evaluateGlobalAccess()', () => {
     it('requires an active account even with a previously issued token', async () => {
       mockUserRepo.findOne.mockResolvedValue({ status: AccountStatus.SUSPENDED });
-      await expect(service.assertGlobalSuperAdmin(userId)).rejects.toThrow(ForbiddenException);
+      await expect(service.evaluateGlobalAccess(userId)).rejects.toThrow(ForbiddenException);
     });
     it('rejects a current global restriction', async () => {
       mockUserRepo.findOne.mockResolvedValue({ status: AccountStatus.ACTIVE });
       mockRestrictionRepo.findOne.mockResolvedValue({ status: GlobalRestrictionStatus.ACTIVE });
-      await expect(service.assertGlobalSuperAdmin(userId)).rejects.toThrow(ForbiddenException);
+      await expect(service.evaluateGlobalAccess(userId)).rejects.toThrow(ForbiddenException);
     });
     it.each([true, false])(
       'checks current approved Super Admin grants (grant exists: %s)',
@@ -79,9 +79,11 @@ describe('AuthorizationService', () => {
           getOne: jest.fn().mockResolvedValue(exists ? {} : null),
         };
         mockRoleGrantRepo.createQueryBuilder.mockReturnValue(qb);
-        const result = service.assertGlobalSuperAdmin(userId);
-        if (exists) await expect(result).resolves.toBeUndefined();
-        else await expect(result).rejects.toThrow(ForbiddenException);
+        const result = service.evaluateGlobalAccess(userId);
+        await expect(result).resolves.toEqual({
+          isSuperAdmin: exists,
+          roles: exists ? [UserRole.SUPER_ADMIN] : [],
+        });
         expect(qb.andWhere).toHaveBeenCalledWith('m.status = :mStatus', {
           mStatus: MembershipStatus.APPROVED,
         });

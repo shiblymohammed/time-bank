@@ -6,6 +6,7 @@ import { Organization } from '../organizations/entities/organization.entity';
 import { OrganizationMembership } from '../memberships/entities/organization-membership.entity';
 import { MembershipRoleGrant } from '../memberships/entities/membership-role-grant.entity';
 import { AuthorizationService } from './authorization.service';
+import { RoleHierarchyService } from './role-hierarchy.service';
 import { OrganizationAccessGuard } from './guards/organization-access.guard';
 import { RolesGuard } from './guards/roles.guard';
 
@@ -20,7 +21,7 @@ import { RolesGuard } from './guards/roles.guard';
       GlobalAccountRestriction,
     ]),
   ],
-  providers: [AuthorizationService, OrganizationAccessGuard, RolesGuard],
-  exports: [AuthorizationService, OrganizationAccessGuard, RolesGuard],
+  providers: [AuthorizationService, RoleHierarchyService, OrganizationAccessGuard, RolesGuard],
+  exports: [AuthorizationService, RoleHierarchyService, OrganizationAccessGuard, RolesGuard],
 })
 export class AuthorizationModule {}

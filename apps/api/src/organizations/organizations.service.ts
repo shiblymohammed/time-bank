@@ -126,19 +126,22 @@ export class OrganizationsService {
       }
 
       // 4. Record Audit Event
-      await this.auditService.logEvent({
-        eventType: 'ORGANIZATION_CREATED',
-        actorId: creatorUserId,
-        targetId: savedOrg.id,
-        targetType: 'ORGANIZATION',
-        organizationId: savedOrg.id,
-        payload: {
-          code: savedOrg.code,
-          name: savedOrg.name,
-          type: savedOrg.type,
-          adminPhone: dto.adminPhone,
+      await this.auditService.logEvent(
+        {
+          eventType: 'ORGANIZATION_CREATED',
+          actorId: creatorUserId,
+          targetId: savedOrg.id,
+          targetType: 'ORGANIZATION',
+          organizationId: savedOrg.id,
+          payload: {
+            code: savedOrg.code,
+            name: savedOrg.name,
+            type: savedOrg.type,
+            adminPhone: dto.adminPhone,
+          },
         },
-      });
+        manager,
+      );
 
       return savedOrg;
     });

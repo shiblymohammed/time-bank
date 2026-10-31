@@ -3,6 +3,7 @@ import {
   NotFoundException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
@@ -13,6 +14,7 @@ import {
   MembershipStatus,
   OrganizationStatus,
   RoleGrantStatus,
+  UserRole,
 } from '@ktb/shared-types';
 
 import { User } from '../identity/entities/user.entity';
@@ -22,6 +24,8 @@ import { Organization } from '../organizations/entities/organization.entity';
 import { OrganizationMembership } from '../memberships/entities/organization-membership.entity';
 import { MembershipRoleGrant } from '../memberships/entities/membership-role-grant.entity';
 import { AuditService } from '../audit/audit.service';
+import { AuthorizationService } from '../authorization/authorization.service';
+import { RoleHierarchyService } from '../authorization/role-hierarchy.service';
 import { ImposeRestrictionDto } from './dto/impose-restriction.dto';
 import { ResolveRestrictionDto } from './dto/resolve-restriction.dto';
 import { UpdateOrgStatusDto } from './dto/update-org-status.dto';
@@ -45,6 +49,8 @@ export class AdminService {
     @InjectRepository(MembershipRoleGrant)
     private readonly roleGrantRepo: Repository<MembershipRoleGrant>,
     private readonly auditService: AuditService,
+    private readonly authorizationService: AuthorizationService,
+    private readonly roleHierarchyService: RoleHierarchyService,
   ) {}
 
   /**
@@ -145,6 +151,14 @@ export class AdminService {
     });
     if (!restriction) {
       throw new NotFoundException('Account restriction not found');
+    }
+
+    if (restriction.userId === adminId) {
+      throw new ForbiddenException('Cannot resolve a restriction on your own account');
+    }
+    const authority = await this.authorizationService.evaluateGlobalAccess(adminId);
+    if (!authority.isSuperAdmin) {
+      throw new ForbiddenException('Current Super Admin authority required');
     }
 
     if (restriction.status !== GlobalRestrictionStatus.ACTIVE) {
@@ -259,6 +273,13 @@ export class AdminService {
       throw new NotFoundException('Target user not found');
     }
 
+    // SECURITY: Validate role hierarchy - Super Admins can grant any role
+    // but the role must be valid for organization workflows
+    this.roleHierarchyService.assertCanGrantRole(UserRole.SUPER_ADMIN, dto.role);
+
+    // SECURITY: Prevent self-escalation
+    this.authorizationService.assertNoSelfEscalation(adminId, dto.userId, dto.role);
+
     // Find or create membership for this organization
     let membership = await this.membershipRepo.findOne({
       where: { organizationId: orgId, userId: dto.userId },
@@ -291,7 +312,9 @@ export class AdminService {
     });
 
     if (activeGrant) {
-      throw new ConflictException('User already has an active grant for this role in this organization');
+      throw new ConflictException(
+        'User already has an active grant for this role in this organization',
+      );
     }
 
     const newGrant = this.roleGrantRepo.create({

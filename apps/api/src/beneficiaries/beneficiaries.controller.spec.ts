@@ -17,7 +17,6 @@ describe('BeneficiariesController', () => {
   let controller: BeneficiariesController;
 
   const mockBeneficiariesService = {
-    listCareRecipientsForCaregiver: jest.fn(),
     grantEligibility: jest.fn(),
     getEligibility: jest.fn(),
     createCaregiverAuthorization: jest.fn(),
@@ -46,18 +45,6 @@ describe('BeneficiariesController', () => {
       .compile();
 
     controller = module.get<BeneficiariesController>(BeneficiariesController);
-  });
-
-  it('discovers care recipients using the authenticated caregiver membership', async () => {
-    mockBeneficiariesService.listCareRecipientsForCaregiver.mockResolvedValue([]);
-    const req = {
-      organizationMembership: { membershipId: 'caregiver-member' },
-    } as unknown as Request;
-    await controller.listMyCareRecipients('org-1', req);
-    expect(mockBeneficiariesService.listCareRecipientsForCaregiver).toHaveBeenCalledWith(
-      'org-1',
-      'caregiver-member',
-    );
   });
 
   describe('grantEligibility (D#24, D#25)', () => {
@@ -94,9 +81,13 @@ describe('BeneficiariesController', () => {
         membershipId: 'mem-1',
       });
 
-      const result = await controller.getEligibility('org-1', 'mem-1');
+      const result = await controller.getEligibility('org-1', 'mem-1', 'user-1');
       expect(result).toEqual({ id: 'elig-1', membershipId: 'mem-1' });
-      expect(mockBeneficiariesService.getEligibility).toHaveBeenCalledWith('org-1', 'mem-1');
+      expect(mockBeneficiariesService.getEligibility).toHaveBeenCalledWith(
+        'org-1',
+        'mem-1',
+        'user-1',
+      );
     });
   });
 
@@ -169,11 +160,12 @@ describe('BeneficiariesController', () => {
     it('lists caregivers for beneficiary', async () => {
       mockBeneficiariesService.listCaregiversForBeneficiary.mockResolvedValue([{ id: 'auth-1' }]);
 
-      const result = await controller.listCaregivers('org-1', 'mem-1');
+      const result = await controller.listCaregivers('org-1', 'mem-1', 'user-1');
       expect(result).toHaveLength(1);
       expect(mockBeneficiariesService.listCaregiversForBeneficiary).toHaveBeenCalledWith(
         'org-1',
         'mem-1',
+        'user-1',
       );
     });
   });

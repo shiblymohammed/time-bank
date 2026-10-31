@@ -6,10 +6,10 @@ import {
   Delete,
   Param,
   Body,
+  Query,
   Req,
   UseGuards,
   ParseUUIDPipe,
-  ForbiddenException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Request } from 'express';
@@ -22,6 +22,7 @@ import { AcceptVolunteerOfferDto } from './dto/accept-volunteer-offer.dto';
 import { DeclineVolunteerOfferDto } from './dto/decline-volunteer-offer.dto';
 import { WithdrawVolunteerAssignmentDto } from './dto/withdraw-volunteer-assignment.dto';
 import { CoordinatorDispatchDto } from './dto/coordinator-dispatch.dto';
+import { DispatchVolunteerQueryDto } from './dto/dispatch-volunteer-query.dto';
 import { CreateOperationalZoneDto } from './dto/create-operational-zone.dto';
 import { UpdateOperationalZoneDto } from './dto/update-operational-zone.dto';
 import { AssignVolunteerZoneDto } from './dto/assign-volunteer-zone.dto';
@@ -37,18 +38,6 @@ import { CurrentUserId } from '../authorization/decorators/current-user.decorato
 @Controller('organizations/:id')
 export class MatchingController {
   constructor(private readonly matchingService: MatchingService) {}
-
-  private assertVolunteerAccess(req: Request, membershipId: string) {
-    const context = (req as any).organizationMembership;
-    const canManage =
-      context?.isSuperAdmin ||
-      context?.roles?.some((role: UserRole) =>
-        [UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN].includes(role),
-      );
-    if (!context || (context.membershipId !== membershipId && !canManage)) {
-      throw new ForbiddenException('You may only access your own volunteer preferences');
-    }
-  }
 
   // ─── Operational Zones (Coordinator-Managed) ───────────────────────────────
   @Post('zones')
@@ -144,10 +133,9 @@ export class MatchingController {
   async listVolunteerZones(
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('membershipId', ParseUUIDPipe) membershipId: string,
-    @Req() req: Request,
+    @CurrentUserId() userId: string,
   ) {
-    this.assertVolunteerAccess(req, membershipId);
-    return this.matchingService.listVolunteerZones(organizationId, membershipId);
+    return this.matchingService.listVolunteerZones(organizationId, membershipId, userId);
   }
 
   // ─── Volunteer Availability & GPS ──────────────────────────────────────────
@@ -159,10 +147,9 @@ export class MatchingController {
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('membershipId', ParseUUIDPipe) membershipId: string,
     @Body() dto: UpdateVolunteerAvailabilityDto,
-    @Req() req: Request,
+    @CurrentUserId() userId: string,
   ) {
-    this.assertVolunteerAccess(req, membershipId);
-    return this.matchingService.updateAvailability(organizationId, membershipId, dto);
+    return this.matchingService.updateAvailability(organizationId, membershipId, dto, userId);
   }
 
   @Get('volunteers/:membershipId/availability')
@@ -172,10 +159,9 @@ export class MatchingController {
   async getAvailability(
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('membershipId', ParseUUIDPipe) membershipId: string,
-    @Req() req: Request,
+    @CurrentUserId() userId: string,
   ) {
-    this.assertVolunteerAccess(req, membershipId);
-    return this.matchingService.getAvailability(organizationId, membershipId);
+    return this.matchingService.getAvailability(organizationId, membershipId, userId);
   }
 
   // ─── Volunteer Skills ───────────────────────────────────────────────────────
@@ -201,19 +187,20 @@ export class MatchingController {
   async listSkills(
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('membershipId', ParseUUIDPipe) membershipId: string,
-    @Req() req: Request,
+    @CurrentUserId() userId: string,
   ) {
-    this.assertVolunteerAccess(req, membershipId);
-    return this.matchingService.listVolunteerSkills(organizationId, membershipId);
+    return this.matchingService.listVolunteerSkills(organizationId, membershipId, userId);
   }
 
   // ─── Assignment Offers Lifecycle ───────────────────────────────────────────
   @Get('assignments/mine')
   @UseGuards(AuthGuard, OrganizationAccessGuard)
-  @ApiOperation({ summary: 'List the authenticated member’s own offers and assignments' })
-  async listMyAssignments(@Param('id', ParseUUIDPipe) organizationId: string, @Req() req: Request) {
-    const membership = (req as any).organizationMembership;
-    return this.matchingService.listMyAssignments(organizationId, membership.membershipId);
+  @ApiOperation({ summary: 'List the signed-in volunteer’s own offers and assignments' })
+  async listMyAssignments(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @CurrentUserId() userId: string,
+  ) {
+    return this.matchingService.listMyAssignments(organizationId, userId);
   }
 
   @Post('assignments/:assignmentId/accept')
@@ -280,11 +267,40 @@ export class MatchingController {
     );
   }
 
+  @Get('requests/:requestId/matching')
+  @UseGuards(AuthGuard, OrganizationAccessGuard, RolesGuard)
+  @Roles(UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Get a staff-only snapshot of request matching and assignment history' })
+  async getRequestMatching(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @CurrentUserId() userId: string,
+  ) {
+    return this.matchingService.getRequestMatching(organizationId, requestId, userId);
+  }
+
+  @Get('requests/:requestId/dispatch-volunteers')
+  @UseGuards(AuthGuard, OrganizationAccessGuard, RolesGuard)
+  @Roles(UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Search currently eligible local volunteers for coordinator dispatch' })
+  async listDispatchVolunteers(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @CurrentUserId() userId: string,
+    @Query() query: DispatchVolunteerQueryDto,
+  ) {
+    return this.matchingService.listDispatchVolunteers(organizationId, requestId, userId, query);
+  }
+
   @Post('requests/:requestId/dispatch')
   @UseGuards(AuthGuard, OrganizationAccessGuard, RolesGuard)
   @Roles(UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN, UserRole.SUPER_ADMIN)
   @ApiOperation({ summary: 'Coordinator manually dispatches volunteer (D#7, D#30)' })
-  @ApiResponse({ status: 200, description: 'Volunteer dispatched' })
+  @ApiResponse({
+    status: 200,
+    description:
+      'Volunteer assigned; rescheduled requests return an OFFERED assignment requiring volunteer confirmation',
+  })
   async coordinatorDispatch(
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('requestId', ParseUUIDPipe) requestId: string,
@@ -305,8 +321,7 @@ export class MatchingController {
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('requestId', ParseUUIDPipe) requestId: string,
   ) {
-    await this.matchingService.assertRequestOrganization(organizationId, requestId);
-    return this.matchingService.expandSearchRadius(requestId);
+    return this.matchingService.expandSearchRadius(organizationId, requestId);
   }
 
   @Post('requests/:requestId/progression')
@@ -320,7 +335,6 @@ export class MatchingController {
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('requestId', ParseUUIDPipe) requestId: string,
   ) {
-    await this.matchingService.assertRequestOrganization(organizationId, requestId);
-    return this.matchingService.evaluateRoundProgression(requestId);
+    return this.matchingService.evaluateRoundProgression(organizationId, requestId);
   }
 }

@@ -4,11 +4,7 @@ import { RequestsController } from './requests.controller';
 import { RequestsService } from './requests.service';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { OrganizationAccessGuard } from '../authorization/guards/organization-access.guard';
-import {
-  ServiceRequestStatus,
-  UrgencyType,
-  UserRole,
-} from '@ktb/shared-types';
+import { ServiceRequestStatus, UrgencyType, UserRole } from '@ktb/shared-types';
 
 describe('RequestsController', () => {
   let controller: RequestsController;

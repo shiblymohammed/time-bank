@@ -20,6 +20,8 @@ import { CaregiverAuthorization } from './entities/caregiver-authorization.entit
 import { OrganizationMembership } from '../memberships/entities/organization-membership.entity';
 import { ServiceRequest } from '../requests/entities/service-request.entity';
 import { AuditService } from '../audit/audit.service';
+import { AuthorizationService } from '../authorization/authorization.service';
+import { MembershipDocument } from '../memberships/entities/membership-document.entity';
 
 describe('BeneficiariesService', () => {
   let service: BeneficiariesService;
@@ -66,6 +68,17 @@ describe('BeneficiariesService', () => {
         { provide: getRepositoryToken(OrganizationMembership), useValue: mockMembershipRepo },
         { provide: getRepositoryToken(ServiceRequest), useValue: mockRequestRepo },
         { provide: AuditService, useValue: mockAuditService },
+        {
+          provide: AuthorizationService,
+          useValue: {
+            evaluateOrganizationAccess: jest.fn().mockResolvedValue({
+              isSuperAdmin: true,
+              roles: [],
+              membershipId: 'staff-membership',
+            }),
+          },
+        },
+        { provide: getRepositoryToken(MembershipDocument), useValue: { findOne: jest.fn() } },
       ],
     }).compile();
 
@@ -170,17 +183,19 @@ describe('BeneficiariesService', () => {
 
   describe('getEligibility', () => {
     it('returns eligibility record if found', async () => {
+      mockMembershipRepo.findOne.mockResolvedValue({ id: 'mem-1', organizationId: 'org-1' });
       const record = { id: 'elig-1', membershipId: 'mem-1' };
       mockEligibilityRepo.findOne.mockResolvedValue(record);
 
-      const result = await service.getEligibility('org-1', 'mem-1');
+      const result = await service.getEligibility('org-1', 'mem-1', 'staff-1');
       expect(result).toBe(record);
     });
 
     it('throws NotFoundException if eligibility not found', async () => {
+      mockMembershipRepo.findOne.mockResolvedValue({ id: 'missing-mem', organizationId: 'org-1' });
       mockEligibilityRepo.findOne.mockResolvedValue(null);
 
-      await expect(service.getEligibility('org-1', 'missing-mem')).rejects.toThrow(
+      await expect(service.getEligibility('org-1', 'missing-mem', 'staff-1')).rejects.toThrow(
         NotFoundException,
       );
     });
@@ -267,8 +282,16 @@ describe('BeneficiariesService', () => {
   describe('createCaregiverAuthorization (D#8, D#37)', () => {
     it('creates caregiver authorization in PENDING_REVIEW status', async () => {
       mockMembershipRepo.findOne
-        .mockResolvedValueOnce({ id: 'ben-mem', organizationId: 'org-1', status: MembershipStatus.APPROVED })
-        .mockResolvedValueOnce({ id: 'cg-mem', organizationId: 'org-1', status: MembershipStatus.APPROVED });
+        .mockResolvedValueOnce({
+          id: 'ben-mem',
+          organizationId: 'org-1',
+          status: MembershipStatus.APPROVED,
+        })
+        .mockResolvedValueOnce({
+          id: 'cg-mem',
+          organizationId: 'org-1',
+          status: MembershipStatus.APPROVED,
+        });
       mockCaregiverAuthRepo.findOne.mockResolvedValue(null);
 
       const result = await service.createCaregiverAuthorization(
@@ -307,8 +330,16 @@ describe('BeneficiariesService', () => {
 
     it('throws BadRequestException if beneficiary and caregiver memberships are identical', async () => {
       mockMembershipRepo.findOne
-        .mockResolvedValueOnce({ id: 'same-mem', organizationId: 'org-1', status: MembershipStatus.APPROVED })
-        .mockResolvedValueOnce({ id: 'same-mem', organizationId: 'org-1', status: MembershipStatus.APPROVED });
+        .mockResolvedValueOnce({
+          id: 'same-mem',
+          organizationId: 'org-1',
+          status: MembershipStatus.APPROVED,
+        })
+        .mockResolvedValueOnce({
+          id: 'same-mem',
+          organizationId: 'org-1',
+          status: MembershipStatus.APPROVED,
+        });
 
       await expect(
         service.createCaregiverAuthorization(
@@ -325,8 +356,16 @@ describe('BeneficiariesService', () => {
 
     it('throws ConflictException if caregiver authorization already approved and active', async () => {
       mockMembershipRepo.findOne
-        .mockResolvedValueOnce({ id: 'ben-mem', organizationId: 'org-1', status: MembershipStatus.APPROVED })
-        .mockResolvedValueOnce({ id: 'cg-mem', organizationId: 'org-1', status: MembershipStatus.APPROVED });
+        .mockResolvedValueOnce({
+          id: 'ben-mem',
+          organizationId: 'org-1',
+          status: MembershipStatus.APPROVED,
+        })
+        .mockResolvedValueOnce({
+          id: 'cg-mem',
+          organizationId: 'org-1',
+          status: MembershipStatus.APPROVED,
+        });
       mockCaregiverAuthRepo.findOne.mockResolvedValue({
         id: 'auth-active',
         status: CaregiverAuthorizationStatus.APPROVED,
@@ -380,7 +419,10 @@ describe('BeneficiariesService', () => {
       const result = await service.reviewCaregiverAuthorization(
         'org-1',
         'auth-1',
-        { status: CaregiverAuthorizationStatus.REVOKED, revocationReason: 'Family dispute resolved' },
+        {
+          status: CaregiverAuthorizationStatus.REVOKED,
+          revocationReason: 'Family dispute resolved',
+        },
         'user-coord-1',
       );
 
@@ -437,12 +479,15 @@ describe('BeneficiariesService', () => {
 
   describe('listCaregiversForBeneficiary', () => {
     it('lists caregivers for beneficiary', async () => {
+      mockMembershipRepo.findOne.mockResolvedValue({ id: 'ben-mem', organizationId: 'org-1' });
       mockCaregiverAuthRepo.find.mockResolvedValue([{ id: 'auth-1' }]);
 
-      const result = await service.listCaregiversForBeneficiary('org-1', 'ben-mem');
+      const result = await service.listCaregiversForBeneficiary('org-1', 'ben-mem', 'staff-1');
       expect(result).toHaveLength(1);
       expect(mockCaregiverAuthRepo.find).toHaveBeenCalledWith(
-        expect.objectContaining({ where: { organizationId: 'org-1', beneficiaryMembershipId: 'ben-mem' } }),
+        expect.objectContaining({
+          where: { organizationId: 'org-1', beneficiaryMembershipId: 'ben-mem' },
+        }),
       );
     });
   });

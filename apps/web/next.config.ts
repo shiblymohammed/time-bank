@@ -1,3 +1,4 @@
+import path from 'node:path';
 import type { NextConfig } from 'next';
 
 /**
@@ -7,14 +8,12 @@ import type { NextConfig } from 'next';
  * D#93: Browser dashboards for coordinators, admins, Super Admin and merchants
  */
 const nextConfig: NextConfig = {
-  async rewrites() {
-    const apiUrl = (
-      process.env.API_URL ||
-      process.env.NEXT_PUBLIC_API_URL ||
-      'http://localhost:3001'
-    ).replace(/\/$/, '');
-    return [{ source: '/backend/:path*', destination: `${apiUrl}/:path*` }];
-  },
+  // API traffic goes through the allowlisted /api/backend gateway, not a blanket rewrite.
+
+  // Self-contained server for infra/docker/Dockerfile.web; trace from the monorepo root so
+  // pnpm workspace dependencies are included.
+  output: 'standalone',
+  outputFileTracingRoot: path.join(__dirname, '../..'),
 
   // Strict mode helps surface concurrent rendering issues early
   reactStrictMode: true,

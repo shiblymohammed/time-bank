@@ -2,7 +2,7 @@
   "name": "@ktb/web",
   "version": "0.0.1",
   "private": true,
-  "description": "Kottakkal Time Bank \u2014 Next.js web dashboards for coordinators, admins and merchants (D#96, D#93)",
+  "description": "Kottakkal Time Bank — Next.js web dashboards for coordinators, admins and merchants (D#96, D#93)",
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
@@ -11,7 +11,7 @@
     "typecheck": "tsc --noEmit",
     "format": "prettier --write \"src/**/*.{ts,tsx}\"",
     "test": "node --test test/*.test.cjs",
-    "test:watch": "echo \"No test runner configured yet\""
+    "test:watch": "node --test --watch test/*.test.cjs"
   },
   "dependencies": {
     "@ktb/shared-types": "workspace:*",

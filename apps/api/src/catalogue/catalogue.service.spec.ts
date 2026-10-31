@@ -123,9 +123,9 @@ describe('CatalogueService', () => {
     it('throws NotFoundException when category to update is missing', async () => {
       mockCategoryRepo.findOne.mockResolvedValue(null);
 
-      await expect(
-        service.updateCategory('missing-cat', { nameEn: 'New Name' }),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.updateCategory('missing-cat', { nameEn: 'New Name' })).rejects.toThrow(
+        NotFoundException,
+      );
     });
   });
 
@@ -217,6 +217,19 @@ describe('CatalogueService', () => {
   });
 
   describe('updateGlobalService', () => {
+    it('rejects requiring skills without any skill codes', async () => {
+      mockGlobalServiceRepo.findOne.mockResolvedValue({
+        id: 'gs-1',
+        defaultMinVolunteers: 1,
+        defaultPreferredVolunteers: 1,
+        requiresSkills: false,
+        requiredSkillCodes: [],
+      });
+      await expect(service.updateGlobalService('gs-1', { requiresSkills: true })).rejects.toThrow(
+        BadRequestException,
+      );
+      expect(mockGlobalServiceRepo.save).not.toHaveBeenCalled();
+    });
     it('updates service rules, credit calculation, and status', async () => {
       const existing = {
         id: 'gs-1',
@@ -248,9 +261,9 @@ describe('CatalogueService', () => {
     it('throws NotFoundException if global service does not exist', async () => {
       mockGlobalServiceRepo.findOne.mockResolvedValue(null);
 
-      await expect(
-        service.updateGlobalService('missing-gs', { nameEn: 'New' }),
-      ).rejects.toThrow(NotFoundException);
+      await expect(service.updateGlobalService('missing-gs', { nameEn: 'New' })).rejects.toThrow(
+        NotFoundException,
+      );
     });
 
     it('throws BadRequestException if updated preferred volunteers < min volunteers', async () => {
@@ -284,6 +297,44 @@ describe('CatalogueService', () => {
   });
 
   describe('configureOrgCatalogue (AT-M3-02)', () => {
+    it('preserves staffing and dispatch policy when only enablement changes', async () => {
+      mockOrgRepo.findOne.mockResolvedValue({ id: 'org-1' });
+      mockGlobalServiceRepo.findOne.mockResolvedValue({
+        id: 'gs-1',
+        isActive: true,
+        defaultMinVolunteers: 1,
+        defaultPreferredVolunteers: 1,
+      });
+      mockOrgCatalogRepo.findOne.mockResolvedValue({
+        id: 'oc-1',
+        isEnabled: true,
+        minVolunteers: 3,
+        preferredVolunteers: 4,
+        requiresCoordinatorDispatch: true,
+        customLabelEn: 'Local help',
+      });
+      const result = await service.configureOrgCatalogue('org-1', {
+        globalServiceId: 'gs-1',
+        isEnabled: false,
+      });
+      expect(result).toMatchObject({
+        isEnabled: false,
+        minVolunteers: 3,
+        preferredVolunteers: 4,
+        requiresCoordinatorDispatch: true,
+        customLabelEn: 'Local help',
+      });
+      mockOrgCatalogRepo.findOne.mockResolvedValue(null);
+    });
+    it('rejects enabling a centrally inactive service', async () => {
+      mockOrgRepo.findOne.mockResolvedValue({ id: 'org-1' });
+      mockGlobalServiceRepo.findOne.mockResolvedValue({ id: 'gs-1', isActive: false });
+      mockOrgCatalogRepo.findOne.mockResolvedValue(null);
+      await expect(
+        service.configureOrgCatalogue('org-1', { globalServiceId: 'gs-1', isEnabled: true }),
+      ).rejects.toThrow(BadRequestException);
+      expect(mockOrgCatalogRepo.save).not.toHaveBeenCalled();
+    });
     it('enables service in organization catalogue with local rules', async () => {
       mockOrgRepo.findOne.mockResolvedValue({ id: 'org-1' });
       mockGlobalServiceRepo.findOne.mockResolvedValue({

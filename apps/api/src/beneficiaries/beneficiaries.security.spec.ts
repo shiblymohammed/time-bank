@@ -1,5 +1,11 @@
 import { ExecutionContext, ForbiddenException, BadRequestException } from '@nestjs/common';
-import { UserRole, MembershipStatus, RoleGrantStatus, CreationChannel, UrgencyType } from '@ktb/shared-types';
+import {
+  UserRole,
+  MembershipStatus,
+  RoleGrantStatus,
+  CreationChannel,
+  UrgencyType,
+} from '@ktb/shared-types';
 import { OrganizationAccessGuard } from '../authorization/guards/organization-access.guard';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { RequestsService } from '../requests/requests.service';
@@ -111,6 +117,13 @@ describe('Milestone 3 Phase B Security & Boundary Invariants', () => {
         mockBeneficiariesService,
         mockMatchingService,
         mockAuditService,
+        {
+          evaluateOrganizationAccess: jest.fn().mockResolvedValue({
+            isSuperAdmin: false,
+            roles: [],
+            membershipId: 'caller-mem',
+          }),
+        } as unknown as AuthorizationService,
       );
     });
 

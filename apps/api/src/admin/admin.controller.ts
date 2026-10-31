@@ -11,13 +11,7 @@ import {
   UseGuards,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-  ApiQuery,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { Request } from 'express';
 import { UserRole, GlobalRestrictionStatus } from '@ktb/shared-types';
 
@@ -143,7 +137,8 @@ export class AdminController {
   @Delete('organizations/:id/roles/:roleGrantId')
   @ApiOperation({
     summary: 'Revoke organization-scoped role grant',
-    description: 'Revokes an active administrative or operational role from a user in an organization.',
+    description:
+      'Revokes an active administrative or operational role from a user in an organization.',
   })
   @ApiResponse({ status: 200, description: 'Role revoked' })
   @ApiResponse({ status: 404, description: 'Role grant not found' })

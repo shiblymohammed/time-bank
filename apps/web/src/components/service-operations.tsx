@@ -1,12 +1,8 @@
 'use client';
 
 import { useEffect, useRef, useState, type ReactNode, type FormEvent } from 'react';
-import {
-  BeneficiaryEligibilityType,
-  CaregiverRelationshipType,
-  ServiceRequestStatus,
-} from '@ktb/shared-types';
-import { api, ApiError, allMemberships } from '../lib/api';
+import { BeneficiaryEligibilityType, CaregiverRelationshipType } from '@ktb/shared-types';
+import { api as request, gatewayFetch as api, ApiError, allMemberships } from '../lib/api';
 
 interface Category {
   id: string;
@@ -19,12 +15,6 @@ interface Service {
   code: string;
   nameEn: string;
   isActive: boolean;
-}
-interface CatalogueItem {
-  id: string;
-  globalServiceId: string;
-  isEnabled: boolean;
-  globalService?: Service;
 }
 interface Proposal {
   id: string;
@@ -46,15 +36,6 @@ interface Member {
   status: string;
   user?: { phoneE164: string };
 }
-interface RequestRecord {
-  id: string;
-  requestNumber: string;
-  status: string;
-  scheduledStartTime: string;
-  locationAddressText: string;
-  locationWardNumber: string;
-  assignments?: { id: string; volunteerMembershipId: string; status: string }[];
-}
 interface Caregiver {
   id: string;
   caregiverMembershipId: string;
@@ -62,6 +43,8 @@ interface Caregiver {
 }
 interface Props {
   organizationId: string | null;
+  /** Central catalogue writes are Super Admin only; hide them from local staff. */
+  isGlobal: boolean;
   onError: (cause: unknown) => void;
 }
 
@@ -150,19 +133,13 @@ const list = (data: FormData, key: string) =>
     .filter(Boolean);
 const iso = (data: FormData, key: string) => new Date(str(data, key)).toISOString();
 
-export function ServiceOperations({ organizationId, onError }: Props) {
+export function ServiceOperations({ organizationId, isGlobal, onError }: Props) {
   const [section, setSection] = useState('catalogue');
   const [categories, setCategories] = useState<Category[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
-  const [catalogue, setCatalogue] = useState<CatalogueItem[]>([]);
   const [zones, setZones] = useState<Zone[]>([]);
   const [members, setMembers] = useState<Member[]>([]);
-  const [requests, setRequests] = useState<RequestRecord[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [status, setStatus] = useState('');
-  const [detail, setDetail] = useState<RequestRecord | null>(null);
   const [beneficiary, setBeneficiary] = useState('');
   const [volunteer, setVolunteer] = useState<{
     id: string;
@@ -193,24 +170,25 @@ export function ServiceOperations({ organizationId, onError }: Props) {
     const options = { signal: controller.signal };
     setLoading(true);
     setError('');
-    setDetail(null);
     setRecordDetails(null);
     setVolunteer(null);
     const load = async () => {
       if (section === 'profile') {
-        const profile = await api<Record<string, unknown>>('/api/auth/me', options);
+        const profile = await request<Record<string, unknown>>(
+          '/api/session',
+          'GET',
+          undefined,
+          controller.signal,
+        );
         if (!controller.signal.aborted) setRecordDetails(profile);
       } else if (section === 'catalogue') {
-        const [cats, definitions, proposalsData, local] = await Promise.all([
+        const [cats, definitions, proposalsData] = await Promise.all([
           api<Category[]>('/api/catalogue/categories', options),
           api<Service[]>('/api/catalogue/global?activeOnly=false', options),
           api<Proposal[]>(
             organizationId ? `${base}/catalogue/proposals` : '/api/catalogue/proposals',
             options,
           ),
-          organizationId
-            ? api<CatalogueItem[]>(`${base}/catalogue?all=true`, options)
-            : Promise.resolve([]),
         ]);
         if (controller.signal.aborted) return;
         setCategories(cats);
@@ -220,25 +198,11 @@ export function ServiceOperations({ organizationId, onError }: Props) {
             ? proposalsData.filter((p) => p.organizationId === organizationId)
             : proposalsData,
         );
-        setCatalogue(local);
       } else if (organizationId) {
         const memberData = await allMemberships<Member>(organizationId, controller.signal);
         if (controller.signal.aborted) return;
         setMembers(memberData.filter((m) => m.status === 'APPROVED'));
-        if (section === 'requests') {
-          const query = new URLSearchParams({ page: String(page), limit: '20' });
-          if (status) query.set('status', status);
-          const local = await api<CatalogueItem[]>(`${base}/catalogue`, options);
-          if (controller.signal.aborted) return;
-          setCatalogue(local);
-          const result = await api<{ data: RequestRecord[]; total: number }>(
-            `${base}/requests?${query}`,
-            options,
-          );
-          if (controller.signal.aborted) return;
-          setRequests(result.data);
-          setTotal(result.total);
-        } else if (section === 'zones') {
+        if (section === 'zones') {
           const result = await api<Zone[]>(`${base}/zones`, options);
           if (!controller.signal.aborted) setZones(result);
         }
@@ -255,7 +219,7 @@ export function ServiceOperations({ organizationId, onError }: Props) {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [organizationId, base, section, revision, page, status, onError]);
+  }, [organizationId, base, section, revision, onError]);
 
   const run = async (action: () => Promise<void>) => {
     if (lock.current) return;
@@ -317,7 +281,7 @@ export function ServiceOperations({ organizationId, onError }: Props) {
     <section className="glass-panel" style={{ padding: 24 }} aria-busy={loading || busy}>
       <h1>Service operations</h1>
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBlock: 20 }}>
-        {['catalogue', 'requests', 'beneficiaries', 'zones', 'profile'].map((tab) => (
+        {['catalogue', 'beneficiaries', 'zones', 'profile'].map((tab) => (
           <button
             key={tab}
             className={`btn ${section === tab ? 'btn-primary' : ''}`}
@@ -369,36 +333,40 @@ export function ServiceOperations({ organizationId, onError }: Props) {
               {categories.map((category) => (
                 <li key={category.id}>
                   {category.nameEn} ({category.code}) · {category.isActive ? 'Active' : 'Inactive'}{' '}
-                  <button
-                    className="btn"
-                    onClick={() =>
-                      void save(
-                        `/api/catalogue/categories/${category.id}`,
-                        { isActive: !category.isActive },
-                        'PATCH',
-                      )
-                    }
-                  >
-                    {category.isActive ? 'Deactivate' : 'Activate'}
-                  </button>
+                  {isGlobal && (
+                    <button
+                      className="btn"
+                      onClick={() =>
+                        void save(
+                          `/api/catalogue/categories/${category.id}`,
+                          { isActive: !category.isActive },
+                          'PATCH',
+                        )
+                      }
+                    >
+                      {category.isActive ? 'Deactivate' : 'Activate'}
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
-            <ActionForm
-              title="Create category"
-              submit="Create category"
-              onSubmit={(data) =>
-                save('/api/catalogue/categories', {
-                  code: str(data, 'code').toUpperCase(),
-                  nameEn: str(data, 'nameEn'),
-                  nameMl: str(data, 'nameMl'),
-                })
-              }
-            >
-              <Field name="code" label="Category code" maxLength={50} />
-              <Field name="nameEn" label="English name" maxLength={100} />
-              <Field name="nameMl" label="Malayalam name" maxLength={100} />
-            </ActionForm>
+            {isGlobal && (
+              <ActionForm
+                title="Create category"
+                submit="Create category"
+                onSubmit={(data) =>
+                  save('/api/catalogue/categories', {
+                    code: str(data, 'code').toUpperCase(),
+                    nameEn: str(data, 'nameEn'),
+                    nameMl: str(data, 'nameMl'),
+                  })
+                }
+              >
+                <Field name="code" label="Category code" maxLength={50} />
+                <Field name="nameEn" label="English name" maxLength={100} />
+                <Field name="nameMl" label="Malayalam name" maxLength={100} />
+              </ActionForm>
+            )}
             <h2>Global services</h2>
             {!services.length && !loading && !error && <p>No services yet.</p>}
             <ul>
@@ -417,128 +385,64 @@ export function ServiceOperations({ organizationId, onError }: Props) {
                   >
                     View service details
                   </button>{' '}
-                  <button
-                    className="btn"
-                    onClick={() =>
-                      void save(
-                        `/api/catalogue/global/${service.id}`,
-                        { isActive: !service.isActive },
-                        'PATCH',
-                      )
-                    }
-                  >
-                    {service.isActive ? 'Deactivate' : 'Activate'}
-                  </button>
+                  {isGlobal && (
+                    <button
+                      className="btn"
+                      onClick={() =>
+                        void save(
+                          `/api/catalogue/global/${service.id}`,
+                          { isActive: !service.isActive },
+                          'PATCH',
+                        )
+                      }
+                    >
+                      {service.isActive ? 'Deactivate' : 'Activate'}
+                    </button>
+                  )}
                 </li>
               ))}
             </ul>
-            <ActionForm
-              title="Create global service"
-              submit="Create service"
-              onSubmit={(data) =>
-                save('/api/catalogue/global', {
-                  categoryId: str(data, 'categoryId'),
-                  code: str(data, 'code').toUpperCase(),
-                  nameEn: str(data, 'nameEn'),
-                  nameMl: str(data, 'nameMl'),
-                  defaultMinVolunteers: number(data, 'minimum'),
-                  defaultPreferredVolunteers: number(data, 'preferred'),
-                })
-              }
-            >
-              <Select name="categoryId" label="Category">
-                {categories
-                  .filter((c) => c.isActive)
-                  .map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.nameEn}
-                    </option>
-                  ))}
-              </Select>
-              <Field name="code" label="Service code" maxLength={60} />
-              <Field name="nameEn" label="English name" maxLength={150} />
-              <Field name="nameMl" label="Malayalam name" maxLength={150} />
-              <Field name="minimum" label="Minimum volunteers" type="number" min={1} value={1} />
-              <Field
-                name="preferred"
-                label="Preferred volunteers"
-                type="number"
-                min={1}
-                value={1}
-              />
-            </ActionForm>
+            {isGlobal && (
+              <ActionForm
+                title="Create global service"
+                submit="Create service"
+                onSubmit={(data) =>
+                  save('/api/catalogue/global', {
+                    categoryId: str(data, 'categoryId'),
+                    code: str(data, 'code').toUpperCase(),
+                    nameEn: str(data, 'nameEn'),
+                    nameMl: str(data, 'nameMl'),
+                    defaultMinVolunteers: number(data, 'minimum'),
+                    defaultPreferredVolunteers: number(data, 'preferred'),
+                  })
+                }
+              >
+                <Select name="categoryId" label="Category">
+                  {categories
+                    .filter((c) => c.isActive)
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nameEn}
+                      </option>
+                    ))}
+                </Select>
+                <Field name="code" label="Service code" maxLength={60} />
+                <Field name="nameEn" label="English name" maxLength={150} />
+                <Field name="nameMl" label="Malayalam name" maxLength={150} />
+                <Field name="minimum" label="Minimum volunteers" type="number" min={1} value={1} />
+                <Field
+                  name="preferred"
+                  label="Preferred volunteers"
+                  type="number"
+                  min={1}
+                  value={1}
+                />
+              </ActionForm>
+            )}
             {organizationId && (
-              <>
-                <h2>Organization catalogue</h2>
-                {!catalogue.length && !loading && !error && (
-                  <p>No services configured for this organization.</p>
-                )}
-                <ul>
-                  {catalogue.map((item) => (
-                    <li key={item.id}>
-                      {item.globalService?.nameEn ?? item.globalServiceId} ·{' '}
-                      {item.isEnabled ? 'Enabled' : 'Disabled'}{' '}
-                      <button
-                        className="btn"
-                        onClick={() =>
-                          void run(async () =>
-                            setRecordDetails(
-                              await api<Record<string, unknown>>(`${base}/catalogue/${item.id}`),
-                            ),
-                          )
-                        }
-                      >
-                        View catalogue details
-                      </button>{' '}
-                      <button
-                        className="btn"
-                        onClick={() =>
-                          void save(`${base}/catalogue/configure`, {
-                            globalServiceId: item.globalServiceId,
-                            isEnabled: !item.isEnabled,
-                          })
-                        }
-                      >
-                        {item.isEnabled ? 'Disable' : 'Enable'}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                <ActionForm
-                  title="Configure organization service"
-                  submit="Save service configuration"
-                  onSubmit={(data) =>
-                    save(`${base}/catalogue/configure`, {
-                      globalServiceId: str(data, 'globalServiceId'),
-                      isEnabled: true,
-                      minVolunteers: number(data, 'minimum'),
-                      preferredVolunteers: number(data, 'preferred'),
-                      requiresCoordinatorDispatch: data.get('dispatch') === 'on',
-                    })
-                  }
-                >
-                  <Select name="globalServiceId" label="Service">
-                    {serviceOptions}
-                  </Select>
-                  <Field
-                    name="minimum"
-                    label="Minimum volunteers"
-                    type="number"
-                    min={1}
-                    value={1}
-                  />
-                  <Field
-                    name="preferred"
-                    label="Preferred volunteers"
-                    type="number"
-                    min={1}
-                    value={1}
-                  />
-                  <label>
-                    <input name="dispatch" type="checkbox" /> Require coordinator dispatch
-                  </label>
-                </ActionForm>
-              </>
+              <p>
+                Enable and configure this organization’s services in the Service catalogue section.
+              </p>
             )}
             {organizationId && (
               <ActionForm
@@ -585,7 +489,7 @@ export function ServiceOperations({ organizationId, onError }: Props) {
                   {proposal.proposedName} · {proposal.status}
                 </h3>
                 <p>{proposal.justification}</p>
-                {proposal.status === 'PENDING_REVIEW' && (
+                {isGlobal && proposal.status === 'PENDING_REVIEW' && (
                   <ActionForm
                     title="Review proposal"
                     submit="Save review"
@@ -623,183 +527,6 @@ export function ServiceOperations({ organizationId, onError }: Props) {
                 )}
               </div>
             ))}
-          </>
-        )}
-        {organizationId && section === 'requests' && (
-          <>
-            <h2>Service requests</h2>
-            <ActionForm
-              title="Create service request"
-              submit="Create request"
-              onSubmit={(data) =>
-                save(`${base}/requests`, {
-                  serviceCatalogId: str(data, 'serviceCatalogId'),
-                  beneficiaryMembershipId: str(data, 'beneficiaryMembershipId'),
-                  creationChannel: 'COORDINATOR_ON_BEHALF',
-                  urgency: 'SCHEDULED',
-                  scheduledStartTime: iso(data, 'start'),
-                  locationAddressText: str(data, 'address'),
-                  locationWardNumber: str(data, 'ward'),
-                  locationPostalCode: str(data, 'postal'),
-                })
-              }
-            >
-              <Select name="serviceCatalogId" label="Organization service">
-                {catalogue
-                  .filter((c) => c.isEnabled)
-                  .map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.globalService?.nameEn ?? c.globalServiceId}
-                    </option>
-                  ))}
-              </Select>
-              <Select name="beneficiaryMembershipId" label="Beneficiary membership">
-                {memberOptions}
-              </Select>
-              <Field name="start" label="Scheduled start" type="datetime-local" />
-              <Field name="address" label="Service address" maxLength={500} />
-              <Field name="ward" label="Ward number" maxLength={20} />
-              <Field name="postal" label="Postal code (6 digits)" maxLength={6} />
-            </ActionForm>
-
-            <label>
-              Status{' '}
-              <select
-                className="form-input"
-                value={status}
-                onChange={(e) => {
-                  setStatus(e.target.value);
-                  setPage(1);
-                }}
-              >
-                <option value="">All statuses</option>
-                {Object.values(ServiceRequestStatus).map((s) => (
-                  <option key={s}>{s}</option>
-                ))}
-              </select>
-            </label>
-            <p>
-              {total} requests · Page {page}
-            </p>
-            <button className="btn" disabled={page === 1} onClick={() => setPage((p) => p - 1)}>
-              Previous
-            </button>
-            <button
-              className="btn"
-              disabled={page * 20 >= total}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Next
-            </button>
-            <div className="table-container">
-              <table className="custom-table">
-                <thead>
-                  <tr>
-                    <th>Request</th>
-                    <th>Status</th>
-                    <th>Scheduled</th>
-                    <th>Ward</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {!requests.length && !loading && !error && (
-                    <tr>
-                      <td colSpan={5}>No requests found.</td>
-                    </tr>
-                  )}
-                  {requests.map((request) => (
-                    <tr key={request.id}>
-                      <td>{request.requestNumber}</td>
-                      <td>{request.status}</td>
-                      <td>{new Date(request.scheduledStartTime).toLocaleString()}</td>
-                      <td>{request.locationWardNumber}</td>
-                      <td>
-                        <button
-                          className="btn"
-                          onClick={() =>
-                            void run(async () =>
-                              setDetail(await api<RequestRecord>(`${base}/requests/${request.id}`)),
-                            )
-                          }
-                        >
-                          View details
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {detail && (
-              <div>
-                <h3>{detail.requestNumber}</h3>
-                <p>
-                  {detail.status} · {detail.locationAddressText}
-                </p>
-                <h4>Volunteer assignments</h4>
-                <ul>
-                  {detail.assignments?.map((assignment) => (
-                    <li key={assignment.id}>
-                      {assignment.volunteerMembershipId} · {assignment.status}
-                    </li>
-                  ))}
-                </ul>
-                <ActionForm
-                  title="Dispatch volunteer"
-                  submit="Dispatch"
-                  onSubmit={(data) =>
-                    save(`${base}/requests/${detail.id}/dispatch`, {
-                      volunteerMembershipId: str(data, 'volunteer'),
-                      dispatchNotes: str(data, 'notes'),
-                    })
-                  }
-                >
-                  <Select name="volunteer" label="Volunteer membership">
-                    {memberOptions}
-                  </Select>
-                  <Field name="notes" label="Dispatch notes" required={false} />
-                </ActionForm>
-                <button
-                  className="btn"
-                  onClick={() => void save(`${base}/requests/${detail.id}/expand-radius`, {})}
-                >
-                  Expand matching radius
-                </button>{' '}
-                <button
-                  className="btn"
-                  onClick={() => void save(`${base}/requests/${detail.id}/progression`, {})}
-                >
-                  Evaluate matching progression
-                </button>
-                <ActionForm
-                  title="Reschedule request"
-                  submit="Reschedule"
-                  onSubmit={(data) =>
-                    save(`${base}/requests/${detail.id}/reschedule`, {
-                      newStartTime: iso(data, 'start'),
-                      reason: str(data, 'reason'),
-                    })
-                  }
-                >
-                  <Field name="start" label="New start time" type="datetime-local" />
-                  <Field name="reason" label="Reason" maxLength={500} />
-                </ActionForm>
-                <ActionForm
-                  title="Cancel request"
-                  submit="Cancel request"
-                  onSubmit={(data) =>
-                    save(`${base}/requests/${detail.id}/cancel`, {
-                      reasonCode: str(data, 'reasonCode'),
-                      notes: str(data, 'notes'),
-                    })
-                  }
-                >
-                  <Field name="reasonCode" label="Reason code" maxLength={50} />
-                  <Field name="notes" label="Cancellation notes" maxLength={500} />
-                </ActionForm>
-              </div>
-            )}
           </>
         )}
         {organizationId && section === 'beneficiaries' && (

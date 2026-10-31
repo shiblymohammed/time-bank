@@ -13,6 +13,7 @@ import { ServiceRequest } from '../../requests/entities/service-request.entity';
 import { OrganizationMembership } from '../../memberships/entities/organization-membership.entity';
 import { User } from '../../identity/entities/user.entity';
 import { MatchingRound } from './matching-round.entity';
+import { RequestRescheduleHistory } from '../../requests/entities/request-reschedule.entity';
 
 /**
  * VolunteerAssignment Entity (Organization Tenant Domain)
@@ -47,12 +48,22 @@ export class VolunteerAssignment {
   @Column({ name: 'matching_round_id', type: 'uuid', nullable: true })
   matchingRoundId?: string | null;
 
-  @ManyToOne(() => MatchingRound, (round) => round.assignments, { onDelete: 'SET NULL', nullable: true })
+  @ManyToOne(() => MatchingRound, (round) => round.assignments, {
+    onDelete: 'SET NULL',
+    nullable: true,
+  })
   @JoinColumn({ name: 'matching_round_id' })
   matchingRound?: MatchingRound | null;
 
   @Column({ name: 'idempotency_key', type: 'varchar', length: 100, nullable: true })
   idempotencyKey?: string | null;
+
+  @Column({ name: 'reschedule_id', type: 'uuid', nullable: true })
+  rescheduleId?: string | null;
+
+  @ManyToOne(() => RequestRescheduleHistory, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'reschedule_id' })
+  reschedule?: RequestRescheduleHistory | null;
 
   @Column({ name: 'slot_number', type: 'int', default: 1 })
   slotNumber!: number;
