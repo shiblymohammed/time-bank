@@ -136,6 +136,46 @@ importers:
         specifier: ^5.6.3
         version: 5.9.3
 
+  apps/landing:
+    dependencies:
+      '@ktb/shared-types':
+        specifier: workspace:*
+        version: link:../../packages/shared-types
+      next:
+        specifier: ^15.0.3
+        version: 15.5.28(@babel/core@7.29.7(supports-color@8.1.1))(@types/node@22.20.5)(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
+      react:
+        specifier: ^19.0.0
+        version: 19.3.1
+      react-dom:
+        specifier: ^19.0.0
+        version: 19.3.1(react@19.3.1)
+    devDependencies:
+      '@ktb/eslint-config':
+        specifier: workspace:*
+        version: link:../../packages/eslint-config
+      '@ktb/tsconfig':
+        specifier: workspace:*
+        version: link:../../packages/tsconfig
+      '@types/node':
+        specifier: ^22.7.9
+        version: 22.20.5
+      '@types/react':
+        specifier: ^19.0.0
+        version: 19.3.0
+      '@types/react-dom':
+        specifier: ^19.0.0
+        version: 19.3.0(@types/react@19.3.0)
+      eslint:
+        specifier: ^9.13.0
+        version: 9.39.5(supports-color@8.1.1)
+      eslint-config-next:
+        specifier: ^15.0.3
+        version: 15.5.28(eslint@9.39.5(supports-color@8.1.1))(supports-color@8.1.1)(typescript@5.9.3)
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+
   apps/web:
     dependencies:
       '@ktb/shared-types':
@@ -4344,7 +4384,7 @@ snapshots:
   '@angular-devkit/core@17.3.11(chokidar@3.6.0)':
     dependencies:
       ajv: 8.12.0
-      ajv-formats: 2.1.1(ajv@8.12.0)
+      ajv-formats: 2.1.1
       jsonc-parser: 3.2.1
       picomatch: 4.0.1
       rxjs: 7.8.1
@@ -5670,8 +5710,8 @@ snapshots:
 
   acorn@8.19.0: {}
 
-  ajv-formats@2.1.1(ajv@8.12.0):
-    optionalDependencies:
+  ajv-formats@2.1.1:
+    dependencies:
       ajv: 8.12.0
 
   ajv-formats@3.0.1(ajv@8.20.0):
