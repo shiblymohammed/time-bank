@@ -386,6 +386,7 @@ export class RequestsService {
             orgId,
             membershipContext.membershipId,
             request.beneficiaryMembershipId,
+            'view',
           )
           .catch(() => null);
 
@@ -647,6 +648,7 @@ export class RequestsService {
             orgId,
             membershipContext.membershipId,
             request.beneficiaryMembershipId,
+            'confirm',
           )
           .catch(() => null);
         if (!caregiver) {

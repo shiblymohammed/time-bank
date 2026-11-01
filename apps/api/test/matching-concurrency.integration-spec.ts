@@ -1,3 +1,6 @@
+import { BeneficiariesService } from '../src/beneficiaries/beneficiaries.service';
+import { BeneficiaryEligibility } from '../src/beneficiaries/entities/beneficiary-eligibility.entity';
+import { CaregiverAuthorization } from '../src/beneficiaries/entities/caregiver-authorization.entity';
 import 'reflect-metadata';
 import { randomUUID } from 'crypto';
 import { join } from 'path';
@@ -1036,6 +1039,71 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       );
       expect(done.reportedMinutes).toBe(60);
       expect(done.status).toBe('COMPLETED');
+    });
+
+    it('honors separate caregiver verification permission through request details and payment', async () => {
+      const { req, assignment } = await accepted();
+      await service.startAssignment(orgA, assignment, memberA, undefined, at(scheduled));
+      await service.finishAssignment(
+        orgA,
+        assignment,
+        memberA,
+        { minutes: 30 },
+        undefined,
+        at(scheduled),
+      );
+      await db.query(
+        "INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,'CAREGIVER',$2)",
+        [otherMember, coordinator],
+      );
+      const authId = await id(
+        "INSERT INTO caregiver_authorizations(organization_id,beneficiary_membership_id,caregiver_membership_id,status,can_initiate_requests,can_verify_completions,approved_by_user_id) VALUES($1,$2,$3,'APPROVED',true,false,$4) RETURNING id",
+        [orgA, beneficiaryA, otherMember, coordinator],
+      );
+      const verifier = new BeneficiariesService(
+        db.getRepository(BeneficiaryEligibility),
+        db.getRepository(CaregiverAuthorization),
+        db.getRepository(OrganizationMembership),
+        db.getRepository(ServiceRequest),
+        audit,
+        authorization,
+        db.getRepository(MembershipDocument),
+      );
+      const previous = (requests as any).beneficiariesService;
+      (requests as any).beneficiariesService = verifier;
+      try {
+        const context = await authorization.evaluateOrganizationAccess(otherVolunteer, orgA);
+        await expect(
+          requests.confirmCompletion(orgA, req, assignment, otherVolunteer, context, {}),
+        ).rejects.toThrow(ForbiddenException);
+        expect(
+          (
+            await db.query('SELECT confirmed_at FROM volunteer_assignments WHERE id=$1', [
+              assignment,
+            ])
+          )[0].confirmed_at,
+        ).toBeNull();
+        await db.query(
+          'UPDATE caregiver_authorizations SET can_initiate_requests=false, can_verify_completions=true WHERE id=$1',
+          [authId],
+        );
+        await expect(
+          verifier.verifyCaregiverProxyAccess(orgA, otherMember, beneficiaryA),
+        ).rejects.toThrow(ForbiddenException);
+        expect((await requests.getRequestById(orgA, req, otherVolunteer, context)).id).toBe(req);
+        const confirmed = await requests.confirmCompletion(
+          orgA,
+          req,
+          assignment,
+          otherVolunteer,
+          context,
+          {},
+        );
+        expect(confirmed.confirmedMinutes).toBe(30);
+        expect(confirmed.creditsEarned).toBe(0.5);
+      } finally {
+        (requests as any).beneficiariesService = previous;
+      }
     });
 
     it('never lets the volunteer confirm, even when they are also a coordinator', async () => {
