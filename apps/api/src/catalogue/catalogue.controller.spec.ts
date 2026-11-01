@@ -73,7 +73,9 @@ describe('CatalogueController', () => {
       mockCatalogueService.updateCategory.mockResolvedValue({ id: 'cat-1', ...dto });
 
       const result = await controller.updateCategory('cat-1', dto, 'user-admin-1', mockRequest);
-      expect(result).toEqual(expect.objectContaining({ id: 'cat-1', nameEn: 'Updated Elder Care' }));
+      expect(result).toEqual(
+        expect.objectContaining({ id: 'cat-1', nameEn: 'Updated Elder Care' }),
+      );
       expect(mockCatalogueService.updateCategory).toHaveBeenCalledWith(
         'cat-1',
         dto,
@@ -105,7 +107,9 @@ describe('CatalogueController', () => {
       mockCatalogueService.createGlobalService.mockResolvedValue({ id: 'gs-1', ...dto });
 
       const result = await controller.createGlobalService(dto, 'user-admin-1', mockRequest);
-      expect(result).toEqual(expect.objectContaining({ id: 'gs-1', code: 'HOSPITAL_ACCOMPANIMENT' }));
+      expect(result).toEqual(
+        expect.objectContaining({ id: 'gs-1', code: 'HOSPITAL_ACCOMPANIMENT' }),
+      );
       expect(mockCatalogueService.createGlobalService).toHaveBeenCalledWith(
         dto,
         'user-admin-1',

@@ -1,13 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsArray,
-  IsBoolean,
-  IsNumber,
-  IsOptional,
-  IsString,
-  Max,
-  Min,
-} from 'class-validator';
+import { IsArray, IsBoolean, IsNumber, IsOptional, IsString, Max, Min } from 'class-validator';
 
 export class UpdateVolunteerAvailabilityDto {
   @ApiPropertyOptional({ example: true, default: true })
@@ -15,7 +7,11 @@ export class UpdateVolunteerAvailabilityDto {
   @IsOptional()
   isAvailableImmediate?: boolean;
 
-  @ApiPropertyOptional({ example: 7.5, default: 5.0, description: 'Max travel radius in kilometers' })
+  @ApiPropertyOptional({
+    example: 7.5,
+    default: 5.0,
+    description: 'Max travel radius in kilometers',
+  })
   @IsNumber()
   @Min(0.5)
   @Max(50.0)
@@ -42,12 +38,19 @@ export class UpdateVolunteerAvailabilityDto {
   @IsOptional()
   transientLng?: number;
 
-  @ApiPropertyOptional({ example: true, default: true, description: 'Consent for transient GPS usage' })
+  @ApiPropertyOptional({
+    example: true,
+    default: true,
+    description: 'Consent for transient GPS usage',
+  })
   @IsBoolean()
   @IsOptional()
   isGpsConsented?: boolean;
 
-  @ApiPropertyOptional({ example: 'House 14, Ward 4, Kottakkal', description: 'Verified residential address' })
+  @ApiPropertyOptional({
+    example: 'House 14, Ward 4, Kottakkal',
+    description: 'Verified residential address',
+  })
   @IsString()
   @IsOptional()
   residentialAddressText?: string;

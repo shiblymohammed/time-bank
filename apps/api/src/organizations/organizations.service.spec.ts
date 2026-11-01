@@ -141,6 +141,7 @@ describe('OrganizationsService', () => {
           actorId: 'creator-uuid-1',
           targetId: 'new-org-uuid',
         }),
+        expect.objectContaining({ save: expect.any(Function) }),
       );
     });
   });

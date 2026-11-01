@@ -22,17 +22,24 @@ export class CreateServiceRequestDto {
   @IsNotEmpty()
   serviceCatalogId!: string;
 
-  @ApiPropertyOptional({ description: 'Optional client idempotency key to prevent double bookings' })
+  @ApiPropertyOptional({
+    description: 'Optional client idempotency key to prevent double bookings',
+  })
   @IsString()
   @IsOptional()
   idempotencyKey?: string;
 
-  @ApiPropertyOptional({ description: 'Beneficiary organization membership UUID (mandatory if created by Caregiver or Coordinator)' })
+  @ApiPropertyOptional({
+    description:
+      'Beneficiary organization membership UUID (mandatory if created by Caregiver or Coordinator)',
+  })
   @IsUUID()
   @IsOptional()
   beneficiaryMembershipId?: string;
 
-  @ApiPropertyOptional({ description: 'CaregiverAuthorization UUID (mandatory if creationChannel is CAREGIVER_PROXY)' })
+  @ApiPropertyOptional({
+    description: 'CaregiverAuthorization UUID (mandatory if creationChannel is CAREGIVER_PROXY)',
+  })
   @IsUUID()
   @IsOptional()
   caregiverAuthorizationId?: string;
@@ -50,12 +57,19 @@ export class CreateServiceRequestDto {
   @IsNotEmpty()
   urgency!: UrgencyType;
 
-  @ApiProperty({ example: '2026-10-20T10:00:00.000Z', description: 'Scheduled start time ISO string' })
+  @ApiProperty({
+    example: '2026-10-20T10:00:00.000Z',
+    description: 'Scheduled start time ISO string',
+  })
   @IsISO8601()
   @IsNotEmpty()
   scheduledStartTime!: string;
 
-  @ApiPropertyOptional({ example: 60, default: 60, description: 'Expected duration in minutes (15 to 480)' })
+  @ApiPropertyOptional({
+    example: 60,
+    default: 60,
+    description: 'Expected duration in minutes (15 to 480)',
+  })
   @IsInt()
   @Min(15)
   @Max(480)
@@ -63,7 +77,10 @@ export class CreateServiceRequestDto {
   expectedDurationMinutes?: number;
 
   // Mandatory Manual Location Fields (D#59, FR-SVC-02)
-  @ApiProperty({ example: 'Taluk Hospital OP Counter, Kottakkal', description: 'Mandatory manually entered location text (never auto-filled from profile)' })
+  @ApiProperty({
+    example: 'Taluk Hospital OP Counter, Kottakkal',
+    description: 'Mandatory manually entered location text (never auto-filled from profile)',
+  })
   @IsString()
   @IsNotEmpty()
   @Length(5, 500)
@@ -105,7 +122,11 @@ export class CreateServiceRequestDto {
   @IsOptional()
   beneficiaryNotes?: string;
 
-  @ApiPropertyOptional({ example: false, default: false, description: 'Allows cross-org volunteers for community drives (ITB-006)' })
+  @ApiPropertyOptional({
+    example: false,
+    default: false,
+    description: 'Allows cross-org volunteers for community drives (ITB-006)',
+  })
   @IsBoolean()
   @IsOptional()
   allowsCrossOrgVolunteers?: boolean;

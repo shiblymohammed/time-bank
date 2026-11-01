@@ -60,7 +60,7 @@ export class RequestCancellation {
   @Column({
     name: 'hours_before_start',
     type: 'numeric',
-    precision: 5,
+    precision: 10,
     scale: 2,
     default: 0.0,
   })

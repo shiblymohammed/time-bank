@@ -10,6 +10,7 @@ import { Repository } from 'typeorm';
 import {
   MembershipStatus,
   MembershipApprovalAction,
+  SkillVerificationStatus,
   RoleGrantStatus,
   UserRole,
   OrganizationStatus,
@@ -17,11 +18,19 @@ import {
 
 import { Organization } from '../organizations/entities/organization.entity';
 import { User } from '../identity/entities/user.entity';
-import { OrganizationMembership } from './entities/organization-membership.entity';
+import {
+  MembershipApplicationDetails,
+  OrganizationMembership,
+} from './entities/organization-membership.entity';
 import { MembershipRoleGrant } from './entities/membership-role-grant.entity';
 import { MembershipApproval } from './entities/membership-approval.entity';
 import { MembershipDocument } from './entities/membership-document.entity';
 import { AuditService } from '../audit/audit.service';
+import { AuthorizationService } from '../authorization/authorization.service';
+import { RoleHierarchyService } from '../authorization/role-hierarchy.service';
+import { GlobalServiceDefinition } from '../catalogue/entities/global-service-definition.entity';
+import { VolunteerAvailability } from '../matching/entities/volunteer-availability.entity';
+import { VolunteerSkill } from '../matching/entities/volunteer-skill.entity';
 
 import { ApplyMembershipDto } from './dto/apply-membership.dto';
 import { ApproveMembershipDto } from './dto/approve-membership.dto';
@@ -48,6 +57,8 @@ export class MembershipsService {
     @InjectRepository(MembershipDocument)
     private readonly documentRepo: Repository<MembershipDocument>,
     private readonly auditService: AuditService,
+    private readonly authorizationService: AuthorizationService,
+    private readonly roleHierarchyService: RoleHierarchyService,
   ) {}
 
   /**
@@ -82,7 +93,11 @@ export class MembershipsService {
         existing.status === MembershipStatus.APPLIED ||
         existing.status === MembershipStatus.PENDING_REVIEW
       ) {
-        return existing;
+        // A pending applicant may correct what they asked for; nothing else changes.
+        if (dto.requestedRole === undefined && dto.notes === undefined && !dto.volunteer)
+          return existing;
+        Object.assign(existing, await this.applicationFields(dto));
+        return this.membershipRepo.save(existing);
       }
 
       // Re-apply if previously rejected
@@ -90,6 +105,7 @@ export class MembershipsService {
         existing.status = MembershipStatus.APPLIED;
         existing.appliedAt = new Date();
         existing.rejectionReason = null;
+        Object.assign(existing, await this.applicationFields(dto));
         const reApplied = await this.membershipRepo.save(existing);
 
         await this.auditService.logEvent({
@@ -99,15 +115,15 @@ export class MembershipsService {
           targetType: 'ORGANIZATION_MEMBERSHIP',
           organizationId,
           ipAddress,
-          payload: { reapplication: true, notes: dto.notes ?? null },
+          payload: {
+            reapplication: true,
+            requestedRole: reApplied.requestedRole ?? null,
+            notes: dto.notes ?? null,
+          },
         });
 
         return reApplied;
       }
-    }
-
-    if (existing) {
-      throw new BadRequestException('This membership cannot reapply in its current status');
     }
 
     // Create new application
@@ -115,6 +131,7 @@ export class MembershipsService {
       organizationId,
       userId,
       status: MembershipStatus.APPLIED,
+      ...(await this.applicationFields(dto)),
     });
     const saved = await this.membershipRepo.save(membership);
 
@@ -133,10 +150,77 @@ export class MembershipsService {
       targetType: 'ORGANIZATION_MEMBERSHIP',
       organizationId,
       ipAddress,
-      payload: { notes: dto.notes ?? null },
+      payload: { requestedRole: saved.requestedRole ?? null, notes: dto.notes ?? null },
     });
 
     return saved;
+  }
+
+  /** What the applicant asked for. Volunteer answers need the volunteer role and known skills. */
+  private async applicationFields(dto: ApplyMembershipDto): Promise<{
+    requestedRole: UserRole | null;
+    applicationNotes: string | null;
+    applicationDetails: MembershipApplicationDetails;
+  }> {
+    const requestedRole = dto.requestedRole ?? null;
+    if (dto.volunteer && requestedRole !== UserRole.VOLUNTEER)
+      throw new BadRequestException('Volunteer details need requestedRole VOLUNTEER');
+    const details: MembershipApplicationDetails = {};
+    if (dto.volunteer) {
+      const skillCodes = [...new Set(dto.volunteer.skillCodes ?? [])];
+      if (skillCodes.length) {
+        const services = await this.membershipRepo.manager
+          .getRepository(GlobalServiceDefinition)
+          .find({ where: { isActive: true }, select: { id: true, requiredSkillCodes: true } });
+        const known = new Set(services.flatMap((service) => service.requiredSkillCodes ?? []));
+        const unknown = skillCodes.filter((code) => !known.has(code));
+        if (unknown.length)
+          throw new BadRequestException(`Unknown skill codes: ${unknown.join(', ')}`);
+      }
+      details.volunteer = {
+        maxTravelRadiusKm: dto.volunteer.maxTravelRadiusKm ?? 5,
+        availableAtShortNotice: dto.volunteer.availableAtShortNotice ?? false,
+        usualDays: dto.volunteer.usualDays ?? [],
+        usualTimes: dto.volunteer.usualTimes ?? [],
+        skillCodes,
+      };
+    }
+    return { requestedRole, applicationNotes: dto.notes ?? null, applicationDetails: details };
+  }
+
+  /** Turns a volunteer's application answers into matching preferences and unverified skills. */
+  private async seedVolunteerProfile(membership: OrganizationMembership): Promise<void> {
+    const answers = membership.applicationDetails?.volunteer;
+    if (!answers) return;
+    const manager = this.membershipRepo.manager;
+    const availabilityRepo = manager.getRepository(VolunteerAvailability);
+    const existing = await availabilityRepo.findOne({
+      where: { organizationId: membership.organizationId, membershipId: membership.id },
+    });
+    if (!existing)
+      await availabilityRepo.save(
+        availabilityRepo.create({
+          organizationId: membership.organizationId,
+          membershipId: membership.id,
+          maxTravelRadiusKm: answers.maxTravelRadiusKm,
+          isAvailableImmediate: answers.availableAtShortNotice,
+        }),
+      );
+    if (answers.skillCodes.length)
+      await manager
+        .createQueryBuilder()
+        .insert()
+        .into(VolunteerSkill)
+        .values(
+          answers.skillCodes.map((skillCode) => ({
+            organizationId: membership.organizationId,
+            membershipId: membership.id,
+            skillCode,
+            status: SkillVerificationStatus.PENDING_VERIFICATION,
+          })),
+        )
+        .orIgnore()
+        .execute();
   }
 
   /**
@@ -162,10 +246,9 @@ export class MembershipsService {
       throw new BadRequestException('Membership is already approved');
     }
 
-    if (membership.userId === approverId) {
-      throw new ForbiddenException('Cannot approve your own membership');
-    }
-    this.assertOperationalRole(dto.initialRole ?? UserRole.VOLUNTEER);
+    const initialRole = dto.initialRole ?? membership.requestedRole ?? UserRole.VOLUNTEER;
+    this.authorizationService.assertNoSelfEscalation(approverId, membership.userId, initialRole);
+    await this.assertCanManageRole(organizationId, approverId, initialRole);
 
     const org = await this.orgRepo.findOne({ where: { id: organizationId } });
     if (!org) {
@@ -187,7 +270,6 @@ export class MembershipsService {
     const saved = await this.membershipRepo.save(membership);
 
     // Grant initial role (default: VOLUNTEER)
-    const initialRole = dto.initialRole ?? UserRole.VOLUNTEER;
     const existingGrant = await this.roleGrantRepo.findOne({
       where: {
         membershipId: saved.id,
@@ -205,6 +287,7 @@ export class MembershipsService {
       });
       await this.roleGrantRepo.save(grant);
     }
+    if (initialRole === UserRole.VOLUNTEER) await this.seedVolunteerProfile(saved);
 
     // Record approval audit trail
     const approval = this.approvalRepo.create({
@@ -378,6 +461,7 @@ export class MembershipsService {
   ): Promise<MembershipRoleGrant> {
     const membership = await this.membershipRepo.findOne({
       where: { id: membershipId, organizationId },
+      relations: ['user'],
     });
 
     if (!membership) {
@@ -388,10 +472,8 @@ export class MembershipsService {
       throw new BadRequestException('Cannot grant roles to an unapproved membership');
     }
 
-    if (membership.userId === granterId) {
-      throw new ForbiddenException('Cannot grant roles to yourself');
-    }
-    this.assertOperationalRole(dto.role);
+    this.authorizationService.assertNoSelfEscalation(granterId, membership.userId, dto.role);
+    await this.assertCanManageRole(organizationId, granterId, dto.role, true);
 
     const existingGrant = await this.roleGrantRepo.findOne({
       where: {
@@ -449,11 +531,12 @@ export class MembershipsService {
       throw new NotFoundException('Role grant not found in this organization');
     }
 
+    await this.assertCanManageRole(organizationId, revokerId, grant.role, true);
+
     if (grant.status === RoleGrantStatus.REVOKED) {
       throw new BadRequestException('Role grant is already revoked');
     }
 
-    this.assertOperationalRole(grant.role);
     grant.status = RoleGrantStatus.REVOKED;
     grant.revokedAt = new Date();
     grant.revokedBy = revokerId;
@@ -477,12 +560,6 @@ export class MembershipsService {
     return saved;
   }
 
-  private assertOperationalRole(role: UserRole): void {
-    if ([UserRole.SUPER_ADMIN, UserRole.MUNICIPALITY_ADMIN, UserRole.COORDINATOR].includes(role)) {
-      throw new ForbiddenException('Administrative roles require the central administration API');
-    }
-  }
-
   /**
    * List and filter organization memberships (M2-17).
    */
@@ -499,6 +576,16 @@ export class MembershipsService {
     if (query.status) {
       qb.andWhere('m.status = :status', { status: query.status });
     }
+
+    if (query.role)
+      qb.andWhere(
+        'EXISTS (SELECT 1 FROM membership_role_grants selected_role WHERE selected_role.membership_id = m.id AND selected_role.role = :selectedRole AND selected_role.status = :activeRole)',
+        { selectedRole: query.role, activeRole: RoleGrantStatus.ACTIVE },
+      );
+    if (query.search?.trim())
+      qb.andWhere('(m.membershipNumber ILIKE :search OR user.phoneE164 ILIKE :search)', {
+        search: `%${query.search.trim()}%`,
+      });
 
     qb.orderBy('m.createdAt', 'DESC');
     qb.take(Math.min(query.limit ?? 50, 100));
@@ -525,5 +612,53 @@ export class MembershipsService {
     }
 
     return membership;
+  }
+
+  async listMembershipDocuments(
+    organizationId: string,
+    membershipId: string,
+  ): Promise<MembershipDocument[]> {
+    const membership = await this.membershipRepo.findOne({
+      where: { id: membershipId, organizationId },
+    });
+    if (!membership) throw new NotFoundException('Membership not found in this organization');
+    return this.documentRepo.find({ where: { membershipId }, order: { createdAt: 'DESC' } });
+  }
+
+  private async assertCanManageRole(
+    organizationId: string,
+    actorId: string,
+    role: UserRole,
+    requiresAdmin = false,
+  ): Promise<void> {
+    this.roleHierarchyService.assertValidMembershipRole(role);
+    const context = await this.authorizationService.evaluateOrganizationAccess(
+      actorId,
+      organizationId,
+    );
+    if (
+      requiresAdmin &&
+      !context.isSuperAdmin &&
+      !context.roles.includes(UserRole.MUNICIPALITY_ADMIN)
+    ) {
+      throw new ForbiddenException('Municipality administrator required to manage roles');
+    }
+    this.roleHierarchyService.assertCanGrantRole(this.getHighestRole(context.roles), role);
+  }
+
+  /**
+   * Helper: determines the highest privilege level from a set of roles.
+   * Role hierarchy: SUPER_ADMIN > MUNICIPALITY_ADMIN > COORDINATOR > VOLUNTEER/BENEFICIARY/CAREGIVER/MERCHANT
+   */
+  private getHighestRole(roles: UserRole[]): UserRole {
+    if (roles.includes(UserRole.SUPER_ADMIN)) return UserRole.SUPER_ADMIN;
+    if (roles.includes(UserRole.MUNICIPALITY_ADMIN)) return UserRole.MUNICIPALITY_ADMIN;
+    if (roles.includes(UserRole.COORDINATOR)) return UserRole.COORDINATOR;
+    if (roles.includes(UserRole.VOLUNTEER)) return UserRole.VOLUNTEER;
+    if (roles.includes(UserRole.BENEFICIARY)) return UserRole.BENEFICIARY;
+    if (roles.includes(UserRole.CAREGIVER)) return UserRole.CAREGIVER;
+    if (roles.includes(UserRole.MERCHANT)) return UserRole.MERCHANT;
+
+    throw new ForbiddenException('User has no recognized roles');
   }
 }

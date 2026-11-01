@@ -5,11 +5,11 @@ import { AuthorizationService } from '../authorization.service';
 import { RolesGuard } from './roles.guard';
 
 describe('RolesGuard', () => {
-  const assertGlobalSuperAdmin = jest.fn();
+  const evaluateGlobalAccess = jest.fn();
   const getAllAndOverride = jest.fn();
   const guard = new RolesGuard(
     { getAllAndOverride } as unknown as Reflector,
-    { assertGlobalSuperAdmin } as unknown as AuthorizationService,
+    { evaluateGlobalAccess } as unknown as AuthorizationService,
   );
   const context = (request: object) =>
     ({
@@ -23,23 +23,25 @@ describe('RolesGuard', () => {
 
   it('validates global admin routes without an organization context', async () => {
     getAllAndOverride.mockReturnValue([UserRole.SUPER_ADMIN]);
-    assertGlobalSuperAdmin.mockResolvedValue(undefined);
+    evaluateGlobalAccess.mockResolvedValue({ isSuperAdmin: true, roles: [UserRole.SUPER_ADMIN] });
     await expect(guard.canActivate(context({ user: { id: 'admin' } }))).resolves.toBe(true);
-    expect(assertGlobalSuperAdmin).toHaveBeenCalledWith('admin');
+    expect(evaluateGlobalAccess).toHaveBeenCalledWith('admin');
   });
   it('rejects claimed Super Admin privileges without current database authorization', async () => {
     getAllAndOverride.mockReturnValue([UserRole.SUPER_ADMIN]);
-    assertGlobalSuperAdmin.mockRejectedValue(new ForbiddenException());
+    evaluateGlobalAccess.mockResolvedValue({ isSuperAdmin: false, roles: [] });
     await expect(
       guard.canActivate(context({ user: { id: 'user', isSuperAdmin: true } })),
     ).rejects.toThrow(ForbiddenException);
   });
   it('does not permit tenant roles without organization evaluation', async () => {
-    getAllAndOverride.mockReturnValue([UserRole.SUPER_ADMIN, UserRole.COORDINATOR]);
+    getAllAndOverride.mockReturnValue([UserRole.COORDINATOR]);
+    evaluateGlobalAccess.mockResolvedValue({ isSuperAdmin: false, roles: [] });
     await expect(
-      guard.canActivate(context({ user: { id: 'admin', isSuperAdmin: true } })),
+      guard.canActivate(
+        context({ user: { id: 'coordinator', roles: [UserRole.COORDINATOR], isSuperAdmin: true } }),
+      ),
     ).rejects.toThrow(ForbiddenException);
-    expect(assertGlobalSuperAdmin).not.toHaveBeenCalled();
   });
   it('checks tenant roles against the evaluated membership', async () => {
     getAllAndOverride.mockReturnValue([UserRole.COORDINATOR]);
@@ -53,5 +55,6 @@ describe('RolesGuard', () => {
         context({ organizationMembership: { roles: [UserRole.VOLUNTEER], isSuperAdmin: false } }),
       ),
     ).rejects.toThrow(ForbiddenException);
+    expect(evaluateGlobalAccess).not.toHaveBeenCalled();
   });
 });

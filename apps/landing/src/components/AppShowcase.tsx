@@ -322,6 +322,7 @@ export function AppShowcase() {
 
   const activeRequest = feedItems[selectedFeedItem] || feedItems[0];
   const activeRadarTask = radarPins[selectedRadarPin] || radarPins[0];
+  if (!activeRequest || !activeRadarTask) return null;
 
   return (
     <section
@@ -1404,7 +1405,7 @@ export function AppShowcase() {
                               </span>
                               <div style={{ textAlign: 'left', lineHeight: 1.15 }}>
                                 <div style={{ fontSize: '0.72rem', fontWeight: 800, whiteSpace: 'nowrap' }}>
-                                  {pin.requester.split('(')[0].trim()}
+                                  {pin.requester.split('(')[0]?.trim() ?? pin.requester}
                                 </div>
                                 <div style={{ fontSize: '0.62rem', fontWeight: 700, color: isSelected ? '#FCD34D' : '#6B7280' }}>
                                   {pin.distance} • {pin.duration}

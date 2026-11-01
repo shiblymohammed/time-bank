@@ -1,19 +1,5 @@
-import {
-  Controller,
-  Post,
-  Get,
-  Body,
-  Req,
-  HttpCode,
-  HttpStatus,
-  UseGuards,
-} from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
+import { Controller, Post, Get, Body, Req, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Request } from 'express';
 import { AuthService } from './auth.service';
 import { RequestOtpDto } from './dto/request-otp.dto';
@@ -76,10 +62,7 @@ export class AuthController {
     description: 'Revokes the active refresh token session in the database.',
   })
   @ApiResponse({ status: 200, description: 'Session revoked' })
-  async logout(
-    @Body() dto: RefreshTokenDto,
-    @Req() req: Request,
-  ) {
+  async logout(@Body() dto: RefreshTokenDto, @Req() req: Request) {
     const ip = req.ip ?? req.socket.remoteAddress;
     // Extract optional user id from request if user is authenticated
     const userId = (req as any).user?.id ?? (req as any).userId;

@@ -25,7 +25,14 @@ import { AuthGuard } from './auth/guards/auth.guard';
 import { OrganizationAccessGuard } from './authorization/guards/organization-access.guard';
 import { RolesGuard } from './authorization/guards/roles.guard';
 
+import { DonationsController } from './donations/donations.controller';
+import { DonationsService } from './donations/donations.service';
+import { TimeLedgerController } from './time-ledger/time-ledger.controller';
+import { TimeLedgerService } from './time-ledger/time-ledger.service';
+
 const controllers = [
+  DonationsController,
+  TimeLedgerController,
   HealthController,
   AuthController,
   AdminController,
@@ -37,6 +44,8 @@ const controllers = [
   MatchingController,
 ];
 const services = [
+  DonationsService,
+  TimeLedgerService,
   AuthService,
   AdminService,
   OrganizationsService,

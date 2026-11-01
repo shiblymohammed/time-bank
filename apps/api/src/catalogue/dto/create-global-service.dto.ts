@@ -1,6 +1,7 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
+  ArrayMaxSize,
   IsBoolean,
   IsInt,
   IsNotEmpty,
@@ -69,20 +70,34 @@ export class CreateGlobalServiceDefinitionDto {
 
   @ApiPropertyOptional({ example: ['FIRST_AID'], default: [] })
   @IsArray()
+  @ArrayMaxSize(50)
   @IsString({ each: true })
+  @Length(1, 50, { each: true })
   @IsOptional()
   requiredSkillCodes?: string[];
 
-  @ApiPropertyOptional({ example: true, default: true, description: 'Strict disclaimer against emergency dispatch (D#26)' })
+  @ApiPropertyOptional({
+    example: true,
+    default: true,
+    description: 'Strict disclaimer against emergency dispatch (D#26)',
+  })
   @IsBoolean()
   @IsOptional()
   isEmergencyProhibited?: boolean;
 
-  @ApiPropertyOptional({ example: 1.0, default: 1.0, description: 'Base hourly time-credit award rate (PRD D#14)' })
+  @ApiPropertyOptional({
+    example: 1.0,
+    default: 1.0,
+    description: 'Base hourly time-credit award rate (PRD D#14)',
+  })
   @IsOptional()
   baseCreditRateHourly?: number;
 
-  @ApiPropertyOptional({ example: 1.0, default: 1.0, description: 'Credit multiplier for hazardous or specialized service' })
+  @ApiPropertyOptional({
+    example: 1.0,
+    default: 1.0,
+    description: 'Credit multiplier for hazardous or specialized service',
+  })
   @IsOptional()
   creditMultiplier?: number;
 

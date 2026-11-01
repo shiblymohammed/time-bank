@@ -18,6 +18,7 @@ import { RequestsService } from './requests.service';
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { CancelServiceRequestDto } from './dto/cancel-service-request.dto';
 import { RescheduleServiceRequestDto } from './dto/reschedule-service-request.dto';
+import { ConfirmServiceCompletionDto } from './dto/confirm-service-completion.dto';
 import { RequestQueryDto } from './dto/request-query.dto';
 
 import { AuthGuard } from '../auth/guards/auth.guard';
@@ -134,6 +135,37 @@ export class RequestsController {
     return this.requestsService.rescheduleRequest(
       organizationId,
       requestId,
+      userId,
+      membershipContext,
+      dto,
+      ip,
+    );
+  }
+
+  @Post(':requestId/assignments/:assignmentId/confirm')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @ApiOperation({
+    summary: 'Confirm that a volunteer finished the service',
+    description:
+      'The beneficiary, an authorized caregiver or a coordinator confirms; never the volunteer.',
+  })
+  @ApiResponse({ status: 201, description: 'Service confirmed' })
+  @ApiResponse({ status: 403, description: 'Not allowed to confirm, or confirming own service' })
+  @ApiResponse({ status: 409, description: 'Not finished yet, or already confirmed' })
+  async confirmCompletion(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @Param('assignmentId', ParseUUIDPipe) assignmentId: string,
+    @Body() dto: ConfirmServiceCompletionDto,
+    @CurrentUserId() userId: string,
+    @Req() req: Request,
+  ) {
+    const membershipContext = (req as any).organizationMembership;
+    const ip = req.ip ?? req.socket.remoteAddress;
+    return this.requestsService.confirmCompletion(
+      organizationId,
+      requestId,
+      assignmentId,
       userId,
       membershipContext,
       dto,

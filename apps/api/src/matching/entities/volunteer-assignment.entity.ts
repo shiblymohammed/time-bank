@@ -13,6 +13,7 @@ import { ServiceRequest } from '../../requests/entities/service-request.entity';
 import { OrganizationMembership } from '../../memberships/entities/organization-membership.entity';
 import { User } from '../../identity/entities/user.entity';
 import { MatchingRound } from './matching-round.entity';
+import { RequestRescheduleHistory } from '../../requests/entities/request-reschedule.entity';
 
 /**
  * VolunteerAssignment Entity (Organization Tenant Domain)
@@ -47,12 +48,22 @@ export class VolunteerAssignment {
   @Column({ name: 'matching_round_id', type: 'uuid', nullable: true })
   matchingRoundId?: string | null;
 
-  @ManyToOne(() => MatchingRound, (round) => round.assignments, { onDelete: 'SET NULL', nullable: true })
+  @ManyToOne(() => MatchingRound, (round) => round.assignments, {
+    onDelete: 'SET NULL',
+    nullable: true,
+  })
   @JoinColumn({ name: 'matching_round_id' })
   matchingRound?: MatchingRound | null;
 
   @Column({ name: 'idempotency_key', type: 'varchar', length: 100, nullable: true })
   idempotencyKey?: string | null;
+
+  @Column({ name: 'reschedule_id', type: 'uuid', nullable: true })
+  rescheduleId?: string | null;
+
+  @ManyToOne(() => RequestRescheduleHistory, { nullable: true, onDelete: 'SET NULL' })
+  @JoinColumn({ name: 'reschedule_id' })
+  reschedule?: RequestRescheduleHistory | null;
 
   @Column({ name: 'slot_number', type: 'int', default: 1 })
   slotNumber!: number;
@@ -84,6 +95,32 @@ export class VolunteerAssignment {
 
   @Column({ name: 'withdrawal_reason', type: 'text', nullable: true })
   withdrawalReason?: string | null;
+
+  // Service completion: the volunteer starts and finishes; someone else confirms.
+  @Column({ name: 'started_at', type: 'timestamptz', nullable: true })
+  startedAt?: Date | null;
+
+  @Column({ name: 'finished_at', type: 'timestamptz', nullable: true })
+  finishedAt?: Date | null;
+
+  @Column({ name: 'reported_minutes', type: 'int', nullable: true })
+  reportedMinutes?: number | null;
+
+  @Column({ name: 'completion_notes', type: 'text', nullable: true })
+  completionNotes?: string | null;
+
+  @Column({ name: 'confirmed_at', type: 'timestamptz', nullable: true })
+  confirmedAt?: Date | null;
+
+  @Column({ name: 'confirmed_by_user_id', type: 'uuid', nullable: true })
+  confirmedByUserId?: string | null;
+
+  @ManyToOne(() => User, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'confirmed_by_user_id' })
+  confirmedBy?: User | null;
+
+  @Column({ name: 'confirmed_minutes', type: 'int', nullable: true })
+  confirmedMinutes?: number | null;
 
   @Column({ name: 'replaced_by_assignment_id', type: 'uuid', nullable: true })
   replacedByAssignmentId?: string | null;

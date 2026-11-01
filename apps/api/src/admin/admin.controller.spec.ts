@@ -67,7 +67,12 @@ describe('AdminController', () => {
   it('should call resolveRestriction', async () => {
     const dto = { resolutionNotes: 'cleared' };
     const res = await controller.resolveRestriction('r-1', dto, 'admin-1', mockReq);
-    expect(mockAdminService.resolveRestriction).toHaveBeenCalledWith('r-1', dto, 'admin-1', '127.0.0.1');
+    expect(mockAdminService.resolveRestriction).toHaveBeenCalledWith(
+      'r-1',
+      dto,
+      'admin-1',
+      '127.0.0.1',
+    );
     expect(res).toEqual({ id: 'r-1' });
   });
 
@@ -80,21 +85,37 @@ describe('AdminController', () => {
   it('should call updateOrgStatus', async () => {
     const dto = { status: OrganizationStatus.ACTIVE };
     const res = await controller.updateOrgStatus('org-1', dto, 'admin-1', mockReq);
-    expect(mockAdminService.updateOrganizationStatus).toHaveBeenCalledWith('org-1', dto, 'admin-1', '127.0.0.1');
+    expect(mockAdminService.updateOrganizationStatus).toHaveBeenCalledWith(
+      'org-1',
+      dto,
+      'admin-1',
+      '127.0.0.1',
+    );
     expect(res).toEqual({ id: 'org-1' });
   });
 
   it('should call grantOrgRole', async () => {
     const dto = { userId: 'u-1', role: UserRole.COORDINATOR };
     const res = await controller.grantOrgRole('org-1', dto, 'admin-1', mockReq);
-    expect(mockAdminService.grantOrganizationRole).toHaveBeenCalledWith('org-1', dto, 'admin-1', '127.0.0.1');
+    expect(mockAdminService.grantOrganizationRole).toHaveBeenCalledWith(
+      'org-1',
+      dto,
+      'admin-1',
+      '127.0.0.1',
+    );
     expect(res).toEqual({ id: 'g-1' });
   });
 
   it('should call revokeOrgRole', async () => {
     const dto = { reason: 'transfer' };
     const res = await controller.revokeOrgRole('org-1', 'g-1', dto, 'admin-1', mockReq);
-    expect(mockAdminService.revokeOrganizationRole).toHaveBeenCalledWith('org-1', 'g-1', dto, 'admin-1', '127.0.0.1');
+    expect(mockAdminService.revokeOrganizationRole).toHaveBeenCalledWith(
+      'org-1',
+      'g-1',
+      dto,
+      'admin-1',
+      '127.0.0.1',
+    );
     expect(res).toEqual({ id: 'g-1' });
   });
 

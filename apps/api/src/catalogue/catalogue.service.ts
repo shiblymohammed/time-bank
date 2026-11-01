@@ -23,8 +23,26 @@ import { ConfigureOrgCatalogueDto } from './dto/configure-org-catalogue.dto';
 import { CreateOrgProposalDto } from './dto/create-proposal.dto';
 import { ReviewOrgProposalDto } from './dto/review-proposal.dto';
 
+/** FIRST_AID → "First aid". */
+export function skillLabel(code: string): string {
+  const words = code.replace(/[_-]+/g, ' ').trim().toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 @Injectable()
 export class CatalogueService {
+  private skillPolicy(requiresSkills: boolean, codes: string[]): string[] {
+    const normalized = [...new Set(codes.map((code) => code.trim()))];
+    if (normalized.some((code) => !code || code.length > 50) || normalized.length > 50)
+      throw new BadRequestException(
+        'Provide at most 50 non-empty skill codes, each at most 50 characters',
+      );
+    if (requiresSkills && !normalized.length)
+      throw new BadRequestException(
+        'At least one required skill code is needed when skills are required',
+      );
+    return normalized;
+  }
   constructor(
     @InjectRepository(ServiceCategory)
     private readonly categoryRepo: Repository<ServiceCategory>,
@@ -150,7 +168,10 @@ export class CatalogueService {
       defaultPreferredVolunteers: dto.defaultPreferredVolunteers,
       isHazardousPhysical: dto.isHazardousPhysical ?? false,
       requiresSkills: dto.requiresSkills ?? false,
-      requiredSkillCodes: dto.requiredSkillCodes ?? [],
+      requiredSkillCodes: this.skillPolicy(
+        dto.requiresSkills ?? false,
+        dto.requiredSkillCodes ?? [],
+      ),
       isEmergencyProhibited: dto.isEmergencyProhibited ?? true,
       baseCreditRateHourly: dto.baseCreditRateHourly ?? 1.0,
       creditMultiplier: dto.creditMultiplier ?? 1.0,
@@ -198,6 +219,10 @@ export class CatalogueService {
       );
     }
 
+    const skillCodes = this.skillPolicy(
+      dto.requiresSkills ?? service.requiresSkills ?? false,
+      dto.requiredSkillCodes ?? service.requiredSkillCodes ?? [],
+    );
     if (dto.nameEn !== undefined) service.nameEn = dto.nameEn;
     if (dto.nameMl !== undefined) service.nameMl = dto.nameMl;
     if (dto.descriptionEn !== undefined) service.descriptionEn = dto.descriptionEn ?? null;
@@ -210,7 +235,7 @@ export class CatalogueService {
     if (dto.isHazardousPhysical !== undefined)
       service.isHazardousPhysical = dto.isHazardousPhysical;
     if (dto.requiresSkills !== undefined) service.requiresSkills = dto.requiresSkills;
-    if (dto.requiredSkillCodes !== undefined) service.requiredSkillCodes = dto.requiredSkillCodes;
+    if (dto.requiredSkillCodes !== undefined) service.requiredSkillCodes = skillCodes;
     if (dto.isEmergencyProhibited !== undefined) {
       service.isEmergencyProhibited = dto.isEmergencyProhibited;
     }
@@ -228,7 +253,12 @@ export class CatalogueService {
       actorId: actorId ?? null,
       targetId: saved.id,
       targetType: 'global_service_definitions',
-      payload: { code: saved.code, isActive: saved.isActive },
+      payload: {
+        code: saved.code,
+        isActive: saved.isActive,
+        requiresSkills: saved.requiresSkills,
+        requiredSkillCodes: saved.requiredSkillCodes,
+      },
       ipAddress: ipAddress ?? null,
     });
 
@@ -252,6 +282,16 @@ export class CatalogueService {
     }
 
     return qb.getMany();
+  }
+
+  /** Skill codes that active services ask for, so applicants can say what they can do. */
+  async listSkills(): Promise<{ code: string; label: string }[]> {
+    const services = await this.globalServiceRepo.find({
+      where: { isActive: true },
+      select: { id: true, requiredSkillCodes: true },
+    });
+    const codes = [...new Set(services.flatMap((service) => service.requiredSkillCodes ?? []))];
+    return codes.sort().map((code) => ({ code, label: skillLabel(code) }));
   }
 
   async getGlobalService(id: string): Promise<GlobalServiceDefinition> {
@@ -287,6 +327,9 @@ export class CatalogueService {
     let entry = await this.orgCatalogRepo.findOne({
       where: { organizationId: orgId, globalServiceId: dto.globalServiceId },
     });
+    const enabled = dto.isEnabled ?? entry?.isEnabled ?? true;
+    if (enabled && globalService.isActive === false)
+      throw new BadRequestException('An inactive central service cannot be enabled locally');
     const minVol = dto.minVolunteers ?? entry?.minVolunteers ?? globalService.defaultMinVolunteers;
     const prefVol =
       dto.preferredVolunteers ??
@@ -348,6 +391,7 @@ export class CatalogueService {
         isEnabled: saved.isEnabled,
         minVolunteers: saved.minVolunteers,
         preferredVolunteers: saved.preferredVolunteers,
+        requiresCoordinatorDispatch: saved.requiresCoordinatorDispatch,
       },
       ipAddress: ipAddress ?? null,
     });

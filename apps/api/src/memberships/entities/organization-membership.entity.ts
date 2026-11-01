@@ -9,12 +9,22 @@ import {
   JoinColumn,
   Unique,
 } from 'typeorm';
-import { MembershipStatus } from '@ktb/shared-types';
+import { MembershipStatus, UserRole } from '@ktb/shared-types';
 import { User } from '../../identity/entities/user.entity';
 import { Organization } from '../../organizations/entities/organization.entity';
 import { MembershipRoleGrant } from './membership-role-grant.entity';
 import { MembershipDocument } from './membership-document.entity';
 import { MembershipApproval } from './membership-approval.entity';
+
+export interface MembershipApplicationDetails {
+  volunteer?: {
+    maxTravelRadiusKm: number;
+    availableAtShortNotice: boolean;
+    usualDays: string[];
+    usualTimes: string[];
+    skillCodes: string[];
+  };
+}
 
 /**
  * Organization Membership Entity
@@ -61,6 +71,17 @@ export class OrganizationMembership {
 
   @Column({ name: 'rejection_reason', type: 'text', nullable: true })
   rejectionReason?: string | null;
+
+  /** What the applicant asked to do; the approver still chooses the role. */
+  @Column({ name: 'requested_role', type: 'varchar', length: 30, nullable: true })
+  requestedRole?: UserRole | null;
+
+  @Column({ name: 'application_notes', type: 'varchar', length: 500, nullable: true })
+  applicationNotes?: string | null;
+
+  /** Volunteer answers from the application: travel, timing and claimed skills. */
+  @Column({ name: 'application_details', type: 'jsonb', default: () => "'{}'::jsonb" })
+  applicationDetails!: MembershipApplicationDetails;
 
   @OneToMany(() => MembershipRoleGrant, (grant) => grant.membership)
   roleGrants!: MembershipRoleGrant[];

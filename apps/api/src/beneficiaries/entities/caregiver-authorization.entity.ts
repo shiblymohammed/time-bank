@@ -8,10 +8,7 @@ import {
   JoinColumn,
   Unique,
 } from 'typeorm';
-import {
-  CaregiverAuthorizationStatus,
-  CaregiverRelationshipType,
-} from '@ktb/shared-types';
+import { CaregiverAuthorizationStatus, CaregiverRelationshipType } from '@ktb/shared-types';
 import { Organization } from '../../organizations/entities/organization.entity';
 import { OrganizationMembership } from '../../memberships/entities/organization-membership.entity';
 import { MembershipDocument } from '../../memberships/entities/membership-document.entity';

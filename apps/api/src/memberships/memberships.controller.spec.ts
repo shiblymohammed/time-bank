@@ -35,7 +35,10 @@ describe('MembershipsController', () => {
       providers: [
         { provide: MembershipsService, useValue: mockService },
         { provide: AuthGuard, useValue: { canActivate: jest.fn().mockReturnValue(true) } },
-        { provide: OrganizationAccessGuard, useValue: { canActivate: jest.fn().mockReturnValue(true) } },
+        {
+          provide: OrganizationAccessGuard,
+          useValue: { canActivate: jest.fn().mockReturnValue(true) },
+        },
         { provide: RolesGuard, useValue: { canActivate: jest.fn().mockReturnValue(true) } },
         { provide: AuthorizationService, useValue: {} },
         { provide: JwtService, useValue: {} },
@@ -73,28 +76,52 @@ describe('MembershipsController', () => {
   it('should call approveMembership', async () => {
     const dto = { initialRole: UserRole.VOLUNTEER };
     const res = await controller.approveMembership('org-1', 'm-1', dto, 'admin-1', mockReq);
-    expect(mockService.approveMembership).toHaveBeenCalledWith('org-1', 'm-1', 'admin-1', dto, '127.0.0.1');
+    expect(mockService.approveMembership).toHaveBeenCalledWith(
+      'org-1',
+      'm-1',
+      'admin-1',
+      dto,
+      '127.0.0.1',
+    );
     expect(res.status).toBe('APPROVED');
   });
 
   it('should call rejectMembership', async () => {
     const dto = { reason: 'Wrong district' };
     const res = await controller.rejectMembership('org-1', 'm-1', dto, 'admin-1', mockReq);
-    expect(mockService.rejectMembership).toHaveBeenCalledWith('org-1', 'm-1', 'admin-1', dto, '127.0.0.1');
+    expect(mockService.rejectMembership).toHaveBeenCalledWith(
+      'org-1',
+      'm-1',
+      'admin-1',
+      dto,
+      '127.0.0.1',
+    );
     expect(res.status).toBe('REJECTED');
   });
 
   it('should call uploadDocument', async () => {
     const dto = { documentType: 'PROOF', storageKey: 'path' };
     const res = await controller.uploadDocument('org-1', 'm-1', dto, 'u-1', mockReq);
-    expect(mockService.uploadDocument).toHaveBeenCalledWith('org-1', 'm-1', 'u-1', dto, '127.0.0.1');
+    expect(mockService.uploadDocument).toHaveBeenCalledWith(
+      'org-1',
+      'm-1',
+      'u-1',
+      dto,
+      '127.0.0.1',
+    );
     expect(res).toEqual({ id: 'doc-1' });
   });
 
   it('should call reviewDocument', async () => {
     const dto = { status: DocumentReviewStatus.APPROVED };
     const res = await controller.reviewDocument('org-1', 'doc-1', dto, 'admin-1', mockReq);
-    expect(mockService.reviewDocument).toHaveBeenCalledWith('org-1', 'doc-1', 'admin-1', dto, '127.0.0.1');
+    expect(mockService.reviewDocument).toHaveBeenCalledWith(
+      'org-1',
+      'doc-1',
+      'admin-1',
+      dto,
+      '127.0.0.1',
+    );
     expect(res).toEqual({ id: 'doc-1' });
   });
 
@@ -108,7 +135,14 @@ describe('MembershipsController', () => {
   it('should call revokeRole', async () => {
     const dto = { reason: 'Retired' };
     const res = await controller.revokeRole('org-1', 'm-1', 'g-1', dto, 'admin-1', mockReq);
-    expect(mockService.revokeRole).toHaveBeenCalledWith('org-1', 'm-1', 'g-1', dto, 'admin-1', '127.0.0.1');
+    expect(mockService.revokeRole).toHaveBeenCalledWith(
+      'org-1',
+      'm-1',
+      'g-1',
+      dto,
+      'admin-1',
+      '127.0.0.1',
+    );
     expect(res).toEqual({ id: 'g-1' });
   });
 });

@@ -550,6 +550,7 @@ export class AuthService {
       status: m.status,
       appliedAt: m.appliedAt,
       approvedAt: m.approvedAt,
+      requestedRole: m.requestedRole ?? null,
       roles: (m.roleGrants || [])
         .filter((g) => g.status === RoleGrantStatus.ACTIVE)
         .map((g) => g.role),

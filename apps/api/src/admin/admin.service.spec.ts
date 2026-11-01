@@ -1,10 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import {
-  BadRequestException,
-  ConflictException,
-  NotFoundException,
-} from '@nestjs/common';
+import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
 import {
   AccountStatus,
   GlobalRestrictionStatus,
@@ -23,6 +19,8 @@ import { Organization } from '../organizations/entities/organization.entity';
 import { OrganizationMembership } from '../memberships/entities/organization-membership.entity';
 import { MembershipRoleGrant } from '../memberships/entities/membership-role-grant.entity';
 import { AuditService } from '../audit/audit.service';
+import { AuthorizationService } from '../authorization/authorization.service';
+import { RoleHierarchyService } from '../authorization/role-hierarchy.service';
 
 describe('AdminService', () => {
   let service: AdminService;
@@ -70,6 +68,25 @@ describe('AdminService', () => {
     queryEvents: jest.fn().mockResolvedValue({ events: [], total: 0 }),
   };
 
+  const mockAuthorizationService = {
+    evaluateGlobalAccess: jest
+      .fn()
+      .mockResolvedValue({ isSuperAdmin: true, roles: [UserRole.SUPER_ADMIN] }),
+    assertNoSelfEscalation: jest.fn(),
+    evaluateOrganizationAccess: jest.fn().mockResolvedValue({
+      isSuperAdmin: true,
+      roles: [UserRole.SUPER_ADMIN],
+      organizationId: 'org-123',
+    }),
+  };
+
+  const mockRoleHierarchyService = {
+    assertCanGrantRole: jest.fn(),
+    assertValidMembershipRole: jest.fn(),
+    isOperationalRole: jest.fn().mockReturnValue(true),
+    requiresSuperAdminToGrant: jest.fn().mockReturnValue(false),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
 
@@ -83,6 +100,8 @@ describe('AdminService', () => {
         { provide: getRepositoryToken(OrganizationMembership), useValue: mockMembershipRepo },
         { provide: getRepositoryToken(MembershipRoleGrant), useValue: mockRoleGrantRepo },
         { provide: AuditService, useValue: mockAuditService },
+        { provide: AuthorizationService, useValue: mockAuthorizationService },
+        { provide: RoleHierarchyService, useValue: mockRoleHierarchyService },
       ],
     }).compile();
 
@@ -179,11 +198,7 @@ describe('AdminService', () => {
       mockRestrictionRepo.findOne.mockResolvedValueOnce(null);
 
       await expect(
-        service.resolveRestriction(
-          'missing-r',
-          { resolutionNotes: 'resolved' },
-          'admin-1',
-        ),
+        service.resolveRestriction('missing-r', { resolutionNotes: 'resolved' }, 'admin-1'),
       ).rejects.toThrow(NotFoundException);
     });
 
@@ -273,8 +288,14 @@ describe('AdminService', () => {
     it('should throw ConflictException if user already has an active grant', async () => {
       mockOrgRepo.findOne.mockResolvedValueOnce({ id: 'org-1' });
       mockUserRepo.findOne.mockResolvedValueOnce({ id: 'u-1' });
-      mockMembershipRepo.findOne.mockResolvedValueOnce({ id: 'm-1', status: MembershipStatus.APPROVED });
-      mockRoleGrantRepo.findOne.mockResolvedValueOnce({ id: 'g-1', status: RoleGrantStatus.ACTIVE });
+      mockMembershipRepo.findOne.mockResolvedValueOnce({
+        id: 'm-1',
+        status: MembershipStatus.APPROVED,
+      });
+      mockRoleGrantRepo.findOne.mockResolvedValueOnce({
+        id: 'g-1',
+        status: RoleGrantStatus.ACTIVE,
+      });
 
       await expect(
         service.grantOrganizationRole(

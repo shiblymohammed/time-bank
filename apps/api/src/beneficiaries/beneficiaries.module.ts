@@ -5,6 +5,7 @@ import { BeneficiaryEligibility } from './entities/beneficiary-eligibility.entit
 import { CaregiverAuthorization } from './entities/caregiver-authorization.entity';
 import { OrganizationMembership } from '../memberships/entities/organization-membership.entity';
 import { ServiceRequest } from '../requests/entities/service-request.entity';
+import { MembershipDocument } from '../memberships/entities/membership-document.entity';
 
 import { BeneficiariesService } from './beneficiaries.service';
 import { BeneficiariesController } from './beneficiaries.controller';
@@ -18,6 +19,7 @@ import { AuthorizationModule } from '../authorization/authorization.module';
       CaregiverAuthorization,
       OrganizationMembership,
       ServiceRequest,
+      MembershipDocument,
     ]),
     AuditModule,
     AuthorizationModule,

@@ -23,17 +23,27 @@ export class AuditLogQueryDto {
   @IsUUID()
   targetId?: string;
 
-  @ApiPropertyOptional({ example: '2026-10-01T00:00:00Z', description: 'Filter events on or after this ISO date' })
+  @ApiPropertyOptional({
+    example: '2026-10-01T00:00:00Z',
+    description: 'Filter events on or after this ISO date',
+  })
   @IsOptional()
   @IsDateString()
   startDate?: string;
 
-  @ApiPropertyOptional({ example: '2026-10-31T23:59:59Z', description: 'Filter events on or before this ISO date' })
+  @ApiPropertyOptional({
+    example: '2026-10-31T23:59:59Z',
+    description: 'Filter events on or before this ISO date',
+  })
   @IsOptional()
   @IsDateString()
   endDate?: string;
 
-  @ApiPropertyOptional({ example: 50, default: 50, description: 'Number of records to return (max 100)' })
+  @ApiPropertyOptional({
+    example: 50,
+    default: 50,
+    description: 'Number of records to return (max 100)',
+  })
   @IsOptional()
   @Type(() => Number)
   @IsInt()

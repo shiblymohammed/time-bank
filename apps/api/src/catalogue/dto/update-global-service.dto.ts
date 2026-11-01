@@ -1,6 +1,7 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsArray,
+  ArrayMaxSize,
   IsBoolean,
   IsInt,
   IsNumber,
@@ -57,7 +58,9 @@ export class UpdateGlobalServiceDefinitionDto {
 
   @ApiPropertyOptional({ example: ['FIRST_AID'] })
   @IsArray()
+  @ArrayMaxSize(50)
   @IsString({ each: true })
+  @Length(1, 50, { each: true })
   @IsOptional()
   requiredSkillCodes?: string[];
 

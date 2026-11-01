@@ -47,7 +47,8 @@ const steps = [
 
 export function HowItWorks() {
   const [activeStep, setActiveStep] = useState(0);
-  const active = steps[activeStep];
+  const active = steps[activeStep] ?? steps[0];
+  if (!active) return null;
 
   return (
     <section

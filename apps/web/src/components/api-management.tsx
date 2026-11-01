@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { UserRole } from '@ktb/shared-types';
-import { api } from '../lib/api';
+import { gatewayFetch as api } from '../lib/api';
 
 interface Organization {
   id: string;

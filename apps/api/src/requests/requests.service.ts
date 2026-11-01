@@ -29,12 +29,17 @@ import { BeneficiariesService } from '../beneficiaries/beneficiaries.service';
 import { MatchingService } from '../matching/matching.service';
 import { VolunteerAssignment } from '../matching/entities/volunteer-assignment.entity';
 import { AuditService } from '../audit/audit.service';
-import { EvaluatedMembershipContext } from '../authorization/authorization.service';
+import { TimeLedgerService } from '../time-ledger/time-ledger.service';
+import {
+  AuthorizationService,
+  EvaluatedMembershipContext,
+} from '../authorization/authorization.service';
 
 import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { CancelServiceRequestDto } from './dto/cancel-service-request.dto';
 import { RescheduleServiceRequestDto } from './dto/reschedule-service-request.dto';
 import { RequestQueryDto } from './dto/request-query.dto';
+import { ConfirmServiceCompletionDto } from './dto/confirm-service-completion.dto';
 
 @Injectable()
 export class RequestsService {
@@ -57,6 +62,8 @@ export class RequestsService {
     @Inject(forwardRef(() => MatchingService))
     private readonly matchingService: MatchingService,
     private readonly auditService: AuditService,
+    private readonly authorizationService: AuthorizationService,
+    private readonly timeLedgerService: TimeLedgerService,
   ) {}
 
   // ─── Create Service Request (D#8, D#59, D#60, D#61) ─────────────────────────
@@ -69,6 +76,23 @@ export class RequestsService {
     const org = await this.orgRepo.findOne({ where: { id: orgId } });
     if (!org) {
       throw new NotFoundException(`Organization '${orgId}' not found`);
+    }
+
+    const context = await this.authorizationService.evaluateOrganizationAccess(
+      callingUserId,
+      orgId,
+    );
+    const isStaff =
+      context.isSuperAdmin ||
+      context.roles.some((role) =>
+        [UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN].includes(role),
+      );
+    if (
+      (dto.creationChannel === CreationChannel.COORDINATOR_ON_BEHALF ||
+        dto.allowsCrossOrgVolunteers) &&
+      !isStaff
+    ) {
+      throw new ForbiddenException('Coordinator authority required for this request option');
     }
 
     // 0. Check idempotency if key provided
@@ -84,8 +108,8 @@ export class RequestsService {
         ],
       });
       if (existing) {
-        if (existing.createdByUserId !== callingUserId) {
-          throw new ConflictException('Idempotency key is already in use');
+        if (existing.createdByUserId !== callingUserId && !isStaff) {
+          throw new ForbiddenException('Idempotency key belongs to another request creator');
         }
         return existing;
       }
@@ -94,15 +118,10 @@ export class RequestsService {
     // 1. Verify catalogue item enablement
     const catalogItem = await this.catalogRepo.findOne({
       where: { id: dto.serviceCatalogId, organizationId: orgId },
-      relations: ['globalService', 'globalService.category'],
+      relations: ['globalService'],
     });
 
-    if (
-      !catalogItem ||
-      !catalogItem.isEnabled ||
-      catalogItem.globalService?.isActive === false ||
-      catalogItem.globalService?.category?.isActive === false
-    ) {
+    if (!catalogItem || !catalogItem.isEnabled || catalogItem.globalService?.isActive === false) {
       throw new BadRequestException('Selected service is not enabled in this organization (D#10)');
     }
 
@@ -203,7 +222,6 @@ export class RequestsService {
       idempotencyKey: idempotencyKey ?? null,
       beneficiaryMembershipId,
       serviceCatalogId: catalogItem.id,
-      serviceCatalog: catalogItem,
       createdByUserId: callingUserId,
       creationChannel,
       caregiverAuthorizationId: caregiverAuthId,
@@ -211,15 +229,8 @@ export class RequestsService {
       status: ServiceRequestStatus.MATCHING_ACTIVE,
       scheduledStartTime: new Date(dto.scheduledStartTime),
       expectedDurationMinutes: dto.expectedDurationMinutes ?? 60,
-      minVolunteers: Math.max(
-        catalogItem.minVolunteers,
-        catalogItem.globalService?.defaultMinVolunteers ?? 1,
-      ),
-      preferredVolunteers: Math.max(
-        catalogItem.preferredVolunteers,
-        catalogItem.minVolunteers,
-        catalogItem.globalService?.defaultMinVolunteers ?? 1,
-      ),
+      minVolunteers: catalogItem.minVolunteers,
+      preferredVolunteers: catalogItem.preferredVolunteers,
       locationAddressText: dto.locationAddressText,
       locationWardNumber: dto.locationWardNumber,
       locationLandmark: dto.locationLandmark ?? null,
@@ -396,107 +407,117 @@ export class RequestsService {
     dto: CancelServiceRequestDto,
     ipAddress?: string,
   ): Promise<ServiceRequest> {
-    const request = await this.requestRepo.findOne({
-      where: { id: requestId, organizationId: orgId },
-      relations: ['assignments', 'beneficiaryMembership'],
-    });
+    return this.requestRepo.manager.transaction('READ COMMITTED', async (manager) => {
+      const request = await manager.getRepository(ServiceRequest).findOne({
+        where: { id: requestId, organizationId: orgId },
+        lock: { mode: 'pessimistic_write' },
+      });
 
-    if (!request) {
-      throw new NotFoundException(`Service request '${requestId}' not found`);
-    }
+      if (!request) {
+        throw new NotFoundException(`Service request '${requestId}' not found`);
+      }
 
-    let cancellerRole = CancellerRole.BENEFICIARY;
+      let cancellerRole = CancellerRole.BENEFICIARY;
 
-    if (typeof membershipContext === 'string') {
-      cancellerRole = membershipContext as CancellerRole;
-    } else {
-      const isCoordOrAdmin =
-        membershipContext.isSuperAdmin ||
-        membershipContext.roles.includes(UserRole.COORDINATOR) ||
-        membershipContext.roles.includes(UserRole.MUNICIPALITY_ADMIN);
-
-      if (isCoordOrAdmin) {
-        cancellerRole = CancellerRole.COORDINATOR;
-      } else if (
-        request.beneficiaryMembershipId === membershipContext.membershipId ||
-        request.createdByUserId === callingUserId
-      ) {
-        cancellerRole = CancellerRole.BENEFICIARY;
+      if (typeof membershipContext === 'string') {
+        cancellerRole = membershipContext as CancellerRole;
       } else {
-        const isCaregiver = await this.beneficiariesService
-          .verifyCaregiverProxyAccess(
-            orgId,
-            membershipContext.membershipId,
-            request.beneficiaryMembershipId,
-          )
-          .catch(() => null);
+        const isCoordOrAdmin =
+          membershipContext.isSuperAdmin ||
+          membershipContext.roles.includes(UserRole.COORDINATOR) ||
+          membershipContext.roles.includes(UserRole.MUNICIPALITY_ADMIN);
 
-        if (isCaregiver) {
-          cancellerRole = CancellerRole.CAREGIVER;
-        } else {
-          throw new ForbiddenException('You do not have permission to cancel this service request');
-        }
-      }
-    }
-
-    if (
-      request.status === ServiceRequestStatus.IN_PROGRESS ||
-      request.status === ServiceRequestStatus.COMPLETED
-    ) {
-      throw new BadRequestException(`Cannot cancel request in status '${request.status}'`);
-    }
-
-    if (request.status === ServiceRequestStatus.CANCELLED) {
-      throw new BadRequestException('Request is already cancelled');
-    }
-
-    // Compute hours before start for reliability scoring
-    const nowMs = Date.now();
-    const startMs = new Date(request.scheduledStartTime).getTime();
-    const hoursBeforeStart = Math.max(0, (startMs - nowMs) / (1000 * 60 * 60));
-
-    request.status = ServiceRequestStatus.CANCELLED;
-    const saved = await this.requestRepo.save(request);
-
-    // Cancel all offered / accepted assignments
-    if (request.assignments && request.assignments.length > 0) {
-      for (const assignment of request.assignments) {
-        if (
-          assignment.status === VolunteerAssignmentStatus.OFFERED ||
-          assignment.status === VolunteerAssignmentStatus.ACCEPTED
+        if (isCoordOrAdmin) {
+          cancellerRole = CancellerRole.COORDINATOR;
+        } else if (
+          request.beneficiaryMembershipId === membershipContext.membershipId ||
+          request.createdByUserId === callingUserId
         ) {
-          assignment.status = VolunteerAssignmentStatus.CANCELLED;
-          await this.assignmentRepo.save(assignment);
+          cancellerRole = CancellerRole.BENEFICIARY;
+        } else {
+          const isCaregiver = await this.beneficiariesService
+            .verifyCaregiverProxyAccess(
+              orgId,
+              membershipContext.membershipId,
+              request.beneficiaryMembershipId,
+            )
+            .catch(() => null);
+
+          if (isCaregiver) {
+            cancellerRole = CancellerRole.CAREGIVER;
+          } else {
+            throw new ForbiddenException(
+              'You do not have permission to cancel this service request',
+            );
+          }
         }
       }
-    }
 
-    const cancellation = this.cancellationRepo.create({
-      organizationId: orgId,
-      serviceRequestId: request.id,
-      cancelledByUserId: callingUserId,
-      cancellerRole,
-      reasonCode: dto.reasonCode,
-      notes: dto.notes,
-      hoursBeforeStart: Number(hoursBeforeStart.toFixed(2)),
-    });
-    await this.cancellationRepo.save(cancellation);
+      if (
+        request.status === ServiceRequestStatus.IN_PROGRESS ||
+        request.status === ServiceRequestStatus.COMPLETED
+      ) {
+        throw new BadRequestException(`Cannot cancel request in status '${request.status}'`);
+      }
 
-    await this.auditService.logEvent({
-      eventType: 'SERVICE_REQUEST_CANCELLED',
-      actorId: callingUserId,
-      targetId: saved.id,
-      targetType: 'service_requests',
-      organizationId: orgId,
-      payload: {
-        reasonCode: dto.reasonCode,
-        hoursBeforeStart: cancellation.hoursBeforeStart,
+      if (request.status === ServiceRequestStatus.CANCELLED) {
+        throw new BadRequestException('Request is already cancelled');
+      }
+
+      // Compute hours before start for reliability scoring
+      const nowMs = Date.now();
+      const startMs = new Date(request.scheduledStartTime).getTime();
+      const hoursBeforeStart = Math.max(0, (startMs - nowMs) / (1000 * 60 * 60));
+
+      request.status = ServiceRequestStatus.CANCELLED;
+      const saved = await manager.getRepository(ServiceRequest).save(request);
+
+      request.assignments = await manager
+        .getRepository(VolunteerAssignment)
+        .find({ where: { serviceRequestId: request.id } });
+      // Cancel all offered / accepted assignments
+      if (request.assignments && request.assignments.length > 0) {
+        for (const assignment of request.assignments) {
+          if (
+            assignment.status === VolunteerAssignmentStatus.OFFERED ||
+            assignment.status === VolunteerAssignmentStatus.ACCEPTED
+          ) {
+            assignment.status = VolunteerAssignmentStatus.CANCELLED;
+            await manager.getRepository(VolunteerAssignment).save(assignment);
+          }
+        }
+      }
+
+      const cancellation = manager.getRepository(RequestCancellation).create({
+        organizationId: orgId,
+        serviceRequestId: request.id,
+        cancelledByUserId: callingUserId,
         cancellerRole,
-      },
-      ipAddress: ipAddress ?? null,
-    });
+        reasonCode: dto.reasonCode,
+        notes: dto.notes,
+        hoursBeforeStart: Number(hoursBeforeStart.toFixed(2)),
+      });
+      await manager.getRepository(RequestCancellation).save(cancellation);
 
-    return saved;
+      await this.auditService.logEvent(
+        {
+          eventType: 'SERVICE_REQUEST_CANCELLED',
+          actorId: callingUserId,
+          targetId: saved.id,
+          targetType: 'service_requests',
+          organizationId: orgId,
+          payload: {
+            reasonCode: dto.reasonCode,
+            hoursBeforeStart: cancellation.hoursBeforeStart,
+            cancellerRole,
+          },
+          ipAddress: ipAddress ?? null,
+        },
+        manager,
+      );
+
+      return saved;
+    });
   }
 
   // ─── Reschedule Request (D#62) ──────────────────────────────────────────────
@@ -508,96 +529,220 @@ export class RequestsService {
     dto: RescheduleServiceRequestDto,
     ipAddress?: string,
   ): Promise<ServiceRequest> {
-    const request = await this.requestRepo.findOne({
-      where: { id: requestId, organizationId: orgId },
-      relations: ['serviceCatalog', 'serviceCatalog.globalService', 'beneficiaryMembership'],
+    const context = await this.authorizationService.evaluateOrganizationAccess(
+      callingUserId,
+      orgId,
+    );
+    membershipContext = context;
+    return this.requestRepo.manager.transaction('READ COMMITTED', async (manager) => {
+      const requests = manager.getRepository(ServiceRequest);
+      const history = manager.getRepository(RequestRescheduleHistory);
+      const request = await requests.findOne({
+        where: { id: requestId, organizationId: orgId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!request) throw new NotFoundException(`Service request '${requestId}' not found`);
+      {
+        const isCoordOrAdmin =
+          membershipContext.isSuperAdmin ||
+          membershipContext.roles.includes(UserRole.COORDINATOR) ||
+          membershipContext.roles.includes(UserRole.MUNICIPALITY_ADMIN);
+
+        const isBeneficiary =
+          request.beneficiaryMembershipId === membershipContext.membershipId ||
+          request.createdByUserId === callingUserId;
+
+        if (!isCoordOrAdmin && !isBeneficiary) {
+          const isCaregiver = await this.beneficiariesService
+            .verifyCaregiverProxyAccess(
+              orgId,
+              membershipContext.membershipId,
+              request.beneficiaryMembershipId,
+            )
+            .catch(() => null);
+
+          if (!isCaregiver) {
+            throw new ForbiddenException(
+              'You do not have permission to reschedule this service request',
+            );
+          }
+        }
+      }
+
+      if (
+        [
+          ServiceRequestStatus.IN_PROGRESS,
+          ServiceRequestStatus.COMPLETED,
+          ServiceRequestStatus.CANCELLED,
+        ].includes(request.status)
+      ) {
+        throw new BadRequestException(`Cannot reschedule request in status '${request.status}'`);
+      }
+      const newStartTime = new Date(dto.newStartTime);
+      if (!Number.isFinite(newStartTime.getTime()) || newStartTime.getTime() <= Date.now()) {
+        throw new BadRequestException('The new start time must be in the future');
+      }
+      if (newStartTime.getTime() === new Date(request.scheduledStartTime).getTime()) return request;
+      const previousStartTime = request.scheduledStartTime;
+      const record = await history.save(
+        history.create({
+          organizationId: orgId,
+          serviceRequestId: request.id,
+          rescheduledByUserId: callingUserId,
+          previousStartTime,
+          newStartTime,
+          reason: dto.reason,
+        }),
+      );
+      request.scheduledStartTime = newStartTime;
+      request.latestRescheduleId = record.id;
+      request.status = ServiceRequestStatus.MATCHING_ACTIVE;
+      request.matchingTier = 1;
+      const saved = await requests.save(request);
+      await this.matchingService.reopenForReschedule(manager, saved, record);
+      await this.auditService.logEvent(
+        {
+          eventType: 'SERVICE_REQUEST_RESCHEDULED',
+          actorId: callingUserId,
+          targetId: request.id,
+          targetType: 'service_requests',
+          organizationId: orgId,
+          payload: { previousStartTime, newStartTime, reason: dto.reason },
+          ipAddress: ipAddress ?? null,
+        },
+        manager,
+      );
+      return saved;
     });
+  }
 
-    if (!request) {
-      throw new NotFoundException(`Service request '${requestId}' not found`);
-    }
+  // ─── Confirm Completed Service ──────────────────────────────────────────────
+  // The beneficiary, an authorized caregiver or staff confirms a finished
+  // assignment. A volunteer never confirms their own service, even as staff.
+  async confirmCompletion(
+    orgId: string,
+    requestId: string,
+    assignmentId: string,
+    callingUserId: string,
+    membershipContext: EvaluatedMembershipContext,
+    dto: ConfirmServiceCompletionDto,
+    ipAddress?: string,
+    now = new Date(),
+  ): Promise<VolunteerAssignment & { creditsEarned: number; creditsHeld: boolean }> {
+    return this.requestRepo.manager.transaction('READ COMMITTED', async (manager) => {
+      const request = await manager.getRepository(ServiceRequest).findOne({
+        where: { id: requestId, organizationId: orgId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!request) throw new NotFoundException(`Service request '${requestId}' not found`);
 
-    if (membershipContext) {
-      const isCoordOrAdmin =
+      const isStaff =
         membershipContext.isSuperAdmin ||
         membershipContext.roles.includes(UserRole.COORDINATOR) ||
         membershipContext.roles.includes(UserRole.MUNICIPALITY_ADMIN);
-
-      const isBeneficiary =
-        request.beneficiaryMembershipId === membershipContext.membershipId ||
-        request.createdByUserId === callingUserId;
-
-      if (!isCoordOrAdmin && !isBeneficiary) {
-        const isCaregiver = await this.beneficiariesService
+      let confirmerRole = isStaff ? 'COORDINATOR' : 'BENEFICIARY';
+      if (!isStaff && request.beneficiaryMembershipId !== membershipContext.membershipId) {
+        const caregiver = await this.beneficiariesService
           .verifyCaregiverProxyAccess(
             orgId,
             membershipContext.membershipId,
             request.beneficiaryMembershipId,
           )
           .catch(() => null);
-
-        if (!isCaregiver) {
-          throw new ForbiddenException(
-            'You do not have permission to reschedule this service request',
-          );
+        if (!caregiver) {
+          throw new ForbiddenException('You do not have permission to confirm this service');
         }
+        confirmerRole = 'CAREGIVER';
       }
-    }
 
-    if (
-      request.status === ServiceRequestStatus.IN_PROGRESS ||
-      request.status === ServiceRequestStatus.COMPLETED ||
-      request.status === ServiceRequestStatus.CANCELLED
-    ) {
-      throw new BadRequestException(`Cannot reschedule request in status '${request.status}'`);
-    }
-
-    const previousStartTime = request.scheduledStartTime;
-    request.scheduledStartTime = new Date(dto.newStartTime);
-    request.status = ServiceRequestStatus.MATCHING_ACTIVE;
-    const saved = await this.requestRepo.save(request);
-
-    const rescheduleRecord = this.rescheduleRepo.create({
-      organizationId: orgId,
-      serviceRequestId: request.id,
-      rescheduledByUserId: callingUserId,
-      previousStartTime,
-      newStartTime: request.scheduledStartTime,
-      reason: dto.reason,
-    });
-    await this.rescheduleRepo.save(rescheduleRecord);
-
-    // Cancel existing volunteer offers and trigger fresh matching for new time
-    const assignments = await this.assignmentRepo.find({
-      where: { serviceRequestId: request.id },
-    });
-    for (const a of assignments) {
+      const assignment = await manager.getRepository(VolunteerAssignment).findOne({
+        where: { id: assignmentId, serviceRequestId: request.id, organizationId: orgId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!assignment) throw new NotFoundException(`Assignment '${assignmentId}' not found`);
+      const volunteer = await manager.getRepository(OrganizationMembership).findOne({
+        where: { id: assignment.volunteerMembershipId },
+      });
       if (
-        a.status === VolunteerAssignmentStatus.OFFERED ||
-        a.status === VolunteerAssignmentStatus.ACCEPTED
+        assignment.volunteerMembershipId === membershipContext.membershipId ||
+        volunteer?.userId === callingUserId
       ) {
-        a.status = VolunteerAssignmentStatus.CANCELLED;
-        await this.assignmentRepo.save(a);
+        throw new ForbiddenException('A volunteer cannot confirm their own service');
       }
-    }
+      if (assignment.confirmedAt) {
+        throw new ConflictException('This service has already been confirmed');
+      }
+      if (
+        assignment.status !== VolunteerAssignmentStatus.COMPLETED ||
+        !assignment.finishedAt ||
+        !assignment.reportedMinutes
+      ) {
+        throw new ConflictException('The volunteer has not finished this service yet');
+      }
+      const minutes = dto.minutes ?? assignment.reportedMinutes;
+      if (minutes > assignment.reportedMinutes) {
+        throw new BadRequestException(
+          `At most the ${assignment.reportedMinutes} reported minutes can be confirmed`,
+        );
+      }
 
-    await this.matchingService.findCandidatesAndDispatchOffers(saved);
+      assignment.confirmedAt = now;
+      assignment.confirmedByUserId = callingUserId;
+      assignment.confirmedMinutes = minutes;
+      const saved = await manager.getRepository(VolunteerAssignment).save(assignment);
 
-    await this.auditService.logEvent({
-      eventType: 'SERVICE_REQUEST_RESCHEDULED',
-      actorId: callingUserId,
-      targetId: saved.id,
-      targetType: 'service_requests',
-      organizationId: orgId,
-      payload: {
-        previousStartTime,
-        newStartTime: request.scheduledStartTime,
-        reason: dto.reason,
-      },
-      ipAddress: ipAddress ?? null,
+      // Pay the volunteer in the same transaction, so a confirmation and its
+      // credits are never separated (FR-TIME-02).
+      const credit = await this.timeLedgerService.postServiceEarning(manager, {
+        volunteerUserId: volunteer!.userId,
+        organizationId: orgId,
+        serviceRequestId: request.id,
+        volunteerAssignmentId: saved.id,
+        minutes,
+        policy: await this.timeLedgerService.policyForRequest(manager, request.id),
+        reference: request.requestNumber,
+      });
+
+      // The request is complete once no helper is still due, working or unconfirmed.
+      const open = await manager
+        .getRepository(VolunteerAssignment)
+        .createQueryBuilder('a')
+        .where('a.serviceRequestId = :id', { id: request.id })
+        .andWhere('(a.status IN (:...active) OR (a.status = :done AND a.confirmedAt IS NULL))', {
+          active: [VolunteerAssignmentStatus.ACCEPTED, VolunteerAssignmentStatus.IN_PROGRESS],
+          done: VolunteerAssignmentStatus.COMPLETED,
+        })
+        .getCount();
+      if (open === 0) {
+        request.status = ServiceRequestStatus.COMPLETED;
+        await manager.getRepository(ServiceRequest).save(request);
+      }
+
+      await this.auditService.logEvent(
+        {
+          eventType: 'SERVICE_CONFIRMED',
+          actorId: callingUserId,
+          targetId: saved.id,
+          targetType: 'volunteer_assignments',
+          organizationId: orgId,
+          payload: {
+            serviceRequestId: request.id,
+            confirmerRole,
+            reportedMinutes: assignment.reportedMinutes,
+            confirmedMinutes: minutes,
+            requestCompleted: open === 0,
+            creditsEarned: credit?.amount ?? 0,
+            creditsHeld: credit?.held ?? false,
+          },
+          ipAddress: ipAddress ?? null,
+        },
+        manager,
+      );
+      return Object.assign(saved, {
+        creditsEarned: credit?.amount ?? 0,
+        creditsHeld: credit?.held ?? false,
+      });
     });
-
-    return saved;
   }
 
   private async generateRequestNumber(orgCode: string): Promise<string> {

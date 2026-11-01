@@ -13,10 +13,11 @@ describe('Milestone 3 Phase A Security & Boundary Invariants', () => {
 
   beforeEach(() => {
     reflector = new Reflector();
-
     mockAuthzService = {
       evaluateOrganizationAccess: jest.fn(),
-      assertGlobalSuperAdmin: jest.fn().mockResolvedValue(undefined),
+      evaluateGlobalAccess: jest
+        .fn()
+        .mockResolvedValue({ isSuperAdmin: true, roles: [UserRole.SUPER_ADMIN] }),
     };
     rolesGuard = new RolesGuard(reflector, mockAuthzService as AuthorizationService);
     orgAccessGuard = new OrganizationAccessGuard(

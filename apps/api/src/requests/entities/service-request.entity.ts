@@ -9,11 +9,7 @@ import {
   OneToMany,
   Unique,
 } from 'typeorm';
-import {
-  CreationChannel,
-  ServiceRequestStatus,
-  UrgencyType,
-} from '@ktb/shared-types';
+import { CreationChannel, ServiceRequestStatus, UrgencyType } from '@ktb/shared-types';
 import { Organization } from '../../organizations/entities/organization.entity';
 import { OrganizationMembership } from '../../memberships/entities/organization-membership.entity';
 import { OrganizationServiceCatalog } from '../../catalogue/entities/organization-service-catalog.entity';
@@ -99,6 +95,9 @@ export class ServiceRequest {
 
   @Column({ name: 'scheduled_start_time', type: 'timestamptz' })
   scheduledStartTime!: Date;
+
+  @Column({ name: 'latest_reschedule_id', type: 'uuid', nullable: true })
+  latestRescheduleId?: string | null;
 
   @Column({ name: 'expected_duration_minutes', type: 'int', default: 60 })
   expectedDurationMinutes!: number;

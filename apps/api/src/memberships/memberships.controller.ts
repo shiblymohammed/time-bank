@@ -11,12 +11,7 @@ import {
   UseGuards,
   ParseUUIDPipe,
 } from '@nestjs/common';
-import {
-  ApiTags,
-  ApiOperation,
-  ApiResponse,
-  ApiBearerAuth,
-} from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Request } from 'express';
 import { UserRole } from '@ktb/shared-types';
 
@@ -83,7 +78,8 @@ export class MembershipsController {
   @Roles(UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN, UserRole.SUPER_ADMIN)
   @ApiOperation({
     summary: 'Get membership application details',
-    description: 'Retrieves full details of a specific membership record including roles and approvals.',
+    description:
+      'Retrieves full details of a specific membership record including roles and approvals.',
   })
   @ApiResponse({ status: 200, description: 'Membership retrieved' })
   @ApiResponse({ status: 404, description: 'Membership not found' })
@@ -113,7 +109,13 @@ export class MembershipsController {
     @Req() req: Request,
   ) {
     const ip = req.ip ?? req.socket.remoteAddress;
-    return this.membershipsService.approveMembership(organizationId, membershipId, approverId, dto, ip);
+    return this.membershipsService.approveMembership(
+      organizationId,
+      membershipId,
+      approverId,
+      dto,
+      ip,
+    );
   }
 
   @Post(':membershipId/reject')
@@ -133,7 +135,24 @@ export class MembershipsController {
     @Req() req: Request,
   ) {
     const ip = req.ip ?? req.socket.remoteAddress;
-    return this.membershipsService.rejectMembership(organizationId, membershipId, rejecterId, dto, ip);
+    return this.membershipsService.rejectMembership(
+      organizationId,
+      membershipId,
+      rejecterId,
+      dto,
+      ip,
+    );
+  }
+
+  @Get(':membershipId/documents')
+  @UseGuards(AuthGuard, OrganizationAccessGuard, RolesGuard)
+  @Roles(UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'List supporting documents for an organization membership' })
+  async listDocuments(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @Param('membershipId', ParseUUIDPipe) membershipId: string,
+  ) {
+    return this.membershipsService.listMembershipDocuments(organizationId, membershipId);
   }
 
   @Post(':membershipId/documents')
@@ -214,6 +233,13 @@ export class MembershipsController {
     @Req() req: Request,
   ) {
     const ip = req.ip ?? req.socket.remoteAddress;
-    return this.membershipsService.revokeRole(organizationId, membershipId, roleGrantId, dto, revokerId, ip);
+    return this.membershipsService.revokeRole(
+      organizationId,
+      membershipId,
+      roleGrantId,
+      dto,
+      revokerId,
+      ip,
+    );
   }
 }
