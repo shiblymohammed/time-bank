@@ -3,6 +3,8 @@ packages:
   - "apps/api"
   # Next.js web dashboard
   - "apps/web"
+  # Next.js public landing page
+  - "apps/landing"
   # Shared TypeScript types consumed by both api and web
   - "packages/shared-types"
   # Shared ESLint config
@@ -14,4 +16,3 @@ allowBuilds:
   '@scarf/scarf': false
   bcrypt: true
   unrs-resolver: true
-

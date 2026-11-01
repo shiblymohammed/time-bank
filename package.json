@@ -19,7 +19,9 @@
     "format": "pnpm --recursive format",
     "test": "pnpm --recursive test",
     "test:e2e": "pnpm --filter @ktb/api test:e2e",
-    "clean": "pnpm --recursive exec rm -rf dist .next .turbo node_modules"
+    "clean": "pnpm --recursive exec rm -rf dist .next .turbo node_modules",
+    "dev:landing": "pnpm --filter @ktb/landing dev",
+    "build:landing": "pnpm --filter @ktb/landing build"
   },
   "devDependencies": {
     "prettier": "^3.3.3",

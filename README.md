@@ -17,6 +17,7 @@ kottakkal-time-bank/
 ├── apps/
 │   ├── api/          # @ktb/api     — NestJS + TypeScript + PostgreSQL (D#95)
 │   ├── web/          # @ktb/web     — Next.js + React + TypeScript (D#96)
+│   ├── landing/      # @ktb/landing — Next.js + React + TypeScript Public Landing Page
 │   └── mobile/       # ktb_mobile   — Flutter Android (D#94); iOS later
 ├── packages/
 │   ├── shared-types/ # @ktb/shared-types — enums/types shared by api & web
@@ -61,7 +62,7 @@ docker compose exec api npx ts-node \
   -d apps/api/src/database/data-source.ts
 
 # 5. Verify
-curl http://localhost:3001/api/health/ready   # API + DB health
+curl http://localhost:3001/health/ready   # API + DB health
 open http://localhost:3001/api/docs       # Swagger UI
 open http://localhost:3000                # Next.js dashboard
 open http://localhost:8080                # Via Nginx reverse proxy
@@ -82,7 +83,7 @@ See [`docs/DEV_SETUP.md`](docs/DEV_SETUP.md) for the full guide with troubleshoo
 | Infra | Docker Compose · Nginx · VPS | D#97, D#101 |
 | CI/CD | GitHub Actions · GHCR images · manual deploy gate | D#101 |
 | Shared types | `@ktb/shared-types` workspace package | ADR-001 |
-| Package manager | pnpm 11 workspaces · Turborepo | ADR-001 |
+| Package manager | pnpm 12 workspaces · Turborepo | ADR-001 |
 
 ---
 
@@ -117,7 +118,8 @@ The full register is in the PRD. The most architecturally significant decisions:
 ```powershell
 pnpm dev          # Start all apps in parallel (native, no Docker)
 pnpm dev:api      # NestJS API with watch mode
-pnpm dev:web      # Next.js with Turbopack
+pnpm dev:web      # Next.js coordinator dashboard with Turbopack (port 3000)
+pnpm dev:landing  # Next.js public community landing page (port 3002)
 pnpm test         # All unit tests
 pnpm test:e2e     # API integration tests (requires running DB)
 pnpm typecheck    # TypeScript check across all packages
@@ -166,3 +168,4 @@ This is a solo-developer project. All changes require:
 
 *Kottakkal Time Bank — connecting verified volunteers with eligible beneficiaries.*  
 *PRD version 1.0 · 107 confirmed product decisions · Built with quality-first milestone approach.*
+# time-bank
