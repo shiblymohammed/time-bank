@@ -33,3 +33,7 @@ Billing was not changed. The console currently shows a 10 SMS/day warning for ne
 No Android device was connected for this change. Real SMS delivery, native app verification and a deployed API exchange have not been exercised. Existing native QA reports used injected legacy server-OTP stores and do not validate Firebase.
 
 See [Android phone authentication](https://firebase.google.com/docs/auth/android/phone-auth), [Flutter phone authentication](https://firebase.google.com/docs/auth/flutter/phone-auth) and [ID-token verification](https://firebase.google.com/docs/auth/admin/verify-id-tokens).
+
+## iOS configuration follow-up
+
+Registered `com.kottakkal.timebank` as Firebase iOS app `1:154706594127:ios:8da72718dd37ad9e1a9d3a`. The separate Flutter repository now includes its Xcode project, GoogleService-Info.plist, encoded-app-ID callback, background modes and iOS-enabled phone gateway. It uses the same API and verified-token endpoint. Apple Team ID, signing and APNs credentials remain unset at the user's request; native simulator compilation runs through the new macOS CI workflow. See the Flutter repository's `IOS_SETUP.md` for account-free configuration and validation limits.
