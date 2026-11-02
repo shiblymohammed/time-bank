@@ -17,6 +17,11 @@ export enum TimeCreditTxType {
   SERVICE_EARNED = 'SERVICE_EARNED',
   DONATION_SENT = 'DONATION_SENT',
   DONATION_RECEIVED = 'DONATION_RECEIVED',
+  ASSISTANCE_SPENT = 'ASSISTANCE_SPENT',
+  FRAUD_HELD = 'FRAUD_HELD',
+  FRAUD_RELEASED = 'FRAUD_RELEASED',
+  CREDIT_CORRECTED = 'CREDIT_CORRECTED',
+  FROZEN_RELEASED = 'FROZEN_RELEASED',
 }
 
 const credits = {
@@ -50,6 +55,22 @@ export class TimeCreditLedgerEntry {
   /** Posted to frozen credits because the wallet was not active. */
   @Column({ type: 'boolean', default: false })
   held!: boolean;
+
+  @Column({
+    name: 'frozen_delta',
+    type: 'numeric',
+    precision: 12,
+    scale: 2,
+    default: 0,
+    transformer: credits,
+  })
+  frozenDelta!: number;
+
+  @Column({ name: 'review_id', type: 'uuid', nullable: true })
+  reviewId?: string | null;
+
+  @Column({ name: 'operation_id', type: 'uuid', nullable: true })
+  operationId?: string | null;
 
   @Column({ name: 'tx_type', type: 'varchar', length: 30 })
   txType!: TimeCreditTxType;

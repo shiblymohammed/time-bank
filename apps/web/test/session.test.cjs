@@ -252,6 +252,42 @@ test('coordinator request routes and read-only catalogue are allowed without exp
     assert.equal(response.status, 404);
   }
 });
+
+test('credit dashboard routes are allowlisted by method without exposing ledger writes or donations', async () => {
+  const signed = await login();
+  const org = ['organizations', 'abc-123'];
+  for (const [method, path] of [
+    ['GET', ['donation-pools']],
+    ['POST', [...org, 'donation-pools']],
+    ['GET', [...org, 'donation-pools', 'def-456', 'transactions']],
+    ['GET', [...org, 'credit-reviews']],
+    ['POST', [...org, 'credit-reviews']],
+    ['GET', [...org, 'credit-reviews', 'def-456', 'transfers']],
+    ['POST', [...org, 'credit-reviews', 'def-456', 'investigation']],
+    ['POST', [...org, 'credit-reviews', 'def-456', 'resolution']],
+    ['GET', [...org, 'wallets', 'def-456', 'transactions']],
+    ['POST', [...org, 'wallets', 'def-456', 'status']],
+    ['POST', [...org, 'wallets', 'def-456', 'release-frozen']],
+  ]) {
+    const result = await proxy[method](
+      request(method, method === 'GET' ? undefined : {}, jar(signed)),
+      { params: Promise.resolve({ path }) },
+    );
+    assert.equal(result.status, 200, `${method} ${path.join('/')}`);
+  }
+  for (const [method, path] of [
+    ['POST', ['donation-pools']],
+    ['POST', [...org, 'wallets', 'def-456', 'transactions']],
+    ['DELETE', [...org, 'credit-reviews', 'def-456']],
+    ['POST', [...org, 'donations']],
+    ['POST', [...org, 'ledger']],
+  ]) {
+    const result = await proxy[method](request(method, {}, jar(signed)), {
+      params: Promise.resolve({ path }),
+    });
+    assert.equal(result.status, 404, `${method} ${path.join('/')}`);
+  }
+});
 test('logout revokes refresh and clears both cookies; a late access cookie alone cannot reopen a session', async () => {
   const signed = await login();
   const response = await session.DELETE(request('DELETE', undefined, jar(signed)));

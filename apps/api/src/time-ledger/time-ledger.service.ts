@@ -93,7 +93,12 @@ export class TimeLedgerService {
     const user = await manager
       .getRepository(User)
       .findOneOrFail({ where: { id: earning.volunteerUserId } });
-    const held = wallet.status !== 'ACTIVE' || user.status !== AccountStatus.ACTIVE;
+    const restrictions = await manager.query(
+      "SELECT id FROM global_account_restrictions WHERE user_id=$1 AND status='ACTIVE'",
+      [earning.volunteerUserId],
+    );
+    const held =
+      wallet.status !== 'ACTIVE' || user.status !== AccountStatus.ACTIVE || restrictions.length > 0;
 
     const cents = (value: number) => Math.round(Number(value) * 100);
     if (held) wallet.frozenCredits = (cents(wallet.frozenCredits) + cents(amount)) / 100;
@@ -106,6 +111,7 @@ export class TimeLedgerService {
         amount,
         balanceAfter: wallet.balanceCredits,
         held,
+        frozenDelta: held ? amount : 0,
         txType: TimeCreditTxType.SERVICE_EARNED,
         originatingOrgId: earning.organizationId,
         serviceRequestId: earning.serviceRequestId,
@@ -166,6 +172,9 @@ export class TimeLedgerService {
         amount: entry.amount,
         balanceAfter: entry.balanceAfter,
         held: entry.held,
+        frozenDelta: entry.frozenDelta,
+        reviewId: entry.reviewId ?? null,
+        operationId: entry.operationId ?? null,
         txType: entry.txType,
         minutes: entry.minutes ?? null,
         createdAt: entry.createdAt,

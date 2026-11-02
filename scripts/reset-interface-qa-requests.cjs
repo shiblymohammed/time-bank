@@ -14,7 +14,7 @@ const db = new Client({
   // CASCADE empties the whole credit ledger, so gifts and balances are reset with it.
   await db.query('TRUNCATE service_requests, credit_donations CASCADE');
   await db.query('UPDATE universal_time_wallets SET balance_credits=0, frozen_credits=0');
-  await db.query('UPDATE community_credit_pools SET balance_credits=0');
+  await db.query('UPDATE community_credit_pools SET balance_credits=0, frozen_credits=0');
   console.log('Cleared only disposable QA requests, matching records, credits and gifts.');
 })()
   .catch((e) => {

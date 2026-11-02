@@ -132,9 +132,14 @@ export class DonationsService {
       }
 
       const donor = await manager.getRepository(User).findOneOrFail({ where: { id: donorUserId } });
+      const restrictions: { user_id: string }[] = await manager.query(
+        "SELECT user_id FROM global_account_restrictions WHERE user_id=ANY($1::uuid[]) AND status='ACTIVE'",
+        [owners],
+      );
       // D#79: a suspended or banned account keeps its balance but cannot give.
       if (
         donor.status !== AccountStatus.ACTIVE ||
+        restrictions.some((r) => r.user_id === donorUserId) ||
         (donorWallet && donorWallet.status !== 'ACTIVE')
       ) {
         throw new ForbiddenException('Your wallet is frozen, so credits cannot be given now');
@@ -144,8 +149,17 @@ export class DonationsService {
           `You have ${donorWallet?.balanceCredits ?? 0} credits available to give`,
         );
       }
-      if (recipientWallet && recipientWallet.status !== 'ACTIVE') {
-        throw new ConflictException('This member cannot receive credits right now');
+      if (recipientWallet) {
+        const recipient = await manager
+          .getRepository(User)
+          .findOneOrFail({ where: { id: recipientWallet.userId } });
+        if (
+          recipientWallet.status !== 'ACTIVE' ||
+          recipient.status !== AccountStatus.ACTIVE ||
+          restrictions.some((r) => r.user_id === recipientWallet.userId)
+        ) {
+          throw new ConflictException('This member cannot receive credits right now');
+        }
       }
       if (pool) {
         // Wallets are always locked before pools.

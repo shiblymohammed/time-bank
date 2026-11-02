@@ -43,6 +43,16 @@ export class CommunityCreditPool {
   })
   balanceCredits!: number;
 
+  @Column({
+    name: 'frozen_credits',
+    type: 'numeric',
+    precision: 12,
+    scale: 2,
+    default: 0,
+    transformer: { to: (value: number) => value, from: (value: string) => parseFloat(value) },
+  })
+  frozenCredits!: number;
+
   @Column({ type: 'varchar', length: 20, default: CommunityPoolStatus.ACTIVE })
   status!: CommunityPoolStatus;
 

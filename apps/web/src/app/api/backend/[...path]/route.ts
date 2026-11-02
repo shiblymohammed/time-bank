@@ -35,6 +35,14 @@ const ROUTES: [methods: string, pattern: RegExp][] = [
   ['GET', new RegExp(`^${ORG}/volunteers/${ID}/(?:availability|skills|zones)$`, 'i')],
   ['PUT', new RegExp(`^${ORG}/volunteers/${ID}/availability$`, 'i')],
   ['POST', new RegExp(`^${ORG}/volunteers/skills/verify$`, 'i')],
+  ['GET', /^\/donation-pools$/],
+  ['POST', new RegExp(`^${ORG}/donation-pools$`, 'i')],
+  ['GET', new RegExp(`^${ORG}/donation-pools/${ID}/transactions$`, 'i')],
+  ['GET POST', new RegExp(`^${ORG}/credit-reviews$`, 'i')],
+  ['GET', new RegExp(`^${ORG}/credit-reviews/${ID}/transfers$`, 'i')],
+  ['POST', new RegExp(`^${ORG}/credit-reviews/${ID}/(?:investigation|resolution)$`, 'i')],
+  ['GET', new RegExp(`^${ORG}/wallets/${ID}/transactions$`, 'i')],
+  ['POST', new RegExp(`^${ORG}/wallets/${ID}/(?:release-frozen|status)$`, 'i')],
 ];
 const allowed = (method: string, resource: string) =>
   ROUTES.some(

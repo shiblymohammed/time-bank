@@ -1,7 +1,10 @@
 import 'reflect-metadata';
 import { randomUUID } from 'crypto';
 import { join } from 'path';
-import { ConflictException, ForbiddenException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, ValidationPipe } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import { JwtService } from '@nestjs/jwt';
+import httpRequest from 'supertest';
 import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
 import { RequestsService } from '../src/requests/requests.service';
@@ -19,6 +22,12 @@ import { ServiceCompletion1729118400006 } from '../src/database/migrations/17291
 import { TimeCreditLedger1729118400007 } from '../src/database/migrations/1729118400007-TimeCreditLedger';
 import { CreditDonations1729118400008 } from '../src/database/migrations/1729118400008-CreditDonations';
 import { MembershipApplications1729118400009 } from '../src/database/migrations/1729118400009-MembershipApplications';
+import { CreditControls1729118400010 } from '../src/database/migrations/1729118400010-CreditControls';
+import { CreditControlsService } from '../src/time-ledger/credit-controls.service';
+import { CreditControlsController } from '../src/time-ledger/credit-controls.controller';
+import { AuthGuard } from '../src/auth/guards/auth.guard';
+import { OrganizationAccessGuard } from '../src/authorization/guards/organization-access.guard';
+import { RolesGuard } from '../src/authorization/guards/roles.guard';
 import { MembershipsService } from '../src/memberships/memberships.service';
 import { MembershipApproval } from '../src/memberships/entities/membership-approval.entity';
 import { MembershipDocument } from '../src/memberships/entities/membership-document.entity';
@@ -69,6 +78,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       TimeCreditLedger1729118400007,
       CreditDonations1729118400008,
       MembershipApplications1729118400009,
+      CreditControls1729118400010,
     ],
     synchronize: false,
     extra: {
@@ -326,7 +336,9 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
     lockId = volunteer,
     ordered = false,
   ) {
-    if (!['users', 'service_requests', 'universal_time_wallets'].includes(lockTable))
+    if (
+      !['users', 'service_requests', 'universal_time_wallets', 'credit_reviews'].includes(lockTable)
+    )
       throw new Error('Unexpected lock table');
     const blocker = db.createQueryRunner();
     await blocker.connect();
@@ -1433,6 +1445,727 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       expect(results.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
       expect(await balance(volunteer)).toBe(2.5);
       expect(await balance(otherVolunteer)).toBe(2.5);
+    });
+  });
+
+  describe('credit spending and reviewed corrections', () => {
+    let controls: CreditControlsService;
+    let admin: string;
+    let source: string;
+    let wallet: string;
+    let completedRequest: string;
+    const amount = (credits = 0.5) => ({
+      amount: credits,
+      idempotencyKey: randomUUID(),
+      reason: 'Verified assistance funding',
+    });
+    const resolution = (decision: 'RELEASE' | 'CORRECT' = 'RELEASE') => ({
+      decision,
+      resolution: 'Evidence reviewed and decision authorized',
+    });
+    const open = (credits = 0.5) =>
+      controls.openReview(orgA, coordinator, { ...amount(credits), sourceEntryId: source });
+    const balances = async () =>
+      (
+        await db.query(
+          'SELECT balance_credits::float AS balance, frozen_credits::float AS frozen FROM universal_time_wallets WHERE id=$1',
+          [wallet],
+        )
+      )[0];
+
+    beforeEach(async () => {
+      controls = new CreditControlsService(db, audit);
+      admin = await id("INSERT INTO users(phone_e164) VALUES('+919000000088') RETURNING id");
+      const membership = await id(
+        "INSERT INTO organization_memberships(organization_id,user_id,status) VALUES($1,$2,'APPROVED') RETURNING id",
+        [orgA, admin],
+      );
+      await db.query(
+        "INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,'MUNICIPALITY_ADMIN',$2)",
+        [membership, coordinator],
+      );
+      completedRequest = await request();
+      const assignment = await offer(completedRequest);
+      const entry = await db.transaction((m) =>
+        ledger.postServiceEarning(m, {
+          volunteerUserId: volunteer,
+          organizationId: orgA,
+          serviceRequestId: completedRequest,
+          volunteerAssignmentId: assignment,
+          minutes: 60,
+          policy: { baseCreditRateHourly: 1, creditMultiplier: 1, allowPartialHours: true },
+        }),
+      );
+      source = entry!.id;
+      wallet = entry!.walletId!;
+      await db.query("UPDATE service_requests SET status='COMPLETED' WHERE id=$1", [
+        completedRequest,
+      ]);
+    });
+
+    it('preserves free assistance without any debit, and funds only by explicit member consent', async () => {
+      expect(await db.query('SELECT id FROM credit_operations')).toHaveLength(0);
+      expect(await balances()).toEqual({ balance: 1, frozen: 0 });
+      // The creator can voluntarily fund the service using only their own credits.
+      await db.query('UPDATE service_requests SET created_by_user_id=$2 WHERE id=$1', [
+        completedRequest,
+        volunteer,
+      ]);
+      const dto = amount();
+      const result = await controls.spend(orgA, volunteer, completedRequest, dto);
+      expect(result).toMatchObject({ kind: 'ASSISTANCE_SPENT', replayed: false });
+      expect(await balances()).toEqual({ balance: 0.5, frozen: 0 });
+      expect((await controls.spend(orgA, volunteer, completedRequest, dto)).replayed).toBe(true);
+      await expect(
+        controls.spend(orgA, volunteer, completedRequest, { ...dto, amount: 0.2 }),
+      ).rejects.toThrow('different operation');
+      await expect(controls.spend(orgA, volunteer, completedRequest, amount())).rejects.toThrow(
+        'already been funded',
+      );
+      const history = await ledger.listMyTransactions(volunteer);
+      expect(history.data[0]).toMatchObject({
+        txType: 'ASSISTANCE_SPENT',
+        amount: -0.5,
+        operationId: result.id,
+      });
+      await expect(
+        db.query('UPDATE credit_operations SET amount=1 WHERE id=$1', [result.id]),
+      ).rejects.toThrow('append-only');
+    });
+
+    it('requires completed service, verified funding limits, request privacy and current pool authority', async () => {
+      await expect(controls.spend(orgA, volunteer, completedRequest, amount())).rejects.toThrow(
+        'recipient or request creator',
+      );
+      await db.query('UPDATE service_requests SET created_by_user_id=$2 WHERE id=$1', [
+        completedRequest,
+        volunteer,
+      ]);
+      await expect(controls.spend(orgA, volunteer, completedRequest, amount(1.01))).rejects.toThrow(
+        'exceeds verified',
+      );
+      await expect(controls.spend(orgB, volunteer, completedRequest, amount())).rejects.toThrow(
+        'not found',
+      );
+      await db.query("UPDATE service_requests SET status='IN_PROGRESS' WHERE id=$1", [
+        completedRequest,
+      ]);
+      await expect(controls.spend(orgA, volunteer, completedRequest, amount())).rejects.toThrow(
+        'completed assistance',
+      );
+      const pool = await donations.createPool(orgA, admin, { name: 'Assistance fund' });
+      await expect(
+        controls.spend(orgA, coordinator, completedRequest, { ...amount(), poolId: pool.id }),
+      ).rejects.toThrow('authority');
+      expect(await balances()).toEqual({ balance: 1, frozen: 0 });
+    });
+
+    it('spends donated pool credits once and never pays the volunteer twice', async () => {
+      const pool = await donations.createPool(orgA, admin, { name: 'Assistance fund' });
+      await donations.donate(orgA, volunteer, {
+        amount: 1,
+        poolId: pool.id,
+        idempotencyKey: randomUUID(),
+      });
+      const dto = { ...amount(0.75), poolId: pool.id };
+      await controls.spend(orgA, admin, completedRequest, dto);
+      expect((await controls.spend(orgA, admin, completedRequest, dto)).replayed).toBe(true);
+      expect(
+        (await db.getRepository(CommunityCreditPool).findOneByOrFail({ id: pool.id }))
+          .balanceCredits,
+      ).toBe(0.25);
+      expect(
+        await db.query("SELECT id FROM time_credit_ledger WHERE tx_type='SERVICE_EARNED'"),
+      ).toHaveLength(1);
+      const [{ total }] = await db.query(
+        "SELECT sum(amount)::float AS total FROM time_credit_ledger WHERE tx_type='ASSISTANCE_SPENT'",
+      );
+      expect(total).toBe(-0.75);
+    });
+
+    it('rejects another organization’s pool and inactive pools without spending', async () => {
+      const pool = await donations.createPool(orgB, admin, { name: 'Other fund' });
+      await expect(
+        controls.spend(orgA, admin, completedRequest, { ...amount(), poolId: pool.id }),
+      ).rejects.toThrow('Pool not found');
+      const own = await donations.createPool(orgA, admin, { name: 'Closed fund' });
+      await db.query("UPDATE community_credit_pools SET status='CLOSED' WHERE id=$1", [own.id]);
+      await expect(
+        controls.spend(orgA, admin, completedRequest, { ...amount(), poolId: own.id }),
+      ).rejects.toThrow('frozen or closed');
+    });
+
+    it('holds disputed credits, requires investigation and independently releases them', async () => {
+      const dto = { ...amount(), sourceEntryId: source };
+      const review = await controls.openReview(orgA, coordinator, dto);
+      expect((await controls.openReview(orgA, coordinator, dto)).replayed).toBe(true);
+      expect(await balances()).toEqual({ balance: 0.5, frozen: 0.5 });
+      await expect(
+        db.query(
+          `INSERT INTO time_credit_ledger(wallet_id,amount,balance_after,held,tx_type,originating_org_id,review_id,frozen_delta)
+         VALUES($1,0.1,0.6,false,'FRAUD_RELEASED',$2,$3,0)`,
+          [wallet, orgA, review.id],
+        ),
+      ).rejects.toThrow('chk_ledger_control_movement');
+      await expect(controls.resolve(orgA, admin, review.id, resolution())).rejects.toThrow(
+        'investigate first',
+      );
+      await expect(
+        controls.investigate(orgA, admin, review.id, {
+          investigation: 'Reviewed source documents',
+        }),
+      ).rejects.toThrow('authority');
+      await controls.investigate(orgA, coordinator, review.id, {
+        investigation: 'Reviewed source documents',
+      });
+      await expect(controls.resolve(orgA, coordinator, review.id, resolution())).rejects.toThrow(
+        'authority',
+      );
+      await controls.resolve(orgA, admin, review.id, resolution());
+      expect((await controls.resolve(orgA, admin, review.id, resolution())).replayed).toBe(true);
+      expect(await balances()).toEqual({ balance: 1, frozen: 0 });
+      expect((await controls.listReviews(orgA, coordinator)).data).toHaveLength(1);
+      await expect(controls.listReviews(orgA, volunteer)).rejects.toThrow('authority');
+      const original = await db
+        .getRepository(TimeCreditLedgerEntry)
+        .findOneByOrFail({ id: source });
+      expect(original.amount).toBe(1);
+    });
+
+    it('corrects held credits with a compensating entry and preserves the immutable original', async () => {
+      const review = await open();
+      await controls.investigate(orgA, coordinator, review.id, {
+        investigation: 'Evidence confirms fraudulent minutes',
+      });
+      await controls.resolve(orgA, admin, review.id, resolution('CORRECT'));
+      expect(await balances()).toEqual({ balance: 0.5, frozen: 0 });
+      await expect(controls.resolve(orgA, admin, review.id, resolution())).rejects.toThrow(
+        'already resolved',
+      );
+      const [row] = await db.query(
+        "SELECT amount::float, frozen_delta::float, held FROM time_credit_ledger WHERE tx_type='CREDIT_CORRECTED'",
+      );
+      expect(row).toEqual({ amount: -0.5, frozen_delta: -0.5, held: true });
+      await expect(
+        db.query('UPDATE time_credit_ledger SET amount=2 WHERE id=$1', [source]),
+      ).rejects.toThrow('append-only');
+      await expect(open(0.75)).rejects.toThrow('undisputed source');
+    });
+
+    it('denies wrong-tenant cases, over-holds, own-credit reviews and self-authorization', async () => {
+      await expect(
+        controls.openReview(orgB, coordinator, { ...amount(), sourceEntryId: source }),
+      ).rejects.toThrow('authority');
+      await expect(open(1.01)).rejects.toThrow('undisputed source');
+      await expect(open(-1)).rejects.toThrow('hundredths');
+      await db.query(
+        "INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,'COORDINATOR',$2)",
+        [memberA, coordinator],
+      );
+      await expect(
+        controls.openReview(orgA, volunteer, { ...amount(), sourceEntryId: source }),
+      ).rejects.toThrow('own credits');
+      const review = await open();
+      await controls.investigate(orgA, coordinator, review.id, {
+        investigation: 'Reviewed all source documents',
+      });
+      const coordMembership = (
+        await db.query(
+          'SELECT id FROM organization_memberships WHERE user_id=$1 AND organization_id=$2',
+          [coordinator, orgA],
+        )
+      )[0].id;
+      await db.query(
+        "INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,'MUNICIPALITY_ADMIN',$2)",
+        [coordMembership, admin],
+      );
+      await expect(controls.resolve(orgA, coordinator, review.id, resolution())).rejects.toThrow(
+        'different administrator',
+      );
+      await expect(controls.resolve(orgB, admin, review.id, resolution())).rejects.toThrow(
+        'authority',
+      );
+    });
+
+    it('does not release a fraud hold while the owner is suspended', async () => {
+      const review = await open();
+      await controls.investigate(orgA, coordinator, review.id, {
+        investigation: 'Reviewed all source documents',
+      });
+      await db.query("UPDATE users SET status='SUSPENDED' WHERE id=$1", [volunteer]);
+      await expect(controls.resolve(orgA, admin, review.id, resolution())).rejects.toThrow(
+        'restricted',
+      );
+      expect(await balances()).toEqual({ balance: 0.5, frozen: 0.5 });
+      await db.query("UPDATE users SET status='ACTIVE' WHERE id=$1", [volunteer]);
+      await controls.resolve(orgA, admin, review.id, resolution());
+      expect(await balances()).toEqual({ balance: 1, frozen: 0 });
+    });
+
+    it('releases only reinstated, locally earned frozen credits and preserves fraud holds', async () => {
+      await open(0.25);
+      await db.query("UPDATE users SET status='SUSPENDED' WHERE id=$1", [volunteer]);
+      const req = await request();
+      const assignment = await offer(req);
+      await db.transaction((m) =>
+        ledger.postServiceEarning(m, {
+          volunteerUserId: volunteer,
+          organizationId: orgA,
+          serviceRequestId: req,
+          volunteerAssignmentId: assignment,
+          minutes: 60,
+          policy: { baseCreditRateHourly: 1, creditMultiplier: 1, allowPartialHours: true },
+        }),
+      );
+      expect(await balances()).toEqual({ balance: 0.75, frozen: 1.25 });
+      const dto = amount(1);
+      await expect(controls.releaseFrozen(orgA, admin, volunteer, dto)).rejects.toThrow(
+        'restricted',
+      );
+      await db.query("UPDATE users SET status='ACTIVE' WHERE id=$1", [volunteer]);
+      await controls.releaseFrozen(orgA, admin, volunteer, dto);
+      expect((await controls.releaseFrozen(orgA, admin, volunteer, dto)).replayed).toBe(true);
+      expect(await balances()).toEqual({ balance: 1.75, frozen: 0.25 });
+      await expect(controls.releaseFrozen(orgA, admin, volunteer, amount(0.01))).rejects.toThrow(
+        'held earnings',
+      );
+      await expect(
+        controls.releaseFrozen(orgA, admin, volunteer, { ...dto, amount: 0.5 }),
+      ).rejects.toThrow('different operation');
+    });
+
+    it('serializes two holds on one source and prevents double correction', async () => {
+      const results = await race(
+        [() => open(0.75), () => open(0.75)],
+        'universal_time_wallets',
+        wallet,
+      );
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(await balances()).toEqual({ balance: 0.25, frozen: 0.75 });
+      const review = (await db.query('SELECT id FROM credit_reviews'))[0];
+      await controls.investigate(orgA, coordinator, review.id, {
+        investigation: 'Reviewed all source documents',
+      });
+      const decisions = await race(
+        [
+          () => controls.resolve(orgA, admin, review.id, resolution('CORRECT')),
+          () => controls.resolve(orgA, admin, review.id, resolution('CORRECT')),
+        ],
+        'credit_reviews',
+        review.id,
+      );
+      expect(decisions.map((r) => r.status)).toEqual(['fulfilled', 'fulfilled']);
+      expect(
+        await db.query("SELECT id FROM time_credit_ledger WHERE tx_type='CREDIT_CORRECTED'"),
+      ).toHaveLength(1);
+    });
+
+    it('serializes spending and donations against the same balance', async () => {
+      await db.query('UPDATE service_requests SET created_by_user_id=$2 WHERE id=$1', [
+        completedRequest,
+        volunteer,
+      ]);
+      const pool = await donations.createPool(orgA, admin, { name: 'Donation fund' });
+      const results = await race(
+        [
+          () => controls.spend(orgA, volunteer, completedRequest, amount(0.75)),
+          () =>
+            donations.donate(orgA, volunteer, {
+              amount: 0.75,
+              poolId: pool.id,
+              idempotencyKey: randomUUID(),
+            }),
+        ],
+        'universal_time_wallets',
+        wallet,
+      );
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(await balances()).toEqual({ balance: 0.25, frozen: 0 });
+    });
+
+    it('rolls back holds and spending when audit recording fails after insertion', async () => {
+      const realLog = audit.logEvent.bind(audit);
+      jest.spyOn(audit, 'logEvent').mockImplementation(async (input, manager) => {
+        const event = await realLog(input, manager);
+        if (['CREDIT_REVIEW_OPENED', 'ASSISTANCE_CREDITS_SPENT'].includes(input.eventType))
+          throw new Error('late credit audit failure');
+        return event;
+      });
+      await expect(open()).rejects.toThrow('late credit audit failure');
+      await db.query('UPDATE service_requests SET created_by_user_id=$2 WHERE id=$1', [
+        completedRequest,
+        volunteer,
+      ]);
+      await expect(controls.spend(orgA, volunteer, completedRequest, amount())).rejects.toThrow(
+        'late credit audit failure',
+      );
+      expect(await balances()).toEqual({ balance: 1, frozen: 0 });
+      expect(await db.query('SELECT id FROM credit_reviews')).toHaveLength(0);
+      expect(await db.query('SELECT id FROM credit_operations')).toHaveLength(0);
+    });
+
+    it('traces transferred disputed credits into a pool, caps holds, and resolves descendants first', async () => {
+      const pool = await donations.createPool(orgA, admin, { name: 'Traceable pool' });
+      const donation = await donations.donate(orgA, volunteer, {
+        amount: 1,
+        poolId: pool.id,
+        idempotencyKey: randomUUID(),
+      });
+      const parent = await open(1);
+      expect(Number(parent.held_amount)).toBe(0);
+      const [received] = await db.query(
+        "SELECT id FROM time_credit_ledger WHERE donation_id=$1 AND tx_type='DONATION_RECEIVED'",
+        [donation.id],
+      );
+      expect((await controls.downstreamTransfers(orgA, coordinator, parent.id)).data).toEqual([
+        expect.objectContaining({ source_entry_id: received.id, review_organization_id: orgA }),
+      ]);
+      const child = await controls.openReview(orgA, coordinator, {
+        ...amount(1),
+        sourceEntryId: received.id,
+        parentReviewId: parent.id,
+      });
+      const account = await db.getRepository(CommunityCreditPool).findOneByOrFail({ id: pool.id });
+      expect(account.balanceCredits).toBe(0);
+      expect(account.frozenCredits).toBe(1);
+      const history = await controls.poolHistory(orgA, coordinator, pool.id);
+      expect(Number(history.frozen_credits)).toBe(1);
+      expect(history.total).toBe(2);
+      await expect(controls.poolHistory(orgA, volunteer, pool.id)).rejects.toThrow('authority');
+      await expect(
+        controls.openReview(orgA, coordinator, {
+          ...amount(0.01),
+          sourceEntryId: received.id,
+          parentReviewId: parent.id,
+        }),
+      ).rejects.toThrow('unallocated');
+      await controls.investigate(orgA, coordinator, parent.id, {
+        investigation: 'Matched the source credit and the actual donation',
+      });
+      await controls.investigate(orgA, coordinator, child.id, {
+        investigation: 'Matched the source credit and the actual donation',
+      });
+      await expect(controls.resolve(orgA, admin, parent.id, resolution('CORRECT'))).rejects.toThrow(
+        'downstream',
+      );
+      await controls.resolve(orgA, admin, child.id, resolution('CORRECT'));
+      await controls.resolve(orgA, admin, parent.id, resolution('CORRECT'));
+      expect(await balances()).toEqual({ balance: 0, frozen: 0 });
+      expect(
+        (await db.getRepository(CommunityCreditPool).findOneByOrFail({ id: pool.id }))
+          .frozenCredits,
+      ).toBe(0);
+      expect(
+        await db.query("SELECT id FROM time_credit_ledger WHERE tx_type='CREDIT_CORRECTED'"),
+      ).toHaveLength(1);
+    });
+
+    it('never holds more than unspent funds and rejects an unrelated downstream source', async () => {
+      const pool = await donations.createPool(orgA, admin, { name: 'Partial transfer' });
+      await donations.donate(orgA, volunteer, {
+        amount: 0.75,
+        poolId: pool.id,
+        idempotencyKey: randomUUID(),
+      });
+      const parent = await open(1);
+      expect(Number(parent.held_amount)).toBe(0.25);
+      expect(await balances()).toEqual({ balance: 0, frozen: 0.25 });
+      await expect(
+        controls.openReview(orgA, coordinator, {
+          ...amount(0.75),
+          sourceEntryId: source,
+          parentReviewId: parent.id,
+        }),
+      ).rejects.toThrow('not a downstream');
+      await expect(controls.releaseFrozen(orgA, admin, volunteer, amount(0.25))).rejects.toThrow(
+        'held earnings',
+      );
+    });
+
+    it('checks active restrictions even when the account status still says ACTIVE', async () => {
+      await db.query(
+        "INSERT INTO global_account_restrictions(user_id,restriction_type,reason_code,authorized_by) VALUES($1,'TEMPORARY_SUSPENSION','REVIEW',$2)",
+        [volunteer, admin],
+      );
+      await db.query('UPDATE service_requests SET created_by_user_id=$2 WHERE id=$1', [
+        completedRequest,
+        volunteer,
+      ]);
+      await expect(controls.spend(orgA, volunteer, completedRequest, amount())).rejects.toThrow(
+        'active account',
+      );
+      const pool = await donations.createPool(orgA, admin, { name: 'Restricted gifts' });
+      await expect(
+        donations.donate(orgA, volunteer, {
+          amount: 0.5,
+          poolId: pool.id,
+          idempotencyKey: randomUUID(),
+        }),
+      ).rejects.toThrow('wallet is frozen');
+      expect(await balances()).toEqual({ balance: 1, frozen: 0 });
+      const req = await request();
+      const assignment = await offer(req);
+      await db.transaction((m) =>
+        ledger.postServiceEarning(m, {
+          volunteerUserId: volunteer,
+          organizationId: orgA,
+          serviceRequestId: req,
+          volunteerAssignmentId: assignment,
+          minutes: 60,
+          policy: { baseCreditRateHourly: 1, creditMultiplier: 1, allowPartialHours: true },
+        }),
+      );
+      expect(await balances()).toEqual({ balance: 1, frozen: 1 });
+    });
+
+    it('allows only global authority to freeze and restore wallets, preserving all balances', async () => {
+      const dto = {
+        status: 'FROZEN' as const,
+        reason: 'Pending global account review',
+        idempotencyKey: randomUUID(),
+      };
+      await expect(controls.changeWalletStatus(orgA, admin, volunteer, dto)).rejects.toThrow(
+        'authority',
+      );
+      const [membership] = await db.query(
+        'SELECT id FROM organization_memberships WHERE user_id=$1',
+        [admin],
+      );
+      await db.query(
+        "INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,'SUPER_ADMIN',$2)",
+        [membership.id, coordinator],
+      );
+      await controls.changeWalletStatus(orgA, admin, volunteer, dto);
+      expect((await controls.changeWalletStatus(orgA, admin, volunteer, dto)).replayed).toBe(true);
+      await expect(
+        controls.changeWalletStatus(orgA, admin, volunteer, { ...dto, status: 'ACTIVE' }),
+      ).rejects.toThrow('different change');
+      const pool = await donations.createPool(orgA, admin, { name: 'Frozen donation target' });
+      await expect(
+        donations.donate(orgA, volunteer, {
+          amount: 0.5,
+          poolId: pool.id,
+          idempotencyKey: randomUUID(),
+        }),
+      ).rejects.toThrow('wallet is frozen');
+      await db.query("UPDATE users SET status='PERMANENTLY_BANNED' WHERE id=$1", [volunteer]);
+      const restore = { ...dto, status: 'ACTIVE' as const, idempotencyKey: randomUUID() };
+      await expect(controls.changeWalletStatus(orgA, admin, volunteer, restore)).rejects.toThrow(
+        'restricted',
+      );
+      await db.query("UPDATE users SET status='ACTIVE' WHERE id=$1", [volunteer]);
+      await controls.changeWalletStatus(orgA, admin, volunteer, restore);
+      expect(await balances()).toEqual({ balance: 1, frozen: 0 });
+      expect(
+        await db.query("SELECT id FROM audit_events WHERE event_type='TIME_WALLET_STATUS_CHANGED'"),
+      ).toHaveLength(2);
+    });
+
+    it('reviews already-frozen earnings without double-moving funds or allowing release around the hold', async () => {
+      await db.query("UPDATE users SET status='SUSPENDED' WHERE id=$1", [volunteer]);
+      const req = await request();
+      const assignment = await offer(req);
+      const earned = await db.transaction((m) =>
+        ledger.postServiceEarning(m, {
+          volunteerUserId: volunteer,
+          organizationId: orgA,
+          serviceRequestId: req,
+          volunteerAssignmentId: assignment,
+          minutes: 60,
+          policy: { baseCreditRateHourly: 1, creditMultiplier: 1, allowPartialHours: true },
+        }),
+      );
+      const review = await controls.openReview(orgA, coordinator, {
+        ...amount(0.5),
+        sourceEntryId: earned!.id,
+      });
+      expect(Number(review.held_amount)).toBe(0.5);
+      expect(Number(review.pre_frozen_amount)).toBe(0.5);
+      expect(await balances()).toEqual({ balance: 1, frozen: 1 });
+      await db.query("UPDATE users SET status='ACTIVE' WHERE id=$1", [volunteer]);
+      await expect(controls.releaseFrozen(orgA, admin, volunteer, amount(1))).rejects.toThrow(
+        'held earnings',
+      );
+      await controls.releaseFrozen(orgA, admin, volunteer, amount(0.5));
+      expect(await balances()).toEqual({ balance: 1.5, frozen: 0.5 });
+      await controls.investigate(orgA, coordinator, review.id, {
+        investigation: 'The frozen service earning is fraudulent',
+      });
+      await controls.resolve(orgA, admin, review.id, resolution('CORRECT'));
+      expect(await balances()).toEqual({ balance: 1.5, frozen: 0 });
+      await expect(controls.releaseFrozen(orgA, admin, volunteer, amount(0.01))).rejects.toThrow(
+        'held earnings',
+      );
+      // A partly released earning is still reviewed through its original source.
+      const second = await controls.openReview(orgA, coordinator, {
+        ...amount(0.5),
+        sourceEntryId: earned!.id,
+      });
+      expect(Number(second.pre_frozen_amount)).toBe(0);
+      expect(await balances()).toEqual({ balance: 1, frozen: 0.5 });
+    });
+
+    it('scopes staff wallet histories to approved local members and local credit origins', async () => {
+      const req = await request(undefined, orgB);
+      const assignment = await offer(req, memberB, orgB);
+      await db.transaction((m) =>
+        ledger.postServiceEarning(m, {
+          volunteerUserId: volunteer,
+          organizationId: orgB,
+          serviceRequestId: req,
+          volunteerAssignmentId: assignment,
+          minutes: 120,
+          policy: { baseCreditRateHourly: 1, creditMultiplier: 1, allowPartialHours: true },
+        }),
+      );
+      const history = await controls.walletHistory(orgA, coordinator, volunteer);
+      expect(history.total).toBe(1);
+      expect(history.data[0].id).toBe(source);
+      expect(history.wallet?.balanceCredits).toBe(3);
+      await expect(controls.walletHistory(orgA, volunteer, otherVolunteer)).rejects.toThrow(
+        'authority',
+      );
+      await expect(controls.walletHistory(orgA, coordinator, randomUUID())).rejects.toThrow(
+        'Member not found',
+      );
+      await db.query("UPDATE organization_memberships SET status='APPLIED' WHERE id=$1", [memberA]);
+      await expect(controls.walletHistory(orgA, coordinator, volunteer)).rejects.toThrow(
+        'Member not found',
+      );
+    });
+
+    it('shows verified funding totals and a recorded contribution without exposing the payer', async () => {
+      const before = await controls.fundingSummary(orgA, coordinator, completedRequest);
+      expect(before).toMatchObject({ verifiedCredits: 1, status: 'COMPLETED', funding: null });
+      const pool = await donations.createPool(orgA, admin, { name: 'Dashboard fund' });
+      await donations.donate(orgA, volunteer, {
+        amount: 1,
+        poolId: pool.id,
+        idempotencyKey: randomUUID(),
+      });
+      await controls.spend(orgA, admin, completedRequest, { ...amount(0.5), poolId: pool.id });
+      const after = await controls.fundingSummary(orgA, coordinator, completedRequest);
+      expect(after.funding).toMatchObject({ amount: 0.5, source: 'Dashboard fund' });
+      expect(after.funding).not.toHaveProperty('actor_id');
+      await expect(controls.fundingSummary(orgA, volunteer, completedRequest)).rejects.toThrow(
+        'authority',
+      );
+    });
+
+    it('applies signed HTTP authentication, real role guards and strict DTO validation to credit controls', async () => {
+      const jwt = new JwtService({ secret: 'disposable-credit-http-test-secret' });
+      const fixture = await Test.createTestingModule({
+        controllers: [CreditControlsController],
+        providers: [
+          { provide: CreditControlsService, useValue: controls },
+          { provide: AuthorizationService, useValue: authorization },
+          { provide: JwtService, useValue: jwt },
+          {
+            provide: ConfigService,
+            useValue: new ConfigService({
+              NODE_ENV: 'test',
+              JWT_SECRET: 'disposable-credit-http-test-secret',
+              AUTH_ALLOW_DEV_HEADERS: 'false',
+            }),
+          },
+          AuthGuard,
+          OrganizationAccessGuard,
+          RolesGuard,
+        ],
+      }).compile();
+      const app = fixture.createNestApplication();
+      app.setGlobalPrefix('api');
+      app.useGlobalPipes(
+        new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }),
+      );
+      await app.init();
+      const token = (user: string) =>
+        `Bearer ${jwt.sign({ sub: user, roles: ['SUPER_ADMIN'], isSuperAdmin: true })}`;
+      const base = `/api/organizations/${orgA}`;
+      try {
+        await httpRequest(app.getHttpServer()).get(`${base}/credit-reviews`).expect(401);
+        await httpRequest(app.getHttpServer())
+          .get(`${base}/credit-reviews`)
+          .set('Authorization', token(volunteer))
+          .expect(403);
+        await httpRequest(app.getHttpServer())
+          .get(`${base}/wallets/${volunteer}/transactions`)
+          .set('Authorization', token(coordinator))
+          .expect(200);
+        await httpRequest(app.getHttpServer())
+          .get(`${base}/wallets/${volunteer}/transactions`)
+          .set('Authorization', token(otherVolunteer))
+          .expect(403);
+        await httpRequest(app.getHttpServer())
+          .get(`${base}/requests/${completedRequest}/credit-funding`)
+          .set('Authorization', token(coordinator))
+          .expect(200);
+        await httpRequest(app.getHttpServer())
+          .post(`${base}/credit-reviews`)
+          .set('Authorization', token(coordinator))
+          .send({ ...amount(0.001), sourceEntryId: source })
+          .expect(400);
+        await httpRequest(app.getHttpServer())
+          .post(`${base}/credit-reviews`)
+          .set('Authorization', token(coordinator))
+          .send({ ...amount(), sourceEntryId: source, walletId: wallet })
+          .expect(400);
+        const opened = await httpRequest(app.getHttpServer())
+          .post(`${base}/credit-reviews`)
+          .set('Authorization', token(coordinator))
+          .send({ ...amount(), sourceEntryId: source })
+          .expect(201);
+        const path = `${base}/credit-reviews/${opened.body.id}`;
+        await httpRequest(app.getHttpServer())
+          .post(`${path}/resolution`)
+          .set('Authorization', token(coordinator))
+          .send(resolution())
+          .expect(403);
+        await httpRequest(app.getHttpServer())
+          .post(`${path}/investigation`)
+          .set('Authorization', token(coordinator))
+          .send({ investigation: 'Reviewed the HTTP verification evidence' })
+          .expect(201);
+        await httpRequest(app.getHttpServer())
+          .post(`${path}/resolution`)
+          .set('Authorization', token(admin))
+          .send(resolution())
+          .expect(201);
+        await httpRequest(app.getHttpServer())
+          .post(`${base}/wallets/${volunteer}/status`)
+          .set('Authorization', token(admin))
+          .send({ status: 'FROZEN', reason: 'HTTP role test', idempotencyKey: randomUUID() })
+          .expect(403);
+        const [membership] = await db.query(
+          'SELECT id FROM organization_memberships WHERE user_id=$1',
+          [admin],
+        );
+        await db.query(
+          "UPDATE membership_role_grants SET status='REVOKED' WHERE membership_id=$1",
+          [membership.id],
+        );
+        await httpRequest(app.getHttpServer())
+          .post(`${path}/resolution`)
+          .set('Authorization', token(admin))
+          .send(resolution())
+          .expect(403);
+        expect(await balances()).toEqual({ balance: 1, frozen: 0 });
+      } finally {
+        await app.close();
+      }
+    });
+
+    it('reverses the new schema only before credit-control records exist', async () => {
+      const migration = new CreditControls1729118400010();
+      await db.transaction(async (m) => {
+        await migration.down(m.queryRunner!);
+        await migration.up(m.queryRunner!);
+      });
+      await open();
+      await expect(db.transaction((m) => migration.down(m.queryRunner!))).rejects.toThrow(
+        'requires empty',
+      );
+      expect(await balances()).toEqual({ balance: 0.5, frozen: 0.5 });
     });
   });
 

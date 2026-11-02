@@ -13,6 +13,8 @@ const nextConfig: NextConfig = {
   // Self-contained server for infra/docker/Dockerfile.web; trace from the monorepo root so
   // pnpm workspace dependencies are included.
   output: 'standalone',
+  // Separate build output lets disposable UI QA run alongside a developer's session.
+  distDir: process.env['NEXT_DIST_DIR'] ?? '.next',
   outputFileTracingRoot: path.join(__dirname, '../..'),
 
   // Strict mode helps surface concurrent rendering issues early

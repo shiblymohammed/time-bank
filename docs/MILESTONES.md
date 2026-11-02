@@ -106,18 +106,30 @@ coordinator escalation.
 - [x] Multi-tenant isolation guards & cross-organization community drive authorization rules (ITB-005, ITB-006, ITB-007)
 - [x] Test suite: 24 test suites, 238 unit and integration tests passing with zero regressions
 
-## Milestone 4: Universal time-credit ledger
+## Milestone 4: Universal time-credit ledger — backend implemented, review pending
 
 **Goal:** Atomic awards, redemption for assistance, cross-municipality donations, freeze/correction rules.
 
-**Planned scope:**
+**Implemented backend scope:**
 
-- TimeLedgerModule: wallet, ledger entries, holds (FR-TIME)
-- Idempotent credit issuance after verification (FR-TIME-02, NFR-10)
-- Cross-municipality donations (FR-TIME-03, UC-12, UC-13)
-- Suspension/ban wallet freeze (FR-TIME-05, D#79)
-- Fraud freeze + coordinator investigation + Municipality Admin correction (FR-TIME-06, D#91)
-- Concurrency tests for double-spend prevention (NFR-16, AT-15)
+- [x] Universal wallet, append-only ledger and independently confirmed service earnings (FR-TIME-01/02/04).
+- [x] Member donations across organizations and donations to approved community pools (FR-TIME-03).
+- [x] Explicit voluntary funding of completed assistance using the caller's own wallet or a local approved pool.
+      Eligible beneficiaries continue to receive assistance free, regardless of credit balance.
+- [x] Global wallet freeze/restore controls, restriction checks and locally attributable frozen-earning releases
+      (FR-TIME-05). Reinstatement does not automatically release funds.
+- [x] Source-linked dispute holds, recorded coordinator investigation and independent Municipality Admin correction or
+      release (FR-TIME-06). Corrections append ledger entries and preserve originals.
+- [x] Evidence-linked downstream donation review, with capped holds against available balances and no negative debt
+      (FR-TIME-07). Staff investigate actual transfer paths; no automatic fraud attribution.
+- [x] Real PostgreSQL concurrency, retry, permission, signed HTTP and failure-rollback tests.
+
+API details, product policy and rollback constraints: [CREDIT_CONTROLS.md](CREDIT_CONTROLS.md).
+
+**Release gates still open:** human ledger/authorization/migration review, CI on PostgreSQL 17, application of the new
+migration to the intended deployment, coordinator/admin UI integration, and full device-to-server validation. Earlier
+milestone gaps (live SMS/recovery and automatic matching progression/replacement) remain separate work. M4 backend
+implementation does not imply overall production readiness.
 
 ---
 

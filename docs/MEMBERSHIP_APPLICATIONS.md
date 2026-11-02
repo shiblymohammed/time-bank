@@ -37,6 +37,6 @@ application (ITB-005, ITB-007).
 - Unit tests cover storing the answers, refusing volunteer answers for other roles and unknown skills, a pending
   applicant changing their request, and approval granting the requested role and seeding availability and pending
   skills.
-- `scripts/test-matching-concurrency.ps1` applies all nine migrations. Its application tests run the real service
-  against PostgreSQL, including both database checks.
+- `scripts/test-matching-concurrency.ps1` applies all ten migrations. Its application tests run the real service against
+  PostgreSQL, including both database checks.
 - On 1 November 2026, an HTTP walk-through against the disposable interface QA API passed all 14 of its checks.

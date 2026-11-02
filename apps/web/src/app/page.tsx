@@ -5,6 +5,7 @@ import type { Action } from '@/lib/admin-types';
 import { CoordinatorRequests } from '@/components/coordinator-requests';
 import { ServiceCatalogue } from '@/components/service-catalogue';
 import { ServiceOperations } from '@/components/service-operations';
+import { TimeCredits } from '@/components/time-credits';
 import { ApiManagement } from '@/components/api-management';
 import { BrandMark, Icon, type IconName } from '@/components/icons';
 import { api, ApiError, backend } from '@/lib/api';
@@ -16,6 +17,7 @@ type Tab =
   | 'requests'
   | 'catalogue'
   | 'operations'
+  | 'credits'
   | 'restrictions'
   | 'audit';
 type Grant = { id: string; role: string; status: string };
@@ -149,6 +151,13 @@ const PAGES: {
     icon: 'operations',
     group: 'Services',
     description: 'Bookings, completions and time credits',
+  },
+  {
+    id: 'credits',
+    text: 'Time credits',
+    icon: 'wallet',
+    group: 'Governance',
+    description: 'Community pools, member wallets and independent credit reviews',
   },
   {
     id: 'restrictions',
@@ -312,6 +321,7 @@ function ActionDialog({
   const [error, setError] = useState(''),
     [busy, setBusy] = useState(false);
   const title = useRef<HTMLHeadingElement>(null);
+  const inFlight = useRef(false);
   useEffect(() => {
     title.current?.focus();
   }, []);
@@ -334,6 +344,8 @@ function ActionDialog({
           className="stack"
           onSubmit={async (event) => {
             event.preventDefault();
+            if (inFlight.current) return;
+            inFlight.current = true;
             const values = Object.fromEntries(
               new FormData(event.currentTarget).entries(),
             ) as Record<string, string>;
@@ -347,6 +359,7 @@ function ActionDialog({
               if (cause instanceof ApiError && cause.status === 401) onExpired();
               else setError(cause instanceof Error ? cause.message : 'Unable to save');
             } finally {
+              inFlight.current = false;
               setBusy(false);
               setPending(false);
             }
@@ -365,6 +378,16 @@ function ActionDialog({
                     name={field.key}
                     required={!field.optional}
                     defaultChecked={field.value === 'true'}
+                  />
+                ) : field.type === 'textarea' ? (
+                  <textarea
+                    name={field.key}
+                    className="form-input"
+                    rows={4}
+                    required={!field.optional}
+                    defaultValue={field.value ?? ''}
+                    minLength={field.minLength}
+                    maxLength={field.maxLength}
                   />
                 ) : field.options || field.choices ? (
                   <select
@@ -471,7 +494,9 @@ export default function AdminDashboard(): React.JSX.Element {
     );
     if (!central)
       setTab((current) =>
-        ['organizations', 'memberships', 'requests', 'catalogue', 'operations'].includes(current)
+        ['organizations', 'memberships', 'requests', 'catalogue', 'operations', 'credits'].includes(
+          current,
+        )
           ? current
           : 'requests',
       );
@@ -833,6 +858,24 @@ export default function AdminDashboard(): React.JSX.Element {
               onExpired={expired}
             />
           )}
+          {tab === 'credits' &&
+            (tenant === 'GLOBAL' ? (
+              <p className="glass-panel empty-state">
+                Choose an organization above to manage its time credits.
+              </p>
+            ) : (
+              <TimeCredits
+                key={tenant}
+                organizationId={tenant}
+                userId={profile.id}
+                roles={localRoles}
+                isGlobal={isGlobal}
+                revision={revision}
+                pending={pending}
+                openAction={openAction}
+                onExpired={expired}
+              />
+            ))}
           {tab === 'operations' && (
             <ServiceOperations
               key={tenant}

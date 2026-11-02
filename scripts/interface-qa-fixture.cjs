@@ -101,7 +101,11 @@ const db = new DataSource({
   );
   const data = { org, orgB, catalogue, people, availableGlobal, inactiveGlobal, pool };
   require('node:fs').writeFileSync(
-    path.resolve(__dirname, '../node_modules/.cache/interface-qa/fixture.json'),
+    path.join(
+      process.env.UI_QA_ARTIFACT_DIR ??
+        path.resolve(__dirname, '../node_modules/.cache/interface-qa'),
+      'fixture.json',
+    ),
     JSON.stringify(data, null, 2),
   );
   console.log('All migrations applied; disposable interface fixtures created.');

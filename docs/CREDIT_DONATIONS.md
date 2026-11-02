@@ -32,11 +32,12 @@ community pool (FR-TIME-03, D#15, D#19). Migration `1729118400008-CreditDonation
   and its organization). A recipient sees only the note and the organization the gift came through, never the donor.
 - Each gift writes `CREDITS_DONATED`, and each new pool writes `COMMUNITY_POOL_CREATED`.
 
-Pools only collect credits so far. Spending pool credits on assistance is not built yet.
+Municipality administrators can now spend local pool credits on completed assistance, and disputed pool credits can be
+held for review. See [CREDIT_CONTROLS.md](CREDIT_CONTROLS.md) for spending, pool history and correction rules.
 
 ## Checks
 
-- `scripts/test-matching-concurrency.ps1` applies all nine migrations. The donation tests cover a member gift with both
+- `scripts/test-matching-concurrency.ps1` applies all ten migrations. The donation tests cover a member gift with both
   ledger rows, replay and key reuse, privacy in both histories, cross-organization pool gifts, closed pools, every
   refusal above, two simultaneous gifts against one balance, and two members giving to each other at once.
 - On 1 November 2026, an HTTP walk-through against the disposable interface QA API passed all 18 of its checks. It ran

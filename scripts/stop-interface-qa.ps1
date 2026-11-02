@@ -1,6 +1,8 @@
+param([string]$RunName = 'interface-qa')
 $ErrorActionPreference = 'Stop'
+if ($RunName -notmatch '^[a-z][a-z0-9-]*$') { throw 'Invalid QA run name' }
 $workspace = Split-Path -Parent $PSScriptRoot
-$qaRoot = Join-Path $workspace 'node_modules\.cache\interface-qa'
+$qaRoot = Join-Path $workspace "node_modules\.cache\$RunName"
 $statePath = Join-Path $qaRoot 'state.json'
 if (-not (Test-Path -LiteralPath $statePath)) { throw 'No interface QA state found' }
 $qaState = Get-Content -LiteralPath $statePath | ConvertFrom-Json

@@ -27,7 +27,9 @@ Examples at the default rates: 20 minutes pay 0.33 credits, 40 minutes 0.67, and
 - Each payment writes an audit event, `TIME_CREDITS_EARNED` or `TIME_CREDITS_HELD`. The `SERVICE_CONFIRMED` event and
   the confirm response carry `creditsEarned` and `creditsHeld`.
 
-Credits can also be given away; see `CREDIT_DONATIONS.md`.
+Credits can also be given away; see `CREDIT_DONATIONS.md`. Voluntary assistance spending, fraud review and frozen-credit
+release are described in [CREDIT_CONTROLS.md](CREDIT_CONTROLS.md). Eligible beneficiaries are never automatically
+charged.
 
 ## History
 
@@ -38,7 +40,7 @@ this endpoint is not scoped to an organization.
 
 ## Checks
 
-- `scripts/test-matching-concurrency.ps1`: the PostgreSQL suite applies all nine migrations. It checks the rate and
+- `scripts/test-matching-concurrency.ps1`: the PostgreSQL suite applies all ten migrations. It checks the rate and
   multiplier, single payment, the append-only trigger and the unique key, whole-hours-only services, held credits for a
   frozen wallet, and the history endpoint's contents.
 - `src/time-ledger/time-ledger.service.spec.ts` covers the rounding.
