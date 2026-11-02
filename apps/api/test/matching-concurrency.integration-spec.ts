@@ -7,6 +7,12 @@ import { join } from 'path';
 import { ConflictException, ForbiddenException } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
+import { AuthService } from '../src/auth/auth.service';
+import { OtpChallenge } from '../src/auth/entities/otp-challenge.entity';
+import { AuthenticationSession } from '../src/auth/entities/authentication-session.entity';
+import { SmsService } from '../src/auth/sms/sms.service';
+import { sha256 } from '../src/auth/utils/phone.util';
 import { RequestsService } from '../src/requests/requests.service';
 import { RequestCancellation } from '../src/requests/entities/request-cancellation.entity';
 import { RequestRescheduleHistory } from '../src/requests/entities/request-reschedule.entity';
@@ -157,7 +163,9 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
 
   beforeEach(async () => {
     jest.restoreAllMocks();
-    await db.query('TRUNCATE audit_events, users, organizations, service_categories CASCADE');
+    await db.query(
+      'TRUNCATE otp_challenges, audit_events, users, organizations, service_categories CASCADE',
+    );
     sequence = 0;
     orgA = await id(
       "INSERT INTO organizations(code,name,district) VALUES('A','Organization A','Test') RETURNING id",
@@ -239,6 +247,104 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       [org, requestId, member, round],
     );
   }
+
+  describe('OTP concurrency and expiry', () => {
+    const phone = '+919000000001';
+    function authentication() {
+      const sms = { sendOtp: jest.fn().mockResolvedValue(true) };
+      return {
+        sms,
+        auth: new AuthService(
+          db.getRepository(OtpChallenge),
+          db.getRepository(AuthenticationSession),
+          db.getRepository(User),
+          db.getRepository(Organization),
+          db.getRepository(OrganizationMembership),
+          db,
+          new JwtService({ secret: 'disposable-integration-test-secret' }),
+          new ConfigService({ NODE_ENV: 'test' }),
+          audit,
+          sms as unknown as SmsService,
+        ),
+      };
+    }
+    async function challenge(code: string, ageSeconds: number, expiresSeconds = 600) {
+      return db.getRepository(OtpChallenge).save({
+        phoneHash: sha256(phone),
+        codeHash: sha256(code),
+        attemptCount: 0,
+        maxAttempts: 3,
+        createdAt: new Date(Date.now() - ageSeconds * 1000),
+        expiresAt: new Date(Date.now() + expiresSeconds * 1000),
+      });
+    }
+    it('serializes simultaneous issuance before a challenge row exists', async () => {
+      const { auth, sms } = authentication();
+      const results = await Promise.allSettled(
+        Array.from({ length: 6 }, () => auth.requestOtp({ phone })),
+      );
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(await db.getRepository(OtpChallenge).count()).toBe(1);
+      expect(sms.sendOtp).toHaveBeenCalledTimes(1);
+      for (const result of results) {
+        if (result.status === 'rejected') expect(result.reason.getStatus()).toBe(429);
+      }
+    });
+    it('allows only one session from simultaneous verification and retains the cooldown', async () => {
+      const { auth } = authentication();
+      const issued = await auth.requestOtp({ phone });
+      const results = await Promise.allSettled(
+        Array.from({ length: 6 }, () => auth.verifyOtp({ phone, code: issued.devOtp! })),
+      );
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(await db.getRepository(AuthenticationSession).count()).toBe(1);
+      const used = await db
+        .getRepository(OtpChallenge)
+        .findOneByOrFail({ phoneHash: sha256(phone) });
+      expect(used.consumedAt).not.toBeNull();
+      expect(used.attemptCount).toBe(1);
+      await expect(auth.requestOtp({ phone })).rejects.toMatchObject({ status: 429 });
+    });
+    it('persists every failed attempt without exceeding the shared attempt budget', async () => {
+      const { auth } = authentication();
+      const issued = await auth.requestOtp({ phone });
+      const results = await Promise.allSettled(
+        Array.from({ length: 8 }, () => auth.verifyOtp({ phone, code: '000000' })),
+      );
+      expect(results.every((r) => r.status === 'rejected')).toBe(true);
+      const used = await db
+        .getRepository(OtpChallenge)
+        .findOneByOrFail({ phoneHash: sha256(phone) });
+      expect(used.attemptCount).toBe(3);
+      expect(used.consumedAt).toBeNull();
+      await expect(auth.verifyOtp({ phone, code: issued.devOtp! })).rejects.toThrow(
+        'Maximum verification attempts',
+      );
+      expect(await db.getRepository(AuthenticationSession).count()).toBe(0);
+    });
+    it('does not revive an earlier code after the newest challenge was consumed', async () => {
+      const { auth } = authentication();
+      const older = await challenge('111111', 120);
+      await challenge('222222', 0);
+      await auth.verifyOtp({ phone, code: '222222' });
+      await expect(auth.verifyOtp({ phone, code: '111111' })).rejects.toThrow(
+        'No active verification challenge',
+      );
+      const unchanged = await db.getRepository(OtpChallenge).findOneByOrFail({ id: older.id });
+      expect(unchanged.consumedAt).toBeNull();
+      expect(unchanged.attemptCount).toBe(0);
+      expect(await db.getRepository(AuthenticationSession).count()).toBe(1);
+    });
+    it('does not fall back to an earlier code when the latest challenge expired', async () => {
+      const { auth } = authentication();
+      await challenge('111111', 120);
+      await challenge('222222', 0, -1);
+      await expect(auth.verifyOtp({ phone, code: '111111' })).rejects.toThrow(
+        'No active verification challenge',
+      );
+      expect(await db.getRepository(AuthenticationSession).count()).toBe(0);
+    });
+  });
 
   it('staff matching snapshot is tenant-scoped and excludes non-staff', async () => {
     const req = await request();

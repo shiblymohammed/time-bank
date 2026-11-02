@@ -98,10 +98,14 @@ describe('AuthService', () => {
 
   const mockDataSource = {
     createQueryRunner: jest.fn().mockReturnValue(mockQueryRunner),
+    transaction: jest.fn(),
   };
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockDataSource.transaction.mockImplementation(async (action) =>
+      action({ getRepository: () => mockOtpRepo, query: jest.fn().mockResolvedValue([]) }),
+    );
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -157,6 +161,61 @@ describe('AuthService', () => {
   });
 
   describe('verifyOtp', () => {
+    it('allows only one concurrent verification of the same challenge', async () => {
+      let stored = {
+        id: 'challenge',
+        attemptCount: 0,
+        expiresAt: new Date(Date.now() + 60_000),
+        maxAttempts: 3,
+        codeHash: sha256('123456'),
+        consumedAt: null as Date | null,
+      };
+      mockOtpRepo.findOne.mockImplementation(async () =>
+        stored.consumedAt ? null : { ...stored },
+      );
+      mockOtpRepo.save.mockImplementation(async (challenge) => {
+        await Promise.resolve();
+        stored = { ...challenge };
+        return challenge;
+      });
+      // Simulate a transaction lock: the second reader observes the committed claim.
+      let pending: Promise<unknown> = Promise.resolve();
+      mockDataSource.transaction.mockImplementation((action) => {
+        const next = pending.then(() =>
+          action({ getRepository: () => mockOtpRepo, query: jest.fn().mockResolvedValue([]) }),
+        );
+        pending = next.catch(() => undefined);
+        return next;
+      });
+      mockQueryRunner.manager.getRepository.mockReturnValue({
+        findOne: jest.fn().mockResolvedValue({
+          id: 'existing-user',
+          phoneE164: '+919876543210',
+          status: AccountStatus.ACTIVE,
+        }),
+      });
+      const qb = {
+        innerJoin: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(null),
+      };
+      mockMembershipRepo.createQueryBuilder.mockReturnValue(qb);
+      mockSessionRepo.create.mockImplementation((dto) => ({ id: 'session', ...dto }));
+      mockSessionRepo.save.mockImplementation(async (session) => session);
+      const results = await Promise.allSettled([
+        service.verifyOtp({ phone: '9876543210', code: '123456' }),
+        service.verifyOtp({ phone: '9876543210', code: '123456' }),
+      ]);
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(mockSessionRepo.save).toHaveBeenCalledTimes(1);
+      expect(mockOtpRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({
+          lock: { mode: 'pessimistic_write' },
+        }),
+      );
+    });
+
     it('should throw BadRequestException if no active challenge exists', async () => {
       mockOtpRepo.findOne.mockResolvedValueOnce(null);
 
@@ -180,6 +239,7 @@ describe('AuthService', () => {
     it('should throw UnauthorizedException on wrong code', async () => {
       const challenge = {
         attemptCount: 0,
+        expiresAt: new Date(Date.now() + 60_000),
         maxAttempts: 3,
         codeHash: sha256('654321'),
       };
@@ -197,6 +257,7 @@ describe('AuthService', () => {
     it('should provision new user, wallet, and identity on valid first verification', async () => {
       const challenge = {
         attemptCount: 0,
+        expiresAt: new Date(Date.now() + 60_000),
         maxAttempts: 3,
         codeHash: sha256('123456'),
         consumedAt: null as Date | null,
@@ -254,6 +315,7 @@ describe('AuthService', () => {
     it('should throw ForbiddenException if user status is suspended', async () => {
       const challenge = {
         attemptCount: 0,
+        expiresAt: new Date(Date.now() + 60_000),
         maxAttempts: 3,
         codeHash: sha256('123456'),
         consumedAt: null as Date | null,

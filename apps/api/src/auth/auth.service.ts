@@ -100,40 +100,37 @@ export class AuthService {
     const cooldownSeconds = 60;
     const cooldownCutoff = new Date(Date.now() - cooldownSeconds * 1000);
 
-    const recentChallenge = await this.otpRepo.findOne({
-      where: {
-        phoneHash,
-        consumedAt: IsNull(),
-        createdAt: MoreThan(cooldownCutoff),
-      },
-      order: { createdAt: 'DESC' },
-    });
-
-    if (recentChallenge) {
-      throw new HttpException(
-        `Please wait ${cooldownSeconds} seconds before requesting a new verification code`,
-        HttpStatus.TOO_MANY_REQUESTS,
-      );
-    }
-
-    // 2. Generate 6-digit numeric OTP code
     const isDev = this.configService.get('NODE_ENV') !== 'production';
     const otp = crypto.randomInt(100000, 1000000).toString();
-    const codeHash = sha256(otp);
-
-    // 3. Challenge validity: default 10 minutes (600s)
     const expirySeconds = Number(this.configService.get('OTP_EXPIRY_SECONDS') ?? 600);
     const expiresAt = new Date(Date.now() + expirySeconds * 1000);
     const maxAttempts = Number(this.configService.get('OTP_MAX_ATTEMPTS') ?? 3);
 
-    const challenge = this.otpRepo.create({
-      phoneHash,
-      codeHash,
-      expiresAt,
-      attemptCount: 0,
-      maxAttempts,
+    await this.dataSource.transaction(async (manager) => {
+      // A row lock cannot protect a phone's first challenge. Serialize issuance
+      // (and verification below) by phone, including across API instances.
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`otp:${phoneHash}`]);
+      const otpRepo = manager.getRepository(OtpChallenge);
+      const recentChallenge = await otpRepo.findOne({
+        where: { phoneHash, createdAt: MoreThan(cooldownCutoff) },
+        order: { createdAt: 'DESC' },
+      });
+      if (recentChallenge) {
+        throw new HttpException(
+          `Please wait ${cooldownSeconds} seconds before requesting a new verification code`,
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+      await otpRepo.save(
+        otpRepo.create({
+          phoneHash,
+          codeHash: sha256(otp),
+          expiresAt,
+          attemptCount: 0,
+          maxAttempts,
+        }),
+      );
     });
-    await this.otpRepo.save(challenge);
 
     // 4. Dispatch SMS
     await this.smsService.sendOtp(phoneE164, otp);
@@ -165,38 +162,35 @@ export class AuthService {
     const phoneE164 = normalizeToE164(dto.phone);
     const phoneHash = sha256(phoneE164);
 
-    // 1. Fetch latest active unconsumed challenge
-    const challenge = await this.otpRepo.findOne({
-      where: {
-        phoneHash,
-        consumedAt: IsNull(),
-        expiresAt: MoreThan(new Date()),
-      },
-      order: { createdAt: 'DESC' },
+    // Lock verification and consumption together. Concurrent callers must not
+    // both spend one code, or lose failed-attempt increments by saving stale rows.
+    const valid = await this.dataSource.transaction(async (manager) => {
+      await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`otp:${phoneHash}`]);
+      const otpRepo = manager.getRepository(OtpChallenge);
+      const challenge = await otpRepo.findOne({
+        where: {
+          phoneHash,
+        },
+        order: { createdAt: 'DESC' },
+        lock: { mode: 'pessimistic_write' },
+      });
+
+      if (!challenge || challenge.consumedAt || challenge.expiresAt <= new Date()) {
+        throw new BadRequestException('No active verification challenge found or code has expired');
+      }
+      if (challenge.attemptCount >= challenge.maxAttempts) {
+        throw new BadRequestException(
+          'Maximum verification attempts exceeded. Please request a new code',
+        );
+      }
+      challenge.attemptCount += 1;
+      const matches = sha256(dto.code) === challenge.codeHash;
+      if (matches) challenge.consumedAt = new Date();
+      await otpRepo.save(challenge);
+      return matches;
     });
-
-    if (!challenge) {
-      throw new BadRequestException('No active verification challenge found or code has expired');
-    }
-
-    if (challenge.attemptCount >= challenge.maxAttempts) {
-      throw new BadRequestException(
-        'Maximum verification attempts exceeded. Please request a new code',
-      );
-    }
-
-    // 2. Validate code
-    challenge.attemptCount += 1;
-    const inputHash = sha256(dto.code);
-
-    if (inputHash !== challenge.codeHash) {
-      await this.otpRepo.save(challenge);
-      throw new UnauthorizedException('Invalid verification code');
-    }
-
-    // Consume challenge
-    challenge.consumedAt = new Date();
-    await this.otpRepo.save(challenge);
+    // Throw after commit so a wrong code still spends an attempt.
+    if (!valid) throw new UnauthorizedException('Invalid verification code');
 
     // 3. User lookup or onboarding in atomic transaction
     let user: User;

@@ -136,3 +136,11 @@ review. It needs separate transactional and retry-recovery work. No claim is mad
 See [the integration report](FLUTTER_API_INTEGRATION_2026-11-01.md) for the earlier 16 live Dart HTTP checks and
 [Flutter live API notes](../apps/mobile/time_bank/LIVE_API.md) for configuration. The nested Flutter repository is
 maintained separately and is not included in the parent repository's Git tree.
+
+## Reliability audit — 2 November 2026
+
+OTP issuance/verification now serialize per phone; concurrent callers cannot reuse one code or bypass the attempt
+budget/cooldown, and earlier codes are not revived after resending. Flutter discards responses from obsolete sessions,
+and clearing volunteer ward preferences now sends an empty list. See [the bug audit](BUG_AUDIT_2026-11-02.md) for
+reproductions, validation and remaining production/recovery risks. This follow-up passed 460 backend tests, 59
+PostgreSQL integration tests, 20 dashboard tests and 56 Flutter tests.
