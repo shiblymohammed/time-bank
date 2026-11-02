@@ -400,7 +400,7 @@ export function CoordinatorRequests({
       )}
       {!list && !error && <p role="status">Loading requests…</p>}
       {list && (
-        <div className="table-container">
+        <div className="table-container glass-panel">
           <table className="custom-table">
             <thead>
               <tr>

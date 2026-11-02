@@ -273,7 +273,7 @@ export function ServiceCatalogue({
       {!data && !error && <p role="status">Loading service catalogue…</p>}
       {data && (
         <>
-          <div className="table-container">
+          <div className="table-container glass-panel">
             <table className="custom-table">
               <thead>
                 <tr>

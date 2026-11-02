@@ -1,10 +1,12 @@
 'use client';
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { Action } from '@/lib/admin-types';
 import { CoordinatorRequests } from '@/components/coordinator-requests';
 import { ServiceCatalogue } from '@/components/service-catalogue';
 import { ServiceOperations } from '@/components/service-operations';
 import { ApiManagement } from '@/components/api-management';
+import { BrandMark, Icon, type IconName } from '@/components/icons';
 import { api, ApiError, backend } from '@/lib/api';
 
 type Tab =
@@ -38,6 +40,9 @@ type Membership = {
     };
   };
 };
+/** "+919876543210" reads as "+91 98765 43210"; other numbers are left as stored. */
+const phone = (value?: string) =>
+  value && /^\+91\d{10}$/.test(value) ? `+91 ${value.slice(3, 8)} ${value.slice(8)}` : value;
 const listed = (values: string[] = []) =>
   values.length ? values.map((value) => label(value)).join(', ') : 'Not given';
 type Profile = {
@@ -94,6 +99,74 @@ const empty = (): View => ({
   metrics: null,
   total: 0,
 });
+const PAGES: {
+  id: Tab;
+  text: string;
+  icon: IconName;
+  group: string;
+  description: string;
+  centralOnly?: boolean;
+}[] = [
+  {
+    id: 'overview',
+    text: 'Overview',
+    icon: 'overview',
+    group: 'General',
+    description: 'Platform-wide totals across all organizations',
+    centralOnly: true,
+  },
+  {
+    id: 'organizations',
+    text: 'Organizations',
+    icon: 'organizations',
+    group: 'General',
+    description: 'Organizations, their status and branding',
+  },
+  {
+    id: 'memberships',
+    text: 'Memberships',
+    icon: 'memberships',
+    group: 'Community',
+    description: 'Review applications and manage member roles',
+  },
+  {
+    id: 'requests',
+    text: 'Requests & matching',
+    icon: 'requests',
+    group: 'Community',
+    description: 'Help requests and volunteer matching',
+  },
+  {
+    id: 'catalogue',
+    text: 'Service catalogue',
+    icon: 'catalogue',
+    group: 'Services',
+    description: 'Services members can offer and request',
+  },
+  {
+    id: 'operations',
+    text: 'Service operations',
+    icon: 'operations',
+    group: 'Services',
+    description: 'Bookings, completions and time credits',
+  },
+  {
+    id: 'restrictions',
+    text: 'Restrictions',
+    icon: 'restrictions',
+    group: 'Governance',
+    description: 'Account restrictions across the platform',
+    centralOnly: true,
+  },
+  {
+    id: 'audit',
+    text: 'Audit trail',
+    icon: 'audit',
+    group: 'Governance',
+    description: 'Server-recorded events',
+    centralOnly: true,
+  },
+];
 const OPERATIONS = ['VOLUNTEER', 'BENEFICIARY', 'CAREGIVER', 'MERCHANT'];
 const STAFF = ['COORDINATOR', 'MUNICIPALITY_ADMIN', 'SUPER_ADMIN'];
 const approved = (profile: Profile) =>
@@ -125,12 +198,11 @@ function SignIn({ onSignedIn }: { onSignedIn: (profile: Profile) => void }) {
   return (
     <main className="login-shell">
       <section className="glass-panel login-panel">
-        <div className="brand-icon">ITB</div>
-        <h1>Administration sign in</h1>
-        <p>
-          Use your registered mobile number. Your current organization permissions determine
-          dashboard access.
-        </p>
+        <div className="brand-icon">
+          <BrandMark />
+        </div>
+        <h1>Sign in to Indian Time Bank</h1>
+        <p>Administration for coordinators and organization staff.</p>
         <form
           className="stack"
           onSubmit={async (event) => {
@@ -168,6 +240,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (profile: Profile) => void }) {
               className="form-input"
               autoComplete="tel"
               type="tel"
+              placeholder="10-digit mobile number"
               required
               pattern="(\+[1-9][0-9]{7,14}|[6-9][0-9]{9})"
               value={phone}
@@ -283,6 +356,9 @@ function ActionDialog({
             {action.fields.map((field) => (
               <label key={field.key}>
                 {field.label}
+                {field.optional && field.type !== 'checkbox' && (
+                  <span className="optional"> · Optional</span>
+                )}
                 {field.type === 'checkbox' ? (
                   <input
                     type="checkbox"
@@ -337,7 +413,7 @@ function ActionDialog({
               Cancel
             </button>
             <button className="btn btn-primary" disabled={busy}>
-              {busy ? 'Saving…' : 'Save changes'}
+              {busy ? 'Saving…' : (action.submitLabel ?? 'Save')}
             </button>
           </div>
         </form>
@@ -374,25 +450,12 @@ export default function AdminDashboard(): React.JSX.Element {
     ...(canManageRoles ? ['COORDINATOR'] : []),
     ...(isGlobal ? ['MUNICIPALITY_ADMIN'] : []),
   ];
-  const tabs: { id: Tab; text: string }[] = isGlobal
-    ? [
-        { id: 'overview', text: 'Overview' },
-        { id: 'organizations', text: 'Organizations' },
-        { id: 'memberships', text: 'Memberships' },
-        { id: 'requests', text: 'Requests & matching' },
-        { id: 'catalogue', text: 'Service catalogue' },
-        { id: 'operations', text: 'Service operations' },
-        { id: 'restrictions', text: 'Global restrictions' },
-        { id: 'audit', text: 'Audit trail' },
-      ]
-    : [
-        { id: 'organizations', text: 'Organizations' },
-        { id: 'memberships', text: 'Memberships' },
-        { id: 'requests', text: 'Requests & matching' },
-        { id: 'catalogue', text: 'Service catalogue' },
-        { id: 'operations', text: 'Service operations' },
-      ];
+  const tabs = PAGES.filter((page) => isGlobal || !page.centralOnly);
   const selectedOrg = organizations.find((organization) => organization.id === tenant);
+  const page = tabs.find((item) => item.id === tab);
+  const shownOrgs = organizations.filter(
+    (organization) => tenant === 'GLOBAL' || organization.id === tenant,
+  );
   function signedIn(next: Profile) {
     epoch.current++;
     setProfile(next);
@@ -574,33 +637,47 @@ export default function AdminDashboard(): React.JSX.Element {
     );
   return (
     <div className="app-container">
-      <aside className="sidebar" inert={action !== null}>
+      <aside className="sidebar" inert={action !== null || detail !== null}>
         <div className="brand-badge">
-          <div className="brand-icon">ITB</div>
+          <div className="brand-icon">
+            <BrandMark />
+          </div>
           <div>
             <div className="brand-title">Indian Time Bank</div>
             <div className="brand-subtitle">Administration</div>
           </div>
         </div>
         <nav className="nav-group" aria-label="Dashboard">
-          {tabs.map((item) => (
-            <button
-              key={item.id}
-              id={`nav-${item.id}`}
-              className={`nav-item ${tab === item.id ? 'active' : ''}`}
-              aria-current={tab === item.id ? 'page' : undefined}
-              disabled={pending}
-              onClick={() => changeTab(item.id)}
-            >
-              {item.text}
-            </button>
+          {tabs.map((item, index) => (
+            <React.Fragment key={item.id}>
+              {tabs[index - 1]?.group !== item.group && (
+                <div className="nav-section">{item.group}</div>
+              )}
+              <button
+                id={`nav-${item.id}`}
+                className={`nav-item ${tab === item.id ? 'active' : ''}`}
+                aria-current={tab === item.id ? 'page' : undefined}
+                disabled={pending}
+                onClick={() => changeTab(item.id)}
+              >
+                <Icon name={item.icon} />
+                {item.text}
+              </button>
+            </React.Fragment>
           ))}
         </nav>
         <div className="sidebar-footer">
-          <p>{profile.phoneE164}</p>
-          <p>{isGlobal ? 'Central administrator' : 'Organization staff'}</p>
+          <div className="avatar" aria-hidden="true">
+            {profile.phoneE164.slice(-2)}
+          </div>
+          <div className="user-meta">
+            <p>{phone(profile.phoneE164)}</p>
+            <p>{isGlobal ? 'Central administrator' : 'Organization staff'}</p>
+          </div>
           <button
-            className="btn btn-secondary"
+            className="icon-button"
+            title="Sign out"
+            aria-label="Sign out"
             disabled={pending}
             onClick={async () => {
               setPending(true);
@@ -615,51 +692,61 @@ export default function AdminDashboard(): React.JSX.Element {
               }
             }}
           >
-            Sign out
+            <Icon name="logout" />
           </button>
         </div>
       </aside>
-      <div className="main-wrapper" inert={action !== null}>
+      <div className="main-wrapper" inert={action !== null || detail !== null}>
         <header className="top-bar">
-          <label className="scope-label">
-            Organization scope
-            <select
-              id="tenant-select"
-              className="form-input"
-              value={tab === 'overview' || tab === 'restrictions' ? 'GLOBAL' : tenant}
-              disabled={pending || tab === 'overview' || tab === 'restrictions'}
-              onChange={(event) => changeScope(event.target.value)}
+          <div className="page-title">
+            <h1>{page?.text}</h1>
+            <p>{page?.description}</p>
+          </div>
+          <div className="top-actions">
+            {/* Overview and restrictions always cover every organization. */}
+            {tab !== 'overview' && tab !== 'restrictions' && (
+              <label className="scope-label">
+                Organization
+                <select
+                  id="tenant-select"
+                  className="form-input"
+                  value={tenant}
+                  disabled={pending}
+                  onChange={(event) => changeScope(event.target.value)}
+                >
+                  {isGlobal && <option value="GLOBAL">All organizations</option>}
+                  {organizations.map((organization) => (
+                    <option key={organization.id} value={organization.id}>
+                      {organization.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <button
+              className="btn btn-secondary"
+              title="Reload from the server"
+              disabled={pending || loading}
+              onClick={async () => {
+                setPending(true);
+                setNotice('');
+                try {
+                  signedIn(await api<Profile>('/api/session'));
+                  setRevision((value) => value + 1);
+                } catch (cause) {
+                  if (cause instanceof ApiError && [401, 403].includes(cause.status)) expired();
+                  else setError(cause instanceof Error ? cause.message : 'Unable to refresh');
+                } finally {
+                  setPending(false);
+                }
+              }}
             >
-              {isGlobal && <option value="GLOBAL">All organizations</option>}
-              {organizations.map((organization) => (
-                <option key={organization.id} value={organization.id}>
-                  {organization.name} ({organization.code})
-                </option>
-              ))}
-            </select>
-          </label>
-          <button
-            className="btn btn-secondary"
-            disabled={pending || loading}
-            onClick={async () => {
-              setPending(true);
-              setNotice('');
-              try {
-                signedIn(await api<Profile>('/api/session'));
-                setRevision((value) => value + 1);
-              } catch (cause) {
-                if (cause instanceof ApiError && [401, 403].includes(cause.status)) expired();
-                else setError(cause instanceof Error ? cause.message : 'Unable to refresh');
-              } finally {
-                setPending(false);
-              }
-            }}
-          >
-            Refresh
-          </button>
+              <Icon name="refresh" />
+              Refresh
+            </button>
+          </div>
         </header>
         <main className="content-body" aria-busy={loading || pending}>
-          <h1>{tabs.find((item) => item.id === tab)?.text}</h1>
           {error && (
             <p className="error-message" role="alert">
               {error}
@@ -670,32 +757,61 @@ export default function AdminDashboard(): React.JSX.Element {
               {notice}
             </p>
           )}
-          {loading && <p role="status">Loading live records…</p>}
-          {tab === 'overview' && (
-            <>
-              <p className="section-description">Platform-wide totals across all organizations.</p>
-              {view.metrics && (
-                <div className="metric-grid">
-                  {[
-                    ['Registered users', view.metrics.totalUsers],
-                    ['Organizations', view.metrics.totalOrganizations],
-                    ['Active organizations', view.metrics.activeOrganizations],
-                    ['Time wallets', view.metrics.totalUniversalWallets],
-                    ['Time credits', view.metrics.totalBalanceCredits],
-                    ['Pending memberships', view.metrics.pendingMemberships],
-                  ].map(([name, value]) => (
-                    <section className="glass-panel metric-card" key={name}>
-                      <div className="metric-label">{name}</div>
-                      <div className="metric-value">{value}</div>
-                    </section>
-                  ))}
+          {loading && (
+            <p className="loading-line" role="status">
+              Loading…
+            </p>
+          )}
+          {tab === 'overview' && view.metrics && (
+            <div className="metric-grid">
+              {(
+                [
+                  ['Registered users', view.metrics.totalUsers, 'users'],
+                  ['Organizations', view.metrics.totalOrganizations, 'organizations'],
+                  ['Active organizations', view.metrics.activeOrganizations, 'check'],
+                  ['Time wallets', view.metrics.totalUniversalWallets, 'wallet'],
+                  ['Time credits', view.metrics.totalBalanceCredits, 'clock'],
+                ] as const
+              ).map(([name, value, icon]) => (
+                <section className="glass-panel metric-card" key={name}>
+                  <div>
+                    <div className="metric-label">{name}</div>
+                    <div className="metric-value">{value}</div>
+                  </div>
+                  <div className="metric-icon">
+                    <Icon name={icon} />
+                  </div>
+                </section>
+              ))}
+              <section
+                className={`glass-panel metric-card ${view.metrics.pendingMemberships ? 'attention' : ''}`}
+              >
+                <div>
+                  <div className="metric-label">Pending memberships</div>
+                  <div className="metric-value">{view.metrics.pendingMemberships}</div>
+                  {view.metrics.pendingMemberships > 0 && (
+                    <button
+                      className="metric-link"
+                      onClick={() => {
+                        changeTab('memberships');
+                        setStatus('PENDING_REVIEW');
+                      }}
+                    >
+                      Review applications →
+                    </button>
+                  )}
                 </div>
-              )}
-            </>
+                <div className="metric-icon">
+                  <Icon name="inbox" />
+                </div>
+              </section>
+            </div>
           )}
           {tab === 'requests' &&
             (tenant === 'GLOBAL' ? (
-              <p className="empty-state">Select an organization to review requests and matching.</p>
+              <p className="glass-panel empty-state">
+                Choose an organization above to see its requests and matching.
+              </p>
             ) : (
               <CoordinatorRequests
                 key={tenant}
@@ -741,7 +857,9 @@ export default function AdminDashboard(): React.JSX.Element {
           {tab === 'organizations' && (
             <>
               <div className="section-heading">
-                <p>Organizations and their current branding.</p>
+                <p>
+                  {shownOrgs.length} organization{shownOrgs.length === 1 ? '' : 's'}
+                </p>
                 {isGlobal && (
                   <button
                     className="btn btn-primary"
@@ -792,6 +910,7 @@ export default function AdminDashboard(): React.JSX.Element {
                       })
                     }
                   >
+                    <Icon name="plus" />
                     Create organization
                   </button>
                 )}
@@ -803,118 +922,130 @@ export default function AdminDashboard(): React.JSX.Element {
                       <th>Organization</th>
                       <th>District</th>
                       <th>Status</th>
-                      <th>Branding</th>
-                      <th>Actions</th>
+                      <th>App branding</th>
+                      <th>
+                        <span className="sr-only">Actions</span>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {organizations
-                      .filter((organization) => tenant === 'GLOBAL' || organization.id === tenant)
-                      .map((organization) => (
-                        <tr key={organization.id}>
-                          <td>
-                            {organization.name}
-                            <div className="help-text">{organization.code}</div>
-                          </td>
-                          <td>
-                            {organization.district}
-                            <div className="help-text">{label(organization.type)}</div>
-                          </td>
-                          <td>
-                            <Badge value={organization.status} />
-                          </td>
-                          <td>
-                            {organization.branding?.appDisplayName ?? 'Not configured'}
-                            <div>
-                              {organization.branding?.primaryColor} /{' '}
-                              {organization.branding?.secondaryColor}
+                    {shownOrgs.map((organization) => (
+                      <tr key={organization.id}>
+                        <td className="primary-cell">
+                          {organization.name}
+                          <div className="mono">{organization.code}</div>
+                        </td>
+                        <td>
+                          {organization.district}
+                          <div className="help-text">{label(organization.type)}</div>
+                        </td>
+                        <td>
+                          <Badge value={organization.status} />
+                        </td>
+                        <td>
+                          {organization.branding ? (
+                            <div className="branding-cell">
+                              <span
+                                className="swatch"
+                                style={{ background: organization.branding.primaryColor }}
+                                title={organization.branding.primaryColor}
+                              />
+                              <span
+                                className="swatch"
+                                style={{ background: organization.branding.secondaryColor }}
+                                title={organization.branding.secondaryColor}
+                              />
+                              {organization.branding.appDisplayName}
                             </div>
-                          </td>
-                          <td>
-                            <div className="action-row">
-                              {isGlobal && (
-                                <button
-                                  className="btn btn-secondary"
-                                  disabled={pending}
-                                  onClick={() => setManaged(organization.id)}
-                                >
-                                  Settings & app builds
-                                </button>
-                              )}
-                              {isGlobal && (
-                                <button
-                                  className="btn btn-secondary"
-                                  disabled={pending}
-                                  onClick={() =>
-                                    openAction({
-                                      title: `Change status: ${organization.name}`,
-                                      fields: [
-                                        {
-                                          key: 'status',
-                                          label: 'Status',
-                                          options: ['ACTIVE', 'DRAFT', 'SUSPENDED', 'ARCHIVED'],
-                                          value: organization.status,
-                                        },
-                                        { key: 'reason', label: 'Reason' },
-                                      ],
-                                      submit: (values) =>
-                                        backend(
-                                          `/admin/organizations/${organization.id}/status`,
-                                          'PATCH',
-                                          values,
-                                        ),
-                                    })
-                                  }
-                                >
-                                  Change status
-                                </button>
-                              )}
-                              {(isGlobal ||
-                                (organization.id === tenant &&
-                                  localRoles.includes('MUNICIPALITY_ADMIN'))) && (
-                                <button
-                                  className="btn btn-secondary"
-                                  disabled={pending}
-                                  onClick={() =>
-                                    openAction({
-                                      title: `Edit branding: ${organization.name}`,
-                                      fields: [
-                                        {
-                                          key: 'appDisplayName',
-                                          label: 'App display name',
-                                          value:
-                                            organization.branding?.appDisplayName ??
-                                            organization.name,
-                                        },
-                                        {
-                                          key: 'primaryColor',
-                                          label: 'Primary color',
-                                          type: 'color',
-                                          value: organization.branding?.primaryColor ?? '#0D5C75',
-                                        },
-                                        {
-                                          key: 'secondaryColor',
-                                          label: 'Secondary color',
-                                          type: 'color',
-                                          value: organization.branding?.secondaryColor ?? '#F59E0B',
-                                        },
-                                      ],
-                                      submit: (values) =>
-                                        backend(
-                                          `/v1/organizations/${organization.id}/branding`,
-                                          'PUT',
-                                          values,
-                                        ),
-                                    })
-                                  }
-                                >
-                                  Edit branding
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                          ) : (
+                            <span className="help-text">Not configured</span>
+                          )}
+                        </td>
+                        <td>
+                          <div className="action-row">
+                            {isGlobal && (
+                              <button
+                                className="btn btn-secondary"
+                                disabled={pending}
+                                onClick={() => setManaged(organization.id)}
+                              >
+                                Settings & app builds
+                              </button>
+                            )}
+                            {isGlobal && (
+                              <button
+                                className="btn btn-secondary"
+                                disabled={pending}
+                                onClick={() =>
+                                  openAction({
+                                    title: `Change status: ${organization.name}`,
+                                    fields: [
+                                      {
+                                        key: 'status',
+                                        label: 'Status',
+                                        options: ['ACTIVE', 'DRAFT', 'SUSPENDED', 'ARCHIVED'],
+                                        value: organization.status,
+                                      },
+                                      { key: 'reason', label: 'Reason' },
+                                    ],
+                                    submit: (values) =>
+                                      backend(
+                                        `/admin/organizations/${organization.id}/status`,
+                                        'PATCH',
+                                        values,
+                                      ),
+                                  })
+                                }
+                              >
+                                Change status
+                              </button>
+                            )}
+                            {(isGlobal ||
+                              (organization.id === tenant &&
+                                localRoles.includes('MUNICIPALITY_ADMIN'))) && (
+                              <button
+                                className="btn btn-secondary"
+                                disabled={pending}
+                                onClick={() =>
+                                  openAction({
+                                    title: `Edit branding: ${organization.name}`,
+                                    fields: [
+                                      {
+                                        key: 'appDisplayName',
+                                        label: 'App display name',
+                                        value:
+                                          organization.branding?.appDisplayName ??
+                                          organization.name,
+                                      },
+                                      {
+                                        key: 'primaryColor',
+                                        label: 'Primary color',
+                                        type: 'color',
+                                        value: organization.branding?.primaryColor ?? '#0D5C75',
+                                      },
+                                      {
+                                        key: 'secondaryColor',
+                                        label: 'Secondary color',
+                                        type: 'color',
+                                        value: organization.branding?.secondaryColor ?? '#F59E0B',
+                                      },
+                                    ],
+                                    submit: (values) =>
+                                      backend(
+                                        `/v1/organizations/${organization.id}/branding`,
+                                        'PUT',
+                                        values,
+                                      ),
+                                  })
+                                }
+                              >
+                                Edit branding
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -923,13 +1054,14 @@ export default function AdminDashboard(): React.JSX.Element {
           {tab === 'memberships' && (
             <>
               {tenant === 'GLOBAL' ? (
-                <p className="empty-state">Select an organization to review its memberships.</p>
+                <p className="glass-panel empty-state">
+                  Choose an organization above to review its memberships.
+                </p>
               ) : (
                 <>
-                  <div className="section-heading">
-                    <p>Memberships in {selectedOrg?.name ?? 'the selected organization'}.</p>
+                  <div className="toolbar">
                     <label>
-                      Membership status
+                      Status
                       <select
                         className="form-input"
                         disabled={pending}
@@ -956,229 +1088,307 @@ export default function AdminDashboard(): React.JSX.Element {
                         <tr>
                           <th>Member</th>
                           <th>Status</th>
-                          <th>Membership number</th>
-                          <th>Active roles</th>
-                          <th>Actions</th>
+                          <th>Membership no.</th>
+                          <th>Roles</th>
+                          <th>
+                            <span className="sr-only">Actions</span>
+                          </th>
                         </tr>
                       </thead>
                       <tbody>
                         {view.memberships.map((member) => (
                           <tr key={member.id}>
                             <td>
-                              {member.user?.phoneE164 ?? member.userId}
-                              <div className="help-text">{member.userId}</div>
+                              {phone(member.user?.phoneE164) ?? 'Unknown number'}
+                              <div className="mono">{member.userId.slice(0, 8)}</div>
                             </td>
                             <td>
                               <Badge value={member.status} />
                             </td>
-                            <td>{member.membershipNumber ?? 'Awaiting approval'}</td>
+                            <td>
+                              {member.membershipNumber ?? (
+                                <span className="help-text">Not assigned</span>
+                              )}
+                            </td>
                             <td>
                               {member.roleGrants
                                 .filter((grant) => grant.status === 'ACTIVE')
                                 .map((grant) => label(grant.role))
-                                .join(', ') || 'None'}
+                                .join(', ') || <span className="help-text">None</span>}
                             </td>
                             <td>
                               <button
-                                className="btn btn-secondary"
+                                className={`btn btn-sm ${['APPLIED', 'PENDING_REVIEW'].includes(member.status) ? 'btn-primary' : 'btn-secondary'}`}
                                 disabled={pending}
                                 onClick={() => review(member)}
                               >
-                                Review membership
+                                {['APPLIED', 'PENDING_REVIEW'].includes(member.status)
+                                  ? 'Review'
+                                  : 'View'}
                               </button>
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
+                    {!loading && !error && view.total === 0 && (
+                      <p className="empty-state">No memberships match this filter.</p>
+                    )}
                   </div>
-                  {!loading && !error && view.total === 0 && (
-                    <p className="empty-state">No memberships match this scope.</p>
-                  )}
                 </>
               )}
-              {detail && (
-                <section className="glass-panel detail-panel">
-                  <div className="section-heading">
-                    <h2>Membership review</h2>
-                    <button
-                      className="btn btn-secondary"
-                      disabled={pending}
-                      onClick={() => setDetail(null)}
+              {detail &&
+                // Rendered on <body> so it stays usable while the page behind is inert.
+                createPortal(
+                  <>
+                    <div className="drawer-backdrop" onClick={() => !pending && setDetail(null)} />
+                    <aside
+                      className="drawer"
+                      role="dialog"
+                      aria-modal="true"
+                      aria-labelledby="membership-title"
+                      inert={action !== null}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape' && !pending) setDetail(null);
+                      }}
                     >
-                      Close review
-                    </button>
-                  </div>
-                  <p>{detail.membership.user?.phoneE164 ?? detail.membership.userId}</p>
-                  <p>
-                    User ID: <code>{detail.membership.userId}</code>
-                  </p>
-                  <p>
-                    <Badge value={detail.membership.status} /> {detail.membership.membershipNumber}
-                  </p>
-                  {detail.membership.rejectionReason && (
-                    <p>Rejection reason: {detail.membership.rejectionReason}</p>
-                  )}
-                  <h3>Application</h3>
-                  <p>
-                    Asked to join as:{' '}
-                    {detail.membership.requestedRole
-                      ? label(detail.membership.requestedRole)
-                      : 'Not stated'}
-                  </p>
-                  {detail.membership.applicationNotes && (
-                    <p>Applicant note: {detail.membership.applicationNotes}</p>
-                  )}
-                  {detail.membership.applicationDetails?.volunteer && (
-                    <ul className="help-text">
-                      <li>
-                        Travels up to{' '}
-                        {detail.membership.applicationDetails.volunteer.maxTravelRadiusKm} km
-                        {detail.membership.applicationDetails.volunteer.availableAtShortNotice
-                          ? ', available at short notice'
-                          : ''}
-                      </li>
-                      <li>
-                        Usual days:{' '}
-                        {listed(detail.membership.applicationDetails.volunteer.usualDays)}
-                      </li>
-                      <li>
-                        Usual times:{' '}
-                        {listed(detail.membership.applicationDetails.volunteer.usualTimes)}
-                      </li>
-                      <li>
-                        Claimed skills (verify each after approval):{' '}
-                        {listed(detail.membership.applicationDetails.volunteer.skillCodes)}
-                      </li>
-                    </ul>
-                  )}
-                  {['APPLIED', 'PENDING_REVIEW'].includes(detail.membership.status) && (
-                    <div className="action-row">
-                      <button
-                        className="btn btn-success"
-                        onClick={() =>
-                          openAction({
-                            title: 'Approve membership',
-                            description:
-                              'Choose the initial role after reviewing the application and supporting documents.',
-                            fields: [
-                              {
-                                key: 'initialRole',
-                                label: 'Initial role',
-                                options: initialRoles,
-                                ...(detail.membership.requestedRole &&
-                                initialRoles.includes(detail.membership.requestedRole)
-                                  ? { value: detail.membership.requestedRole }
-                                  : {}),
-                              },
-                              { key: 'notes', label: 'Approval notes', optional: true },
-                            ],
-                            submit: (values) =>
-                              backend(`${membershipBase}/approve`, 'POST', values),
-                          })
-                        }
-                      >
-                        Approve membership
-                      </button>
-                      <button
-                        className="btn btn-danger"
-                        onClick={() =>
-                          openAction({
-                            title: 'Reject membership',
-                            fields: [{ key: 'reason', label: 'Rejection reason' }],
-                            submit: (values) => backend(`${membershipBase}/reject`, 'POST', values),
-                          })
-                        }
-                      >
-                        Reject membership
-                      </button>
-                    </div>
-                  )}
-                  <h3>Supporting documents</h3>
-                  {detail.documents.length === 0 && <p>No supporting documents submitted.</p>}
-                  {detail.documents.map((document) => (
-                    <div className="document-row" key={document.id}>
-                      <div>
-                        {label(document.documentType)} <Badge value={document.reviewStatus} />
-                        <div className="help-text">Storage reference: {document.storageKey}</div>
+                      <div className="drawer-header">
+                        <div>
+                          <h2 id="membership-title">
+                            {phone(detail.membership.user?.phoneE164) ?? 'Membership'}
+                          </h2>
+                          <p>
+                            <Badge value={detail.membership.status} />{' '}
+                            {detail.membership.membershipNumber}
+                          </p>
+                        </div>
+                        <button
+                          className="icon-button"
+                          aria-label="Close review"
+                          title="Close"
+                          disabled={pending}
+                          autoFocus
+                          onClick={() => setDetail(null)}
+                        >
+                          <Icon name="close" />
+                        </button>
                       </div>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() =>
-                          openAction({
-                            title: 'Review document',
-                            fields: [
-                              {
-                                key: 'status',
-                                label: 'Review decision',
-                                options: ['APPROVED', 'REJECTED'],
-                              },
-                              { key: 'notes', label: 'Review notes', optional: true },
-                            ],
-                            submit: (values) =>
-                              backend(
-                                `/organizations/${detail.membership.organizationId}/memberships/documents/${document.id}/review`,
-                                'PATCH',
-                                values,
-                              ),
-                          })
-                        }
-                      >
-                        Review document
-                      </button>
-                    </div>
-                  ))}
-                  <h3>Active roles</h3>
-                  {detail.membership.roleGrants
-                    .filter((grant) => grant.status === 'ACTIVE')
-                    .map((grant) => (
-                      <div className="document-row" key={grant.id}>
-                        {label(grant.role)}
-                        {canManageRoles &&
-                          grant.role !== 'SUPER_ADMIN' &&
-                          (isGlobal || grant.role !== 'MUNICIPALITY_ADMIN') && (
-                            <button
-                              className="btn btn-danger"
-                              onClick={() =>
-                                openAction({
-                                  title: `Revoke ${label(grant.role)} role`,
-                                  fields: [{ key: 'reason', label: 'Revocation reason' }],
-                                  submit: (values) =>
-                                    backend(
-                                      `${membershipBase}/roles/${grant.id}`,
-                                      'DELETE',
-                                      values,
-                                    ),
-                                })
-                              }
-                            >
-                              Revoke {label(grant.role)}
-                            </button>
+                      <div className="drawer-body">
+                        <section className="drawer-section">
+                          <h3>Application</h3>
+                          <dl className="facts">
+                            <dt>Asked to join as</dt>
+                            <dd>
+                              {detail.membership.requestedRole
+                                ? label(detail.membership.requestedRole)
+                                : 'Not stated'}
+                            </dd>
+                            {detail.membership.applicationNotes && (
+                              <>
+                                <dt>Applicant note</dt>
+                                <dd>{detail.membership.applicationNotes}</dd>
+                              </>
+                            )}
+                            {detail.membership.applicationDetails?.volunteer && (
+                              <>
+                                <dt>Travel</dt>
+                                <dd>
+                                  Up to{' '}
+                                  {detail.membership.applicationDetails.volunteer.maxTravelRadiusKm}{' '}
+                                  km
+                                  {detail.membership.applicationDetails.volunteer
+                                    .availableAtShortNotice
+                                    ? ', available at short notice'
+                                    : ''}
+                                </dd>
+                                <dt>Usual days</dt>
+                                <dd>
+                                  {listed(detail.membership.applicationDetails.volunteer.usualDays)}
+                                </dd>
+                                <dt>Usual times</dt>
+                                <dd>
+                                  {listed(
+                                    detail.membership.applicationDetails.volunteer.usualTimes,
+                                  )}
+                                </dd>
+                                <dt>Claimed skills</dt>
+                                <dd>
+                                  {listed(
+                                    detail.membership.applicationDetails.volunteer.skillCodes,
+                                  )}
+                                  <div className="help-text">Verify each skill after approval.</div>
+                                </dd>
+                              </>
+                            )}
+                            {detail.membership.rejectionReason && (
+                              <>
+                                <dt>Rejection reason</dt>
+                                <dd>{detail.membership.rejectionReason}</dd>
+                              </>
+                            )}
+                            <dt>User ID</dt>
+                            <dd className="mono">{detail.membership.userId}</dd>
+                          </dl>
+                        </section>
+                        <section className="drawer-section">
+                          <h3>Supporting documents</h3>
+                          {detail.documents.length === 0 && (
+                            <p className="help-text">No supporting documents submitted.</p>
                           )}
+                          {detail.documents.map((document) => (
+                            <div className="document-row" key={document.id}>
+                              <div>
+                                {label(document.documentType)}{' '}
+                                <Badge value={document.reviewStatus} />
+                                <div className="mono">{document.storageKey}</div>
+                              </div>
+                              <button
+                                className="btn btn-sm btn-secondary"
+                                onClick={() =>
+                                  openAction({
+                                    title: 'Review document',
+                                    fields: [
+                                      {
+                                        key: 'status',
+                                        label: 'Review decision',
+                                        options: ['APPROVED', 'REJECTED'],
+                                      },
+                                      { key: 'notes', label: 'Review notes', optional: true },
+                                    ],
+                                    submit: (values) =>
+                                      backend(
+                                        `/organizations/${detail.membership.organizationId}/memberships/documents/${document.id}/review`,
+                                        'PATCH',
+                                        values,
+                                      ),
+                                  })
+                                }
+                              >
+                                Review
+                              </button>
+                            </div>
+                          ))}
+                        </section>
+                        <section className="drawer-section">
+                          <div className="section-heading">
+                            <h3>Active roles</h3>
+                            {canManageRoles && detail.membership.status === 'APPROVED' && (
+                              <button
+                                className="btn btn-sm btn-secondary"
+                                onClick={() =>
+                                  openAction({
+                                    title: 'Grant organization role',
+                                    fields: [{ key: 'role', label: 'Role', options: initialRoles }],
+                                    submit: (values) =>
+                                      backend(`${membershipBase}/roles`, 'POST', values),
+                                  })
+                                }
+                              >
+                                <Icon name="plus" />
+                                Grant role
+                              </button>
+                            )}
+                          </div>
+                          {detail.membership.roleGrants.filter((grant) => grant.status === 'ACTIVE')
+                            .length === 0 && <p className="help-text">No active roles.</p>}
+                          {detail.membership.roleGrants
+                            .filter((grant) => grant.status === 'ACTIVE')
+                            .map((grant) => (
+                              <div className="document-row" key={grant.id}>
+                                {label(grant.role)}
+                                {canManageRoles &&
+                                  grant.role !== 'SUPER_ADMIN' &&
+                                  (isGlobal || grant.role !== 'MUNICIPALITY_ADMIN') && (
+                                    <button
+                                      className="btn btn-sm btn-danger"
+                                      onClick={() =>
+                                        openAction({
+                                          title: `Revoke ${label(grant.role)} role`,
+                                          fields: [{ key: 'reason', label: 'Revocation reason' }],
+                                          submit: (values) =>
+                                            backend(
+                                              `${membershipBase}/roles/${grant.id}`,
+                                              'DELETE',
+                                              values,
+                                            ),
+                                        })
+                                      }
+                                    >
+                                      Revoke
+                                    </button>
+                                  )}
+                              </div>
+                            ))}
+                        </section>
                       </div>
-                    ))}
-                  {canManageRoles && detail.membership.status === 'APPROVED' && (
-                    <button
-                      className="btn btn-secondary"
-                      onClick={() =>
-                        openAction({
-                          title: 'Grant organization role',
-                          fields: [{ key: 'role', label: 'Role', options: initialRoles }],
-                          submit: (values) => backend(`${membershipBase}/roles`, 'POST', values),
-                        })
-                      }
-                    >
-                      Grant role
-                    </button>
-                  )}
-                </section>
-              )}
+                      {['APPLIED', 'PENDING_REVIEW'].includes(detail.membership.status) && (
+                        <div className="drawer-footer">
+                          <button
+                            className="btn btn-danger"
+                            onClick={() =>
+                              openAction({
+                                title: 'Reject membership',
+                                submitLabel: 'Reject',
+                                fields: [{ key: 'reason', label: 'Rejection reason' }],
+                                submit: (values) =>
+                                  backend(`${membershipBase}/reject`, 'POST', values),
+                              })
+                            }
+                          >
+                            Reject
+                          </button>
+                          <button
+                            className="btn btn-success"
+                            onClick={() =>
+                              openAction({
+                                title: 'Approve membership',
+                                submitLabel: 'Approve',
+                                description:
+                                  'Choose the initial role after reviewing the application and supporting documents.',
+                                fields: [
+                                  {
+                                    key: 'initialRole',
+                                    label: 'Initial role',
+                                    options: initialRoles,
+                                    ...(detail.membership.requestedRole &&
+                                    initialRoles.includes(detail.membership.requestedRole)
+                                      ? { value: detail.membership.requestedRole }
+                                      : {}),
+                                  },
+                                  { key: 'notes', label: 'Approval notes', optional: true },
+                                ],
+                                submit: (values) =>
+                                  backend(`${membershipBase}/approve`, 'POST', values),
+                              })
+                            }
+                          >
+                            <Icon name="check" />
+                            Approve membership
+                          </button>
+                        </div>
+                      )}
+                    </aside>
+                  </>,
+                  document.body,
+                )}
             </>
           )}
           {tab === 'restrictions' && (
             <>
               <div className="section-heading">
-                <p>Restrictions apply across the entire platform.</p>
+                <label>
+                  Status
+                  <select
+                    className="form-input"
+                    value={status}
+                    disabled={pending}
+                    onChange={(event) => setStatus(event.target.value)}
+                  >
+                    <option value="">All statuses</option>
+                    <option value="ACTIVE">Active</option>
+                    <option value="RESOLVED">Resolved</option>
+                  </select>
+                </label>
                 <button
                   className="btn btn-primary"
                   disabled={pending}
@@ -1203,22 +1413,10 @@ export default function AdminDashboard(): React.JSX.Element {
                     })
                   }
                 >
+                  <Icon name="plus" />
                   Impose restriction
                 </button>
               </div>
-              <label>
-                Restriction status
-                <select
-                  className="form-input compact-filter"
-                  value={status}
-                  disabled={pending}
-                  onChange={(event) => setStatus(event.target.value)}
-                >
-                  <option value="">All statuses</option>
-                  <option value="ACTIVE">Active</option>
-                  <option value="RESOLVED">Resolved</option>
-                </select>
-              </label>
               <div className="table-container glass-panel">
                 <table className="custom-table">
                   <thead>
@@ -1234,8 +1432,8 @@ export default function AdminDashboard(): React.JSX.Element {
                     {view.restrictions.map((restriction) => (
                       <tr key={restriction.id}>
                         <td>
-                          {restriction.user?.phoneE164 ?? restriction.userId}
-                          <div className="help-text">{restriction.userId}</div>
+                          {phone(restriction.user?.phoneE164) ?? 'Unknown number'}
+                          <div className="mono">{restriction.userId}</div>
                         </td>
                         <td>{label(restriction.restrictionType)}</td>
                         <td>{restriction.reasonCode}</td>
@@ -1245,7 +1443,7 @@ export default function AdminDashboard(): React.JSX.Element {
                         <td>
                           {restriction.status === 'ACTIVE' && (
                             <button
-                              className="btn btn-secondary"
+                              className="btn btn-sm btn-secondary"
                               disabled={pending}
                               onClick={() =>
                                 openAction({
@@ -1260,7 +1458,7 @@ export default function AdminDashboard(): React.JSX.Element {
                                 })
                               }
                             >
-                              Resolve restriction
+                              Resolve
                             </button>
                           )}
                         </td>
@@ -1268,34 +1466,34 @@ export default function AdminDashboard(): React.JSX.Element {
                     ))}
                   </tbody>
                 </table>
+                {!loading && !error && view.restrictions.length === 0 && (
+                  <p className="empty-state">No restrictions match this filter.</p>
+                )}
               </div>
-              {!loading && !error && view.restrictions.length === 0 && (
-                <p className="empty-state">No restrictions match this filter.</p>
-              )}
             </>
           )}
           {tab === 'audit' && (
             <>
-              <p className="section-description">
-                Server-recorded events{' '}
-                {tenant === 'GLOBAL'
-                  ? 'across all organizations'
-                  : `for ${selectedOrg?.name ?? 'the selected organization'}`}
-                .
-              </p>
-              <label>
-                Event type
-                <input
-                  className="form-input compact-filter"
-                  value={eventType}
-                  placeholder="e.g. MEMBERSHIP_APPROVED"
-                  disabled={pending}
-                  onChange={(event) => {
-                    setEventType(event.target.value.trim().toUpperCase());
-                    setOffset(0);
-                  }}
-                />
-              </label>
+              <div className="toolbar">
+                <label>
+                  Event type
+                  <input
+                    className="form-input"
+                    value={eventType}
+                    placeholder="e.g. MEMBERSHIP_APPROVED"
+                    disabled={pending}
+                    onChange={(event) => {
+                      setEventType(event.target.value.trim().toUpperCase());
+                      setOffset(0);
+                    }}
+                  />
+                </label>
+                <p className="help-text">
+                  {tenant === 'GLOBAL'
+                    ? 'Showing events across all organizations.'
+                    : `Showing events for ${selectedOrg?.name ?? 'the selected organization'}.`}
+                </p>
+              </div>
               <div className="table-container glass-panel">
                 <table className="custom-table">
                   <thead>
@@ -1310,10 +1508,8 @@ export default function AdminDashboard(): React.JSX.Element {
                   <tbody>
                     {view.events.map((event) => (
                       <tr key={event.id}>
-                        <td>{event.eventType}</td>
-                        <td>
-                          <code>{event.actorId ?? 'System'}</code>
-                        </td>
+                        <td>{label(event.eventType)}</td>
+                        <td className="mono">{event.actorId?.slice(0, 8) ?? 'System'}</td>
                         <td>
                           {organizations.find(
                             (organization) => organization.id === event.organizationId,
@@ -1324,7 +1520,7 @@ export default function AdminDashboard(): React.JSX.Element {
                         <td>{new Date(event.createdAt).toLocaleString()}</td>
                         <td>
                           <details>
-                            <summary>View details</summary>
+                            <summary>Details</summary>
                             <pre>{JSON.stringify(event.payload, null, 2)}</pre>
                           </details>
                         </td>
@@ -1332,33 +1528,38 @@ export default function AdminDashboard(): React.JSX.Element {
                     ))}
                   </tbody>
                 </table>
+                {!loading && !error && view.total === 0 && (
+                  <p className="empty-state">No events match this scope and filter.</p>
+                )}
               </div>
-              {!loading && !error && view.total === 0 && (
-                <p className="empty-state">No events match this scope and filter.</p>
-              )}
             </>
           )}
-          {(tab === 'audit' || (tab === 'memberships' && tenant !== 'GLOBAL')) && (
-            <div className="pagination">
-              <span>
-                {view.total} records · Page {Math.floor(offset / 20) + 1}
-              </span>
-              <button
-                className="btn btn-secondary"
-                disabled={loading || pending || offset === 0}
-                onClick={() => setOffset((value) => Math.max(0, value - 20))}
-              >
-                Previous
-              </button>
-              <button
-                className="btn btn-secondary"
-                disabled={loading || pending || offset + 20 >= view.total}
-                onClick={() => setOffset((value) => value + 20)}
-              >
-                Next
-              </button>
-            </div>
-          )}
+          {(tab === 'audit' || (tab === 'memberships' && tenant !== 'GLOBAL')) &&
+            view.total > 0 && (
+              <div className="pagination">
+                <span>
+                  Showing {offset + 1}–{Math.min(offset + 20, view.total)} of {view.total}
+                </span>
+                <div className="action-row">
+                  <button
+                    className="btn btn-sm btn-secondary"
+                    disabled={loading || pending || offset === 0}
+                    onClick={() => setOffset((value) => Math.max(0, value - 20))}
+                  >
+                    <Icon name="chevronLeft" />
+                    Previous
+                  </button>
+                  <button
+                    className="btn btn-sm btn-secondary"
+                    disabled={loading || pending || offset + 20 >= view.total}
+                    onClick={() => setOffset((value) => value + 20)}
+                  >
+                    Next
+                    <Icon name="chevronRight" />
+                  </button>
+                </div>
+              </div>
+            )}
         </main>
       </div>
       {action && (

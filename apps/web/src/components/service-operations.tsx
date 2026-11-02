@@ -278,13 +278,12 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
     });
 
   return (
-    <section className="glass-panel" style={{ padding: 24 }} aria-busy={loading || busy}>
-      <h1>Service operations</h1>
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBlock: 20 }}>
+    <section className="glass-panel ops" aria-busy={loading || busy}>
+      <div className="ops-tabs" role="group" aria-label="Section">
         {['catalogue', 'beneficiaries', 'zones', 'profile'].map((tab) => (
           <button
             key={tab}
-            className={`btn ${section === tab ? 'btn-primary' : ''}`}
+            className="ops-tab"
             disabled={busy}
             aria-pressed={section === tab}
             onClick={() => {
@@ -296,15 +295,31 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
             {tab === 'zones' ? 'Zones & volunteers' : tab.charAt(0).toUpperCase() + tab.slice(1)}
           </button>
         ))}
+        <button
+          className="btn btn-sm btn-ghost ops-refresh"
+          disabled={busy || loading}
+          onClick={() => setRevision((v) => v + 1)}
+        >
+          Refresh
+        </button>
       </div>
-      {error && <p role="alert">{error}</p>}
-      {notice && <p role="status">{notice}</p>}
-      {loading && <p role="status">Loading live service data…</p>}
-      <button className="btn" disabled={busy || loading} onClick={() => setRevision((v) => v + 1)}>
-        Refresh
-      </button>
+      {error && (
+        <p role="alert" className="error-message">
+          {error}
+        </p>
+      )}
+      {notice && (
+        <p role="status" className="success-message">
+          {notice}
+        </p>
+      )}
+      {loading && (
+        <p role="status" className="loading-line">
+          Loading…
+        </p>
+      )}
       {!organizationId && section !== 'catalogue' && section !== 'profile' && (
-        <p>Select an active organization in Tenant Scope to manage {section}.</p>
+        <p className="empty-state">Choose an organization above to manage {section}.</p>
       )}
       {recordDetails && (
         <section aria-label="Record details" style={{ marginBlock: 16 }}>

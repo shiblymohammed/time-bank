@@ -16,6 +16,8 @@ export type Field = {
 export type Action = {
   title: string;
   description?: string;
+  /** Text on the confirm button; defaults to "Save". */
+  submitLabel?: string;
   fields: Field[];
   submit: (values: Record<string, string>) => Promise<unknown>;
   successMessage?: (result: unknown) => string;
