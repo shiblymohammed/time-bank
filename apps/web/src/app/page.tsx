@@ -710,8 +710,11 @@ export default function AdminDashboard(): React.JSX.Element {
                 await api('/api/session', 'DELETE');
                 expired();
               } catch (cause) {
-                if (cause instanceof ApiError && cause.status === 401) expired();
-                else setError(cause instanceof Error ? cause.message : 'Unable to sign out');
+                expired();
+                setError(
+                  'Signed out of this page. The server could not confirm session revocation. ' +
+                    (cause instanceof Error ? cause.message : 'Please try again when connected.'),
+                );
               } finally {
                 setPending(false);
               }

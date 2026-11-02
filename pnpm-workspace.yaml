@@ -18,3 +18,12 @@ allowBuilds:
   bcrypt: true
   protobufjs: true
   unrs-resolver: true
+
+# Compatible security patches; major framework migrations are reviewed separately.
+overrides:
+  'body-parser@^1.20.0': 1.20.9
+  'multer@^2.0.0': 2.5.0
+  'qs@^6.0.0': 6.16.1
+  'lodash@^4.0.0': 4.18.1
+  'postcss@^8.0.0': 8.5.23
+  'js-yaml@^4.0.0': 4.3.2

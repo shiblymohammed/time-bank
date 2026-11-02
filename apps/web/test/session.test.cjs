@@ -11,7 +11,8 @@ let server,
   proxy,
   gateway,
   calls = [],
-  revoked = new Set();
+  revoked = new Set(),
+  failLogout = false;
 function load(relative) {
   const filename = path.resolve(__dirname, '../src', relative);
   const loaded = new Module(filename, module);
@@ -69,6 +70,7 @@ before(async () => {
       return send(200, { accessToken: body.refreshToken.replace('refresh-', 'access-') });
     }
     if (req.url === '/api/auth/logout') {
+      if (failLogout) return send(503, { message: 'Logout service unavailable' });
       revoked.add(body.refreshToken);
       return send(200, { success: true });
     }
@@ -288,6 +290,23 @@ test('credit dashboard routes are allowlisted by method without exposing ledger 
     assert.equal(result.status, 404, `${method} ${path.join('/')}`);
   }
 });
+test('logout clears browser cookies even when upstream revocation fails', async () => {
+  const signed = await login();
+  failLogout = true;
+  try {
+    const response = await session.DELETE(request('DELETE', undefined, jar(signed)));
+    assert.equal(response.status, 503);
+    assert.equal(response.cookies.get('ktb_admin_access')?.maxAge, 0);
+    assert.equal(response.cookies.get('ktb_admin_refresh')?.maxAge, 0);
+  } finally { failLogout = false; }
+});
+test('rejected cross-origin logout does not alter session cookies', async () => {
+  const signed = await login();
+  const response = await session.DELETE(request('DELETE', undefined, jar(signed), 'https://foreign.test'));
+  assert.equal(response.status, 403);
+  assert.equal(response.cookies.getAll().length, 0);
+});
+
 test('logout revokes refresh and clears both cookies; a late access cookie alone cannot reopen a session', async () => {
   const signed = await login();
   const response = await session.DELETE(request('DELETE', undefined, jar(signed)));

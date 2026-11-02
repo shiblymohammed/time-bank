@@ -24,7 +24,7 @@ if ($LASTEXITCODE -ne 0) { throw 'QA database initialization failed' }
 if ($LASTEXITCODE -ne 0) { throw 'QA database startup failed' }
 @{cluster=$cluster;port=$port;database=$database} | ConvertTo-Json | Set-Content "$qaRoot\state.json"
 & "$pg\createdb.exe" -h 127.0.0.1 -p $port -U ktb_interface_qa $database
-$environmentKeys = @('UI_QA_DATABASE_URL','UI_QA_ARTIFACT_DIR','DATABASE_URL','NODE_ENV','API_PORT','SMS_PROVIDER','AUTH_ALLOW_DEV_HEADERS','JWT_SECRET','API_INTERNAL_URL','DASHBOARD_ORIGIN','NEXT_DIST_DIR')
+$environmentKeys = @('UI_QA_DATABASE_URL','UI_QA_ARTIFACT_DIR','DATABASE_URL','NODE_ENV','API_HOST','API_PORT','SMS_PROVIDER','AUTH_ALLOW_DEV_HEADERS','AUTH_ALLOW_MOCK_OTP','JWT_SECRET','API_INTERNAL_URL','DASHBOARD_ORIGIN','NEXT_DIST_DIR')
 $savedEnvironment = @{}
 foreach ($key in $environmentKeys) { $savedEnvironment[$key] = [Environment]::GetEnvironmentVariable($key) }
 try {
@@ -35,10 +35,12 @@ if ($LASTEXITCODE -ne 0) { throw 'QA fixture creation failed' }
 $env:DATABASE_URL = $env:UI_QA_DATABASE_URL
 $env:NODE_ENV = 'development'
 $env:API_PORT = [string]$ApiPort
+$env:API_HOST = '127.0.0.1'
 $env:API_INTERNAL_URL = "http://127.0.0.1:$ApiPort"
 $env:DASHBOARD_ORIGIN = "http://127.0.0.1:$WebPort"
 $env:NEXT_DIST_DIR = if ($RunName -eq 'interface-qa') { '.next' } else { ".next-$RunName" }
 $env:SMS_PROVIDER = 'local-mock'
+$env:AUTH_ALLOW_MOCK_OTP = 'true'
 $env:AUTH_ALLOW_DEV_HEADERS = 'false'
 $env:JWT_SECRET = [guid]::NewGuid().ToString('N') + [guid]::NewGuid().ToString('N')
 $api = Start-Process node -ArgumentList 'dist/main.js' -WorkingDirectory "$workspace\apps\api" -WindowStyle Hidden -RedirectStandardOutput "$qaRoot\api.log" -RedirectStandardError "$qaRoot\api-error.log" -PassThru

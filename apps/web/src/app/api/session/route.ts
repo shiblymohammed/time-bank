@@ -62,9 +62,15 @@ export async function POST(request: NextRequest) {
 export async function DELETE(request: NextRequest) {
   try {
     checkOrigin(request);
+  } catch (error) {
+    return failure(error);
+  }
+  try {
     await endSession(request);
     return clearSession(respond({ success: true }));
   } catch (error) {
-    return failure(error);
+    // The browser must sign out even when the API cannot revoke its refresh token.
+    // Keep the upstream error status so revocation is not falsely reported as successful.
+    return clearSession(failure(error));
   }
 }

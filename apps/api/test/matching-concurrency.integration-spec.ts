@@ -10,7 +10,6 @@ import { JwtService } from '@nestjs/jwt';
 import httpRequest from 'supertest';
 import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
-import { JwtService } from '@nestjs/jwt';
 import { AuthService } from '../src/auth/auth.service';
 import { OtpChallenge } from '../src/auth/entities/otp-challenge.entity';
 import { AuthenticationSession } from '../src/auth/entities/authentication-session.entity';
@@ -159,7 +158,15 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       db.getRepository(OrganizationMembership),
       db.getRepository(Organization),
       db.getRepository(VolunteerAssignment),
-      {} as any,
+      new BeneficiariesService(
+        db.getRepository(BeneficiaryEligibility),
+        db.getRepository(CaregiverAuthorization),
+        db.getRepository(OrganizationMembership),
+        db.getRepository(ServiceRequest),
+        audit,
+        authorization,
+        db.getRepository(MembershipDocument),
+      ),
       service,
       audit,
       authorization,
@@ -258,6 +265,91 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
     );
   }
 
+  describe('atomic request creation and retries', () => {
+    const create = (key = randomUUID(), hour = 10) =>
+      requests.createRequest(orgA, coordinator, {
+        creationChannel: 'COORDINATOR_ON_BEHALF',
+        beneficiaryMembershipId: beneficiaryA,
+        serviceCatalogId: catalogueA,
+        urgency: 'SCHEDULED',
+        scheduledStartTime: `2030-01-02T${hour}:00:00.000Z`,
+        locationAddressText: 'Test community centre',
+        locationWardNumber: '1',
+        locationPostalCode: '676503',
+        idempotencyKey: key,
+      } as any);
+    beforeEach(async () => {
+      await db.query(
+        `INSERT INTO beneficiary_eligibilities(organization_id,membership_id,review_due_at,
+        approved_by_user_id,monthly_request_quota) VALUES($1,$2,NOW()+interval '1 year',$3,20)`,
+        [orgA, beneficiaryA, coordinator],
+      );
+    });
+    it('fits request numbers even when the organization code has its allowed maximum length', async () => {
+      await db.query('UPDATE organizations SET code=$2 WHERE id=$1', [orgA, 'A'.repeat(50)]);
+      const booking = await create();
+      expect(booking.requestNumber.length).toBeLessThanOrEqual(50);
+    });
+    it('does not collide when Math.random repeats across two bookings', async () => {
+      jest.spyOn(Math, 'random').mockReturnValue(0.5);
+      const first = await create(randomUUID(), 13);
+      const second = await create(randomUUID(), 14);
+      expect(first.requestNumber).not.toBe(second.requestNumber);
+    });
+    it('rejects an already-past scheduled request without saving a booking', async () => {
+      await expect(
+        requests.createRequest(orgA, coordinator, {
+          creationChannel: 'COORDINATOR_ON_BEHALF',
+          beneficiaryMembershipId: beneficiaryA,
+          serviceCatalogId: catalogueA,
+          urgency: 'SCHEDULED',
+          scheduledStartTime: '2020-01-01T10:00:00.000Z',
+          locationAddressText: 'Test community centre',
+          locationWardNumber: '1',
+          locationPostalCode: '676503',
+        } as any),
+      ).rejects.toThrow('not in the past');
+      expect(await db.getRepository(ServiceRequest).count()).toBe(0);
+    });
+    it('rolls back a booking when initial matching fails', async () => {
+      jest
+        .spyOn(service, 'findCandidatesAndDispatchOffers')
+        .mockRejectedValueOnce(new Error('matching unavailable'));
+      await expect(create()).rejects.toThrow('matching unavailable');
+      expect(await db.getRepository(ServiceRequest).count()).toBe(0);
+    });
+    it('rolls back the booking and matching when creation audit fails', async () => {
+      const log = audit.logEvent.bind(audit);
+      jest.spyOn(audit, 'logEvent').mockImplementation(async (event, manager) => {
+        if (event.eventType === 'SERVICE_REQUEST_CREATED') throw new Error('audit unavailable');
+        return log(event, manager);
+      });
+      await expect(create()).rejects.toThrow('audit unavailable');
+      expect(await db.getRepository(ServiceRequest).count()).toBe(0);
+      expect(await db.getRepository(MatchingRound).count()).toBe(0);
+      expect(await db.getRepository(VolunteerAssignment).count()).toBe(0);
+    });
+    it('replays concurrent retries as one booking instead of returning database errors', async () => {
+      const key = randomUUID();
+      const outcomes = await Promise.allSettled(Array.from({ length: 12 }, () => create(key)));
+      expect(outcomes.filter((r) => r.status === 'fulfilled')).toHaveLength(12);
+      const results = outcomes.map((r) => (r as PromiseFulfilledResult<ServiceRequest>).value);
+      expect(new Set(results.map((r) => r.id)).size).toBe(1);
+      expect(await db.getRepository(ServiceRequest).count()).toBe(1);
+    });
+    it('serializes the final monthly quota slot across concurrent requests', async () => {
+      await db.query('UPDATE beneficiary_eligibilities SET monthly_request_quota=1');
+      const results = await Promise.allSettled([
+        create(randomUUID(), 11),
+        create(randomUUID(), 12),
+      ]);
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(await db.getRepository(ServiceRequest).count()).toBe(1);
+      const rejection = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+      expect(rejection.reason).toBeInstanceOf(ForbiddenException);
+    });
+  });
+
   describe('OTP concurrency and expiry', () => {
     const phone = '+919000000001';
     function authentication() {
@@ -272,7 +364,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
           db.getRepository(OrganizationMembership),
           db,
           new JwtService({ secret: 'disposable-integration-test-secret' }),
-          new ConfigService({ NODE_ENV: 'test' }),
+          new ConfigService({ NODE_ENV: 'test', AUTH_ALLOW_MOCK_OTP: 'true' }),
           audit,
           sms as unknown as SmsService,
         ),

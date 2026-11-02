@@ -8,7 +8,8 @@ import {
   Inject,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
+import { randomUUID } from 'crypto';
 import {
   CancellerRole,
   CreationChannel,
@@ -16,6 +17,7 @@ import {
   RoleGrantStatus,
   ServiceRequestStatus,
   UserRole,
+  UrgencyType,
   VolunteerAssignmentStatus,
 } from '@ktb/shared-types';
 
@@ -73,7 +75,25 @@ export class RequestsService {
     dto: CreateServiceRequestDto,
     ipAddress?: string,
   ): Promise<ServiceRequest> {
-    const org = await this.orgRepo.findOne({ where: { id: orgId } });
+    return this.requestRepo.manager.transaction('READ COMMITTED', async (manager) => {
+      // Serialize creation per organization: retries, duplicate checks and the
+      // last monthly quota slot must observe the preceding committed request.
+      await manager.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
+        `request-create:${orgId}`,
+      ]);
+      return this.createRequestInTransaction(orgId, callingUserId, dto, manager, ipAddress);
+    });
+  }
+
+  private async createRequestInTransaction(
+    orgId: string,
+    callingUserId: string,
+    dto: CreateServiceRequestDto,
+    manager: EntityManager,
+    ipAddress?: string,
+  ): Promise<ServiceRequest> {
+    const requestRepo = manager.getRepository(ServiceRequest);
+    const org = await manager.withRepository(this.orgRepo).findOne({ where: { id: orgId } });
     if (!org) {
       throw new NotFoundException(`Organization '${orgId}' not found`);
     }
@@ -81,6 +101,7 @@ export class RequestsService {
     const context = await this.authorizationService.evaluateOrganizationAccess(
       callingUserId,
       orgId,
+      manager,
     );
     const isStaff =
       context.isSuperAdmin ||
@@ -97,8 +118,11 @@ export class RequestsService {
 
     // 0. Check idempotency if key provided
     const idempotencyKey = dto.idempotencyKey?.trim();
+    if (idempotencyKey && idempotencyKey.length > 100) {
+      throw new BadRequestException('Idempotency key must be at most 100 characters');
+    }
     if (idempotencyKey) {
-      const existing = await this.requestRepo.findOne({
+      const existing = await requestRepo.findOne({
         where: { organizationId: orgId, idempotencyKey },
         relations: [
           'serviceCatalog',
@@ -115,8 +139,15 @@ export class RequestsService {
       }
     }
 
+    const start = new Date(dto.scheduledStartTime).getTime();
+    // Allow a minute of transport delay for an immediate request submitted now.
+    const earliest = Date.now() - (dto.urgency === UrgencyType.IMMEDIATE ? 60_000 : 0);
+    if (!Number.isFinite(start) || start <= earliest) {
+      throw new BadRequestException('Choose a valid start time that is not in the past');
+    }
+
     // 1. Verify catalogue item enablement
-    const catalogItem = await this.catalogRepo.findOne({
+    const catalogItem = await manager.withRepository(this.catalogRepo).findOne({
       where: { id: dto.serviceCatalogId, organizationId: orgId },
       relations: ['globalService'],
     });
@@ -132,7 +163,7 @@ export class RequestsService {
 
     if (creationChannel === CreationChannel.DIRECT_BENEFICIARY) {
       // Find calling user's membership in this organization
-      const callerMembership = await this.membershipRepo.findOne({
+      const callerMembership = await manager.withRepository(this.membershipRepo).findOne({
         where: { userId: callingUserId, organizationId: orgId },
         relations: ['roleGrants'],
       });
@@ -162,7 +193,7 @@ export class RequestsService {
       }
 
       // Find caregiver's membership in this org
-      const caregiverMembership = await this.membershipRepo.findOne({
+      const caregiverMembership = await manager.withRepository(this.membershipRepo).findOne({
         where: { userId: callingUserId, organizationId: orgId },
       });
 
@@ -174,6 +205,8 @@ export class RequestsService {
         orgId,
         caregiverMembership.id,
         dto.beneficiaryMembershipId,
+        'initiate',
+        manager,
       );
 
       beneficiaryMembershipId = dto.beneficiaryMembershipId;
@@ -194,10 +227,11 @@ export class RequestsService {
       orgId,
       beneficiaryMembershipId,
       catalogItem.globalService?.categoryId,
+      manager,
     );
 
     // 4. Duplicate active request check for safety
-    const existingDuplicate = await this.requestRepo.findOne({
+    const existingDuplicate = await requestRepo.findOne({
       where: {
         organizationId: orgId,
         beneficiaryMembershipId,
@@ -212,11 +246,11 @@ export class RequestsService {
       );
     }
 
-    // 5. Generate unique human-readable request number: REQ-<ORG_CODE>-<YYYYMM>-<SEQ>
+    // 5. Generate unique human-readable request number: REQ-<SHORT_ORG_CODE>-<YYYYMM>-<RANDOM_ID>
     const requestNumber = await this.generateRequestNumber(org.code);
 
     // 6. Create Service Request record
-    const request = this.requestRepo.create({
+    const request = requestRepo.create({
       organizationId: orgId,
       requestNumber,
       idempotencyKey: idempotencyKey ?? null,
@@ -243,27 +277,30 @@ export class RequestsService {
       allowsCrossOrgVolunteers: dto.allowsCrossOrgVolunteers ?? false,
     });
 
-    const saved = await this.requestRepo.save(request);
+    const saved = await requestRepo.save(request);
 
     // 7. Mandatory Immediate Candidate Matching Dispatch (D#60, D#61)
     // Runs candidate search and sends offers immediately for BOTH immediate and scheduled requests
-    await this.matchingService.findCandidatesAndDispatchOffers(saved);
+    await this.matchingService.findCandidatesAndDispatchOffers(saved, undefined, manager);
 
-    await this.auditService.logEvent({
-      eventType: 'SERVICE_REQUEST_CREATED',
-      actorId: callingUserId,
-      targetId: saved.id,
-      targetType: 'service_requests',
-      organizationId: orgId,
-      payload: {
-        requestNumber: saved.requestNumber,
-        urgency: saved.urgency,
-        creationChannel: saved.creationChannel,
-        beneficiaryMembershipId: saved.beneficiaryMembershipId,
-        idempotencyKey: saved.idempotencyKey,
+    await this.auditService.logEvent(
+      {
+        eventType: 'SERVICE_REQUEST_CREATED',
+        actorId: callingUserId,
+        targetId: saved.id,
+        targetType: 'service_requests',
+        organizationId: orgId,
+        payload: {
+          requestNumber: saved.requestNumber,
+          urgency: saved.urgency,
+          creationChannel: saved.creationChannel,
+          beneficiaryMembershipId: saved.beneficiaryMembershipId,
+          idempotencyKey: saved.idempotencyKey,
+        },
+        ipAddress: ipAddress ?? null,
       },
-      ipAddress: ipAddress ?? null,
-    });
+      manager,
+    );
 
     return saved;
   }
@@ -750,7 +787,8 @@ export class RequestsService {
   private async generateRequestNumber(orgCode: string): Promise<string> {
     const now = new Date();
     const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const randomSuffix = Math.floor(10000 + Math.random() * 90000);
-    return `REQ-${orgCode.toUpperCase()}-${yearMonth}-${randomSuffix}`;
+    const suffix = randomUUID().replace(/-/g, '').slice(0, 16).toUpperCase();
+    // Organization codes may be 50 characters; request_number is limited to 50.
+    return `REQ-${orgCode.toUpperCase().slice(0, 15)}-${yearMonth}-${suffix}`;
   }
 }

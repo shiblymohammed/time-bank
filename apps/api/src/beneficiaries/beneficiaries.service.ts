@@ -6,7 +6,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import {
   BeneficiaryEligibilityStatus,
   CaregiverAuthorizationStatus,
@@ -138,8 +138,11 @@ export class BeneficiariesService {
     orgId: string,
     membershipId: string,
     serviceCategoryId?: string,
+    manager?: EntityManager,
   ): Promise<{ eligible: boolean; remainingQuota: number }> {
-    const eligibility = await this.eligibilityRepo.findOne({
+    const eligibility = await (
+      manager?.withRepository(this.eligibilityRepo) ?? this.eligibilityRepo
+    ).findOne({
       where: { organizationId: orgId, membershipId },
     });
 
@@ -170,7 +173,7 @@ export class BeneficiariesService {
     startOfMonth.setDate(1);
     startOfMonth.setHours(0, 0, 0, 0);
 
-    const monthCount = await this.requestRepo
+    const monthCount = await (manager?.withRepository(this.requestRepo) ?? this.requestRepo)
       .createQueryBuilder('req')
       .where('req.organizationId = :orgId', { orgId })
       .andWhere('req.beneficiaryMembershipId = :membershipId', { membershipId })
@@ -328,8 +331,11 @@ export class BeneficiariesService {
     caregiverMembershipId: string,
     beneficiaryMembershipId: string,
     permission: 'initiate' | 'confirm' | 'view' = 'initiate',
+    manager?: EntityManager,
   ): Promise<CaregiverAuthorization> {
-    const auth = await this.caregiverAuthRepo.findOne({
+    const auth = await (
+      manager?.withRepository(this.caregiverAuthRepo) ?? this.caregiverAuthRepo
+    ).findOne({
       where: {
         organizationId: orgId,
         caregiverMembershipId,

@@ -340,8 +340,7 @@ for an allowlisted set of API paths, so no browser CORS configuration is needed.
 See [Live admin dashboard](LIVE_ADMIN_DASHBOARD.md) for details.
 
 Sign in with the phone number of an existing Super Admin. OTP verification does not grant admin privileges; the account
-needs an active Super Admin role on an approved membership in the database. Development OTP responses include a code,
-which the sign-in form fills automatically. Click Verify and sign in to submit it. Production uses SMS. Tokens are kept
+needs an active Super Admin role on an approved membership in the database. For a private disposable QA API, explicitly set `AUTH_ALLOW_MOCK_OTP=true`, `SMS_PROVIDER=local-mock`, `NODE_ENV=development` and `API_HOST=127.0.0.1`. Only this opt-in path returns a development code for the sign-in form. Public/default and production legacy OTP fail closed; the dashboard still needs Firebase web login or a real SMS gateway before production use. Never expose the mock-enabled QA API through a public tunnel. Tokens are kept
 in HTTP-only cookies that browser scripts cannot read. They are refreshed automatically, survive a page reload, and are
 revoked on sign-out.
 

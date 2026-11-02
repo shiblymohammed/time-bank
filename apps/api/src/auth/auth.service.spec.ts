@@ -67,6 +67,7 @@ describe('AuthService', () => {
   const mockConfigService = {
     get: jest.fn((key: string, defaultValue?: any) => {
       if (key === 'NODE_ENV') return 'test';
+      if (key === 'AUTH_ALLOW_MOCK_OTP') return 'true';
       if (key === 'OTP_EXPIRY_SECONDS') return 600;
       if (key === 'OTP_MAX_ATTEMPTS') return 3;
       return defaultValue;
@@ -130,6 +131,22 @@ describe('AuthService', () => {
   it('should be defined', () => {
     expect(service).toBeDefined();
   });
+
+  it.each(['request', 'verify'])(
+    'blocks legacy OTP %s without explicit QA opt-in',
+    async (action) => {
+      mockConfigService.get
+        .mockImplementationOnce(() => 'development')
+        .mockImplementationOnce(() => 'false');
+      const result =
+        action === 'request'
+          ? service.requestOtp({ phone: '9876543210' })
+          : service.verifyOtp({ phone: '9876543210', code: '123456' });
+      await expect(result).rejects.toThrow('Legacy SMS sign-in is disabled');
+      expect(mockOtpRepo.findOne).not.toHaveBeenCalled();
+      expect(mockSessionRepo.save).not.toHaveBeenCalled();
+    },
+  );
 
   describe('requestOtp', () => {
     it('should throw BadRequestException for invalid phone format', async () => {

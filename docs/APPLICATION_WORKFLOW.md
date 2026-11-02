@@ -119,7 +119,7 @@ implemented. After connection problems, refresh the affected screen before repea
 | Fixed              | A failed wallet refresh could leave old wallet actions visible                     | Clear wallet/pool data before loading                                                         |
 | Production blocker | Production SMS gateway is unimplemented                                            | Android uses Firebase; the legacy dashboard OTP gateway still needs implementation                 |
 | Workflow gap       | No recurring matching progression worker                                           | Coordinator must evaluate progression/dispatch explicitly                                     |
-| Reliability risk   | Request creation persists before matching/audit finish                             | Creation is not one transaction across those steps; inspect a failed creation before retrying |
+| Fixed              | Request creation previously persisted before matching/audit finish               | Creation, initial matching and audit now share one transaction; retries/quota serialize per community |
 | Unimplemented      | Binary uploads, offline sync, emergency alerts, merchant redemption, pool spending | Do not present these as live features                                                         |
 
 The request-creation risk is identified from service ordering; failure injection for that path was not added in this
@@ -148,3 +148,7 @@ PostgreSQL integration tests, 20 dashboard tests and 56 Flutter tests.
 ## Firebase phone login — 2 November 2026
 
 Android now uses Firebase phone verification and the backend ID-token exchange. Account restrictions, membership approval and permissions remain controlled by Time Bank. Deployment configuration, signing certificates, SMS quota and untested real-device steps are documented in [Firebase setup](FIREBASE_PHONE_AUTH.md).
+
+## Full follow-up audit
+
+See [the full application audit](FULL_APPLICATION_AUDIT_2026-11-02.md) for confirmed fixes, remaining production login, matching progression, discovery privacy, retry/time-zone and session issues. The local QA OTP path now requires explicit opt-in and must stay private.

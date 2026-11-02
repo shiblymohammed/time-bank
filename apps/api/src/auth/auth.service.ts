@@ -7,6 +7,7 @@ import {
   HttpException,
   HttpStatus,
   Logger,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource, IsNull, MoreThan } from 'typeorm';
@@ -85,6 +86,19 @@ export class AuthService {
     private readonly smsService: SmsService,
   ) {}
 
+  private assertLegacyOtpEnabled(): void {
+    const environment = this.configService.get<string>('NODE_ENV');
+    if (
+      !['development', 'test'].includes(environment ?? '') ||
+      this.configService.get<string>('AUTH_ALLOW_MOCK_OTP') !== 'true' ||
+      this.configService.get<string>('SMS_PROVIDER', 'local-mock') !== 'local-mock'
+    ) {
+      throw new ServiceUnavailableException(
+        'Legacy SMS sign-in is disabled. Use Firebase phone sign-in.',
+      );
+    }
+  }
+
   /**
    * Request a single-use OTP challenge (M2-07, FR-IDENT-01).
    * Enforces 60-second rate-limiting cooldown and logs an audit trail.
@@ -94,6 +108,7 @@ export class AuthService {
     ipAddress?: string,
   ): Promise<{ success: boolean; message: string; expiresInSeconds: number; devOtp?: string }> {
     const phoneE164 = normalizeToE164(dto.phone);
+    this.assertLegacyOtpEnabled();
     const phoneHash = sha256(phoneE164);
 
     // 1. Rate-limiting cooldown: prevent requesting a new OTP within 60s
@@ -160,6 +175,7 @@ export class AuthService {
    */
   async verifyOtp(dto: VerifyOtpDto, ipAddress?: string): Promise<AuthSessionResponse> {
     const phoneE164 = normalizeToE164(dto.phone);
+    this.assertLegacyOtpEnabled();
     const phoneHash = sha256(phoneE164);
 
     // Lock verification and consumption together. Concurrent callers must not

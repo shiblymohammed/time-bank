@@ -1,6 +1,6 @@
 import { Injectable, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { EntityManager, Repository } from 'typeorm';
 import {
   AccountStatus,
   MembershipStatus,
@@ -49,11 +49,14 @@ export class AuthorizationService {
   async evaluateOrganizationAccess(
     userId: string,
     organizationId: string,
+    manager?: EntityManager,
   ): Promise<EvaluatedMembershipContext> {
     if (!organizationId) throw new ForbiddenException('Organization context required');
-    const { isSuperAdmin } = await this.evaluateGlobalAccess(userId);
+    const { isSuperAdmin } = await this.evaluateGlobalAccess(userId, manager);
 
-    const organization = await this.orgRepo.findOne({ where: { id: organizationId } });
+    const organization = await (manager?.withRepository(this.orgRepo) ?? this.orgRepo).findOne({
+      where: { id: organizationId },
+    });
     if (!organization) {
       throw new ForbiddenException('Organization not found');
     }
@@ -61,7 +64,9 @@ export class AuthorizationService {
       throw new ForbiddenException(`Organization is ${organization.status.toLowerCase()}`);
     }
 
-    const membership = await this.membershipRepo.findOne({
+    const membership = await (
+      manager?.withRepository(this.membershipRepo) ?? this.membershipRepo
+    ).findOne({
       where: { userId, organizationId },
       relations: ['roleGrants'],
     });
@@ -93,11 +98,12 @@ export class AuthorizationService {
   /** Privileged routes use current database authority, never cached JWT role claims. */
   async evaluateGlobalAccess(
     userId: string,
+    manager?: EntityManager,
   ): Promise<{ isSuperAdmin: boolean; roles: UserRole[] }> {
     if (typeof userId !== 'string' || !userId.trim()) {
       throw new ForbiddenException('Authentication required');
     }
-    const user = await this.userRepo.findOne({
+    const user = await (manager?.withRepository(this.userRepo) ?? this.userRepo).findOne({
       where: { id: userId },
     });
 
@@ -111,7 +117,9 @@ export class AuthorizationService {
     }
 
     // 2. Check active global account restrictions
-    const activeRestriction = await this.restrictionRepo.findOne({
+    const activeRestriction = await (
+      manager?.withRepository(this.restrictionRepo) ?? this.restrictionRepo
+    ).findOne({
       where: {
         userId,
         status: GlobalRestrictionStatus.ACTIVE,
@@ -125,7 +133,9 @@ export class AuthorizationService {
     }
 
     // 4. Check if user is a Super Admin (Super Admins have universal platform access)
-    const superAdminGrant = await this.roleGrantRepo
+    const superAdminGrant = await (
+      manager?.withRepository(this.roleGrantRepo) ?? this.roleGrantRepo
+    )
       .createQueryBuilder('grant')
       .innerJoin('grant.membership', 'm')
       .where('m.userId = :userId', { userId })

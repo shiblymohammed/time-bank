@@ -1,0 +1,70 @@
+{
+  "date": "2026-11-02",
+  "command": "pnpm audit --prod --json",
+  "counts": {
+    "info": 0,
+    "low": 0,
+    "moderate": 6,
+    "high": 0,
+    "critical": 0
+  },
+  "remaining": [
+    {
+      "package": "file-type",
+      "severity": "moderate",
+      "versions": [
+        "20.4.1"
+      ],
+      "patchedVersions": ">=21.3.1",
+      "advisory": "https://github.com/advisories/GHSA-5v7r-6r5c-r473"
+    },
+    {
+      "package": "file-type",
+      "severity": "moderate",
+      "versions": [
+        "20.4.1"
+      ],
+      "patchedVersions": ">=21.3.2",
+      "advisory": "https://github.com/advisories/GHSA-j47w-4g3g-c36v"
+    },
+    {
+      "package": "@nestjs/core",
+      "severity": "moderate",
+      "versions": [
+        "10.4.22"
+      ],
+      "patchedVersions": ">=11.1.18",
+      "advisory": "https://github.com/advisories/GHSA-36xv-jgw5-4q75"
+    },
+    {
+      "package": "uuid",
+      "severity": "moderate",
+      "versions": [
+        "9.0.1"
+      ],
+      "patchedVersions": ">=11.1.1",
+      "advisory": "https://github.com/advisories/GHSA-w5hq-g745-h8pq"
+    },
+    {
+      "package": "minimatch",
+      "severity": "moderate",
+      "versions": [
+        "10.2.6",
+        "3.1.5",
+        "9.0.9"
+      ],
+      "patchedVersions": ">=11.0.1",
+      "advisory": "https://github.com/advisories/GHSA-g3hv-75wg-m249"
+    },
+    {
+      "package": "glob",
+      "severity": "moderate",
+      "versions": [
+        "10.5.0",
+        "13.0.6"
+      ],
+      "patchedVersions": ">=14.0.2",
+      "advisory": "https://github.com/advisories/GHSA-3g3m-2fjr-6pw4"
+    }
+  ]
+}

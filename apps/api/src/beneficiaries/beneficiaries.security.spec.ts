@@ -80,6 +80,14 @@ describe('Milestone 3 Phase B Security & Boundary Invariants', () => {
         create: jest.fn((dto) => ({ id: 'req-1', ...dto })),
         save: jest.fn((entity) => Promise.resolve(entity)),
       };
+      mockRequestRepo.manager = {
+        transaction: async (_isolation: string, action: any) =>
+          action({
+            query: jest.fn().mockResolvedValue([]),
+            withRepository: (repo: any) => repo,
+            getRepository: () => mockRequestRepo,
+          }),
+      };
       mockCatalogRepo = {
         findOne: jest.fn().mockResolvedValue({
           id: 'cat-1',

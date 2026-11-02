@@ -8,12 +8,16 @@ export class SmsService implements SmsGateway {
 
   constructor(private readonly configService: ConfigService) {}
 
-  async sendOtp(phoneE164: string, otp: string): Promise<boolean> {
+  async sendOtp(_phoneE164: string, _otp: string): Promise<boolean> {
     const provider = this.configService.get<string>('SMS_PROVIDER', 'local-mock');
-    const isDev = this.configService.get<string>('NODE_ENV') !== 'production';
+    const environment = this.configService.get<string>('NODE_ENV');
+    const isLocalQa =
+      ['development', 'test'].includes(environment ?? '') &&
+      this.configService.get<string>('AUTH_ALLOW_MOCK_OTP') === 'true' &&
+      provider === 'local-mock';
 
-    if (isDev) {
-      this.logger.log(`[SMS-MOCK] OTP for ${phoneE164}: [${otp}] (expires in 10 minutes)`);
+    if (isLocalQa) {
+      this.logger.log('Mock SMS challenge issued for explicitly enabled local QA.');
       return true;
     }
 

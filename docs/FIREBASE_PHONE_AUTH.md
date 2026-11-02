@@ -37,3 +37,7 @@ See [Android phone authentication](https://firebase.google.com/docs/auth/android
 ## iOS configuration follow-up
 
 Registered `com.kottakkal.timebank` as Firebase iOS app `1:154706594127:ios:8da72718dd37ad9e1a9d3a`. The separate Flutter repository now includes its Xcode project, GoogleService-Info.plist, encoded-app-ID callback, background modes and iOS-enabled phone gateway. It uses the same API and verified-token endpoint. Apple Team ID, signing and APNs credentials remain unset at the user's request; native simulator compilation runs through the new macOS CI workflow. See the Flutter repository's `IOS_SETUP.md` for account-free configuration and validation limits.
+
+## Audit hardening follow-up
+
+Legacy server OTP now requires explicit private-QA opt-in; production and default development configurations fail closed. Firebase phone token exchange is unaffected. See [the full audit](FULL_APPLICATION_AUDIT_2026-11-02.md) for deployment and dashboard sign-in work still required.

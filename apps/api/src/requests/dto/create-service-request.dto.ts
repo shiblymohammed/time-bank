@@ -12,6 +12,7 @@ import {
   Length,
   Matches,
   Max,
+  MaxLength,
   Min,
 } from 'class-validator';
 import { CreationChannel, UrgencyType } from '@ktb/shared-types';
@@ -27,6 +28,7 @@ export class CreateServiceRequestDto {
   })
   @IsString()
   @IsOptional()
+  @MaxLength(100)
   idempotencyKey?: string;
 
   @ApiPropertyOptional({
@@ -95,6 +97,7 @@ export class CreateServiceRequestDto {
   @ApiPropertyOptional({ example: 'Near Main Pharmacy Counter' })
   @IsString()
   @IsOptional()
+  @MaxLength(255)
   locationLandmark?: string;
 
   @ApiProperty({ example: '676503', description: '6-digit Indian PIN code' })

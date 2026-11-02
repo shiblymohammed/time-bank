@@ -173,6 +173,16 @@ function fixture() {
       })),
     },
   );
+  Object.assign(requestRepo, {
+    manager: {
+      transaction: async (_isolation: string, action: any) =>
+        action({
+          query: jest.fn().mockResolvedValue([]),
+          withRepository: (repo: any) => repo,
+          getRepository: () => requestRepo,
+        }),
+    },
+  });
   const availability = repository();
   const skillRepo = repository();
   const assignmentRepo = repository();

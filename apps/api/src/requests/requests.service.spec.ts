@@ -51,6 +51,8 @@ describe('RequestsService', () => {
     manager: {
       transaction: jest.fn(async (_isolation, action) =>
         action({
+          query: jest.fn().mockResolvedValue([]),
+          withRepository: (repo: any) => repo,
           getRepository: (entity: any) =>
             entity === ServiceRequest
               ? mockRequestRepo
@@ -181,12 +183,16 @@ describe('RequestsService', () => {
         'org-1',
         'ben-mem-1',
         'cat-1',
+        expect.objectContaining({ withRepository: expect.any(Function) }),
       );
       expect(mockMatchingService.findCandidatesAndDispatchOffers).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'req-1' }),
+        undefined,
+        expect.objectContaining({ getRepository: expect.any(Function) }),
       );
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'SERVICE_REQUEST_CREATED' }),
+        expect.objectContaining({ getRepository: expect.any(Function) }),
       );
     });
 
@@ -270,6 +276,8 @@ describe('RequestsService', () => {
         'org-1',
         'caregiver-mem-1',
         'ben-mem-1',
+        'initiate',
+        expect.objectContaining({ withRepository: expect.any(Function) }),
       );
     });
 
@@ -300,6 +308,7 @@ describe('RequestsService', () => {
         'org-1',
         'ben-mem-1',
         'cat-1',
+        expect.objectContaining({ withRepository: expect.any(Function) }),
       );
     });
 

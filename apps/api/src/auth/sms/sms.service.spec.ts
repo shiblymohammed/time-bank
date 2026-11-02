@@ -2,6 +2,28 @@ import { ConfigService } from '@nestjs/config';
 import { ServiceUnavailableException } from '@nestjs/common';
 import { SmsService } from './sms.service';
 describe('SMS delivery availability', () => {
+  it.each([
+    { NODE_ENV: 'development' },
+    { NODE_ENV: 'test' },
+    { NODE_ENV: 'production', AUTH_ALLOW_MOCK_OTP: 'true', SMS_PROVIDER: 'local-mock' },
+    { NODE_ENV: 'development', AUTH_ALLOW_MOCK_OTP: 'true', SMS_PROVIDER: 'twilio' },
+  ])('fails closed for mock SMS configuration %j', async (settings) => {
+    await expect(
+      new SmsService({
+        get: (key: string, fallback?: string) =>
+          (settings as Record<string, string>)[key] ?? fallback,
+      } as ConfigService).sendOtp('+919876543210', '123456'),
+    ).rejects.toThrow(ServiceUnavailableException);
+  });
+  it('allows mock delivery only for explicitly enabled local QA', async () => {
+    const settings = { NODE_ENV: 'test', AUTH_ALLOW_MOCK_OTP: 'true', SMS_PROVIDER: 'local-mock' };
+    await expect(
+      new SmsService({
+        get: (key: string, fallback?: string) =>
+          (settings as Record<string, string>)[key] ?? fallback,
+      } as ConfigService).sendOtp('+919876543210', '123456'),
+    ).resolves.toBe(true);
+  });
   it.each(['twilio', 'local-mock'])(
     'never reports production delivery for the unimplemented %s provider',
     async (provider) => {
