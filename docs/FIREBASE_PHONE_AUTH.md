@@ -20,7 +20,7 @@ The refreshed Android client configuration is in the separate Flutter repository
 
 Set `FIREBASE_PROJECT_ID=time-bank-34a1c` on the deployed API and deploy the new endpoint. Allow outbound HTTPS to Google's public signing-certificate endpoint. Development Compose supplies this project ID and attaches only the API to an outbound bridge; PostgreSQL remains on the internal network. No Firebase service-account private key is needed for this public-key verification flow.
 
-The actual deployed API origin has not been supplied yet. Android builds use `--dart-define=API_URL=<HTTPS origin without /api>`; the Flutter GitHub Actions workflow reads the repository variable `API_URL`. Its current fallback is emulator-only `http://10.0.2.2:3001`.
+The current test API origin is `https://phone-richard-should-group.trycloudflare.com`. Flutter and its CI default to this origin. Override using `--dart-define=API_BASE_URL=<HTTPS origin without /api>` or the GitHub repository variable `API_BASE_URL`; legacy `API_URL` remains supported. Quick Tunnel URLs may change after restart. Live checks returned 200 for `/api/health/live` and `/api/health/ready` (database up) and 401 for an invalid token sent to `/api/auth/firebase`; real signed-token exchange remains untested.
 
 Firebase Admin token verification here does not query revocation/disabled-user state. Disabling a Firebase user does not revoke existing Time Bank sessions. Enforce suspensions and permissions through Time Bank, which checks its own account state. Legacy server OTP endpoints remain for the dashboard and disposable QA; their production SMS gateway is still unimplemented. Android does not silently fall back to mock OTP.
 
