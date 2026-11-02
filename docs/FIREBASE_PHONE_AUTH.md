@@ -28,7 +28,7 @@ Billing was not changed. The console currently shows a 10 SMS/day warning for ne
 
 ## Validation and limits
 
-472 backend tests, 62 real PostgreSQL workflow/concurrency tests and 68 Flutter tests passed. API build, TypeScript/lint checks, Flutter analysis and Android debug APK build passed. Tests cover verified-phone identity/roles, suspended accounts, concurrent provisioning, invalid token rejection, automatic/manual verification, cancellation, resend cooldown, duplicate callbacks and backend/profile retry recovery.
+472 backend tests, 62 real PostgreSQL workflow/concurrency tests and 68 Flutter tests passed. API build, TypeScript/lint checks, Flutter analysis and Android debug/release APK builds passed. Tests cover verified-phone identity/roles, suspended accounts, concurrent provisioning, invalid token rejection, automatic/manual verification, cancellation, resend cooldown, duplicate callbacks and backend/profile retry recovery.
 
 No Android device was connected for this change. Real SMS delivery, native app verification and a deployed API exchange have not been exercised. Existing native QA reports used injected legacy server-OTP stores and do not validate Firebase.
 
