@@ -60,66 +60,19 @@ export function Navbar() {
             flexShrink: 0,
           }}
         >
-          <div
+          <img
+            src="/time%20bank%20logo.png"
+            alt="Kottakkal Time Bank"
             style={{
-              width: '40px',
-              height: '40px',
-              borderRadius: '11px',
-              background: '#FFFFFF',
-              boxShadow: scrolled
-                ? '0 2px 8px rgba(0, 0, 0, 0.06)'
-                : '0 4px 14px rgba(0, 0, 0, 0.1)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              border: '1.5px solid #E5DFD5',
+              display: 'block',
+              width: 'clamp(150px, 18vw, 220px)',
+              height: 'auto',
+              maxHeight: '48px',
+              objectFit: 'contain',
               flexShrink: 0,
               transition: 'all 0.25s',
             }}
-          >
-            <svg width="26" height="26" viewBox="0 0 100 100" fill="none">
-              <circle cx="36" cy="28" r="10" fill="#FF5A5F" />
-              <path
-                d="M 24 54 C 24 40, 48 40, 56 52 C 64 64, 76 68, 80 58 C 84 48, 76 38, 64 42"
-                stroke="#FF5A5F"
-                strokeWidth="11"
-                strokeLinecap="round"
-                fill="none"
-              />
-              <circle cx="64" cy="72" r="10" fill="#6366F1" />
-              <path
-                d="M 76 46 C 76 60, 52 60, 44 48 C 36 36, 24 32, 20 42 C 16 52, 24 62, 36 58"
-                stroke="#6366F1"
-                strokeWidth="11"
-                strokeLinecap="round"
-                fill="none"
-              />
-            </svg>
-          </div>
-          <div>
-            <div
-              style={{
-                fontWeight: 900,
-                fontSize: '1.15rem',
-                letterSpacing: '-0.025em',
-                color: '#111827',
-                lineHeight: 1.15,
-                textTransform: 'uppercase',
-              }}
-            >
-              Indian Time Bank
-            </div>
-            <div
-              style={{
-                fontSize: '0.74rem',
-                color: '#6B7280',
-                fontWeight: 700,
-                letterSpacing: '0.01em',
-              }}
-            >
-              Kottakkal Municipality Pilot • ഭാരതീയ ടൈം ബാങ്ക്
-            </div>
-          </div>
+          />
         </a>
 
         {/* Clear Desktop Navigation Links */}

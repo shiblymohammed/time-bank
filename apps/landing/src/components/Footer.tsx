@@ -37,12 +37,12 @@ export function Footer() {
 
         <div className="footer-columns">
           <div className="footer-brand-column">
-            <a href="#" aria-label="Indian Time Bank home" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.75rem', color: '#FFFFFF', textDecoration: 'none' }}>
-              <span aria-hidden="true" style={{ width: '42px', height: '42px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', borderRadius: '14px', background: 'linear-gradient(145deg, #FF6B70, #D9434A)', fontSize: '1.35rem', fontWeight: 900 }}>T</span>
-              <span>
-                <span style={{ display: 'block', color: '#FFFFFF', fontSize: '0.95rem', fontWeight: 950, letterSpacing: '0.03em' }}>INDIAN TIME BANK</span>
-                <span style={{ display: 'block', color: '#AEB3C0', fontSize: '0.68rem', fontWeight: 700 }}>ഭാരതീയ ടൈം ബാങ്ക്</span>
-              </span>
+            <a href="#" aria-label="Kottakkal Time Bank home" style={{ display: 'inline-flex', alignItems: 'center', color: '#FFFFFF', textDecoration: 'none' }}>
+              <img
+                src="/time%20bank%20logo.png"
+                alt="Kottakkal Time Bank"
+                style={{ display: 'block', width: 'clamp(180px, 22vw, 250px)', height: 'auto', maxHeight: '76px', objectFit: 'contain' }}
+              />
             </a>
             <p style={{ maxWidth: '390px', color: '#B8BCC7', fontSize: '0.78rem', lineHeight: 1.7, marginTop: '1rem' }}>
               A shared platform concept for organizing practical volunteer support through local community hubs. Kottakkal is the project’s initial municipal context.
@@ -68,7 +68,7 @@ export function Footer() {
         </div>
 
         <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '0.8rem', padding: '1rem 0 1.4rem', borderTop: '1px solid rgba(255,255,255,0.12)' }}>
-          <span style={{ color: '#8F95A3', fontSize: '0.68rem', lineHeight: 1.5 }}>© 2026 Indian Time Bank · Community time, organized locally</span>
+          <span style={{ color: '#8F95A3', fontSize: '0.68rem', lineHeight: 1.5 }}>© 2026 Kottakkal Time Bank · Community time, organized locally</span>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.45rem', color: '#AEB3C0', fontSize: '0.68rem', fontWeight: 700 }}><span aria-hidden="true" style={{ width: '6px', height: '6px', borderRadius: '50%', background: '#6EE7B7' }} /> Time credits and merchant rewards remain separate</span>
         </div>
       </div>
