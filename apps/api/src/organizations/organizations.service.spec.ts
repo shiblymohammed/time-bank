@@ -239,4 +239,12 @@ describe('OrganizationsService', () => {
       );
     });
   });
+  it('does not transfer an existing application ID to another organization', async () => {
+    mockOrgRepo.findOne.mockResolvedValue({ id: 'other' });
+    mockAppBuildRepo.findOne.mockResolvedValue({ id: 'build', organizationId: 'owner' });
+    await expect(
+      service.createOrUpdateAppBuild('other', { applicationId: 'in.example.app' }, 'admin'),
+    ).rejects.toThrow(ConflictException);
+    expect(mockAppBuildRepo.save).not.toHaveBeenCalled();
+  });
 });

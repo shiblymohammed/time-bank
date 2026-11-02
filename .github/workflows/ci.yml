@@ -10,6 +10,7 @@ on:
     branches: [main, develop]
   pull_request:
     branches: [main]
+  workflow_call:
   workflow_dispatch:
 
 concurrency:
@@ -18,7 +19,7 @@ concurrency:
 
 env:
   NODE_VERSION: '22'
-  PNPM_VERSION: '12.3.4'
+  PNPM_VERSION: '11.25.0'
 
 jobs:
   # ─── Job 1: Lint and type-check ───────────────────────────────────────────
@@ -206,5 +207,5 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-# The Flutter member app lives in its own repository (apps/mobile/time_bank_flutter, git-ignored here)
+# The Flutter member app lives in its own repository (apps/mobile/time_bank, git-ignored here)
 # and is analyzed and tested by that repository's CI.

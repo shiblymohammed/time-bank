@@ -477,6 +477,31 @@ describe('BeneficiariesService', () => {
     });
   });
 
+  it('keeps caregiver creation and completion permissions independent', async () => {
+    mockCaregiverAuthRepo.findOne.mockResolvedValue({
+      id: 'auth',
+      canInitiateRequests: true,
+      canVerifyCompletions: false,
+    });
+    await expect(
+      service.verifyCaregiverProxyAccess('org', 'caregiver', 'beneficiary', 'confirm'),
+    ).rejects.toThrow(ForbiddenException);
+    mockCaregiverAuthRepo.findOne.mockResolvedValue({
+      id: 'auth',
+      canInitiateRequests: false,
+      canVerifyCompletions: true,
+    });
+    await expect(
+      service.verifyCaregiverProxyAccess('org', 'caregiver', 'beneficiary'),
+    ).rejects.toThrow(ForbiddenException);
+    await expect(
+      service.verifyCaregiverProxyAccess('org', 'caregiver', 'beneficiary', 'confirm'),
+    ).resolves.toMatchObject({ id: 'auth' });
+    await expect(
+      service.verifyCaregiverProxyAccess('org', 'caregiver', 'beneficiary', 'view'),
+    ).resolves.toMatchObject({ id: 'auth' });
+  });
+
   describe('listCaregiversForBeneficiary', () => {
     it('lists caregivers for beneficiary', async () => {
       mockMembershipRepo.findOne.mockResolvedValue({ id: 'ben-mem', organizationId: 'org-1' });

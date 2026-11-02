@@ -3,6 +3,8 @@ packages:
   - "apps/api"
   # Next.js web dashboard
   - "apps/web"
+  # Next.js public landing page
+  - "apps/landing"
   # Shared TypeScript types consumed by both api and web
   - "packages/shared-types"
   # Shared ESLint config
@@ -10,8 +12,9 @@ packages:
   # Shared tsconfig bases
   - "packages/tsconfig"
 allowBuilds:
+  '@firebase/util': true
   '@nestjs/core': true
   '@scarf/scarf': false
   bcrypt: true
+  protobufjs: true
   unrs-resolver: true
-

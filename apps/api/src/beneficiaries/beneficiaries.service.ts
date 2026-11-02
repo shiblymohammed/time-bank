@@ -327,6 +327,7 @@ export class BeneficiariesService {
     orgId: string,
     caregiverMembershipId: string,
     beneficiaryMembershipId: string,
+    permission: 'initiate' | 'confirm' | 'view' = 'initiate',
   ): Promise<CaregiverAuthorization> {
     const auth = await this.caregiverAuthRepo.findOne({
       where: {
@@ -337,13 +338,20 @@ export class BeneficiariesService {
       },
     });
 
-    if (!auth || !auth.canInitiateRequests) {
+    const permitted =
+      auth &&
+      (permission === 'confirm'
+        ? auth.canVerifyCompletions
+        : permission === 'view'
+          ? auth.canInitiateRequests || auth.canVerifyCompletions
+          : auth.canInitiateRequests);
+    if (!permitted) {
       throw new ForbiddenException(
-        'Active caregiver authorization not found or proxy request initiation permission denied (D#8, D#37)',
+        `Active caregiver authorization not found or ${permission} permission denied (D#8, D#37)`,
       );
     }
 
-    return auth;
+    return auth!;
   }
 
   async listCaregiversForBeneficiary(

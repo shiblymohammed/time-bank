@@ -263,6 +263,10 @@ export class AdminService {
     adminId: string,
     ipAddress?: string,
   ): Promise<MembershipRoleGrant> {
+    if (dto.userId === adminId) {
+      throw new ForbiddenException('Cannot grant roles to yourself');
+    }
+
     const org = await this.orgRepo.findOne({ where: { id: orgId } });
     if (!org) {
       throw new NotFoundException('Organization not found');

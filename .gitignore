@@ -46,6 +46,9 @@ apps/mobile/**/*.freezed.dart
 *.ipr
 *.iws
 .DS_Store
+# Local database
+.db-data/
+
 Thumbs.db
 
 # ─── Docker ──────────────────────────────────────
@@ -63,6 +66,9 @@ uploads/
 
 # ─── OS ──────────────────────────────────────────
 .DS_Store
+# Local database
+.db-data/
+
 Thumbs.db
 desktop.ini
 

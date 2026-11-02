@@ -3,7 +3,7 @@
 # NFR-17: Versioned container images
 
 FROM node:22-alpine AS base
-RUN corepack enable && corepack prepare pnpm@12.3.4 --activate
+RUN corepack enable && corepack prepare pnpm@11.25.0 --activate
 WORKDIR /app
 
 # ─── Dependencies ─────────────────────────────────────────────────────────────
@@ -18,6 +18,7 @@ RUN pnpm install --frozen-lockfile
 # ─── Development ──────────────────────────────────────────────────────────────
 FROM deps AS development
 COPY . .
+RUN pnpm --filter @ktb/shared-types build
 EXPOSE 3000
 CMD ["pnpm", "--filter", "@ktb/web", "dev"]
 
@@ -27,6 +28,8 @@ COPY packages/tsconfig ./packages/tsconfig
 COPY packages/shared-types ./packages/shared-types
 COPY apps/web ./apps/web
 ENV NEXT_TELEMETRY_DISABLED=1
+ARG API_URL=http://api:3001
+ENV API_URL=$API_URL
 RUN pnpm --filter @ktb/shared-types build
 RUN pnpm --filter @ktb/web build
 
@@ -36,13 +39,14 @@ RUN addgroup --system --gid 1001 ktb && \
     adduser --system --uid 1001 --ingroup ktb ktb
 
 WORKDIR /app
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3000
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Copy Next.js standalone output (requires output: 'standalone' in next.config.ts)
 COPY --from=builder --chown=ktb:ktb /app/apps/web/.next/standalone ./
 COPY --from=builder --chown=ktb:ktb /app/apps/web/.next/static ./apps/web/.next/static
-COPY --from=builder --chown=ktb:ktb /app/apps/web/public ./apps/web/public
 
 USER ktb
 EXPOSE 3000

@@ -1,6 +1,8 @@
 import { Controller, Post, Get, Body, Req, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Request } from 'express';
+import { FirebaseTokenService } from './firebase-token.service';
+import { FirebaseSignInDto } from './dto/firebase-sign-in.dto';
 import { AuthService } from './auth.service';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
@@ -11,7 +13,10 @@ import { CurrentUserId } from '../authorization/decorators/current-user.decorato
 @ApiTags('Authentication & Identity')
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly authService: AuthService) {}
+  constructor(
+    private readonly authService: AuthService,
+    private readonly firebaseTokens: FirebaseTokenService,
+  ) {}
 
   @Post('otp/request')
   @HttpCode(HttpStatus.OK)
@@ -40,6 +45,14 @@ export class AuthController {
   async verifyOtp(@Body() dto: VerifyOtpDto, @Req() req: Request) {
     const ip = req.ip ?? req.socket.remoteAddress;
     return this.authService.verifyOtp(dto, ip);
+  }
+
+  @Post('firebase')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Exchange a verified Firebase phone ID token for a Time Bank session' })
+  async firebaseSignIn(@Body() dto: FirebaseSignInDto, @Req() req: Request) {
+    const phone = await this.firebaseTokens.verifyPhoneToken(dto.idToken);
+    return this.authService.signInVerifiedPhone(phone, dto, req.ip ?? req.socket.remoteAddress);
   }
 
   @Post('refresh')

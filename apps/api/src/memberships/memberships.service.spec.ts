@@ -102,6 +102,14 @@ describe('MembershipsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockRoleHierarchyService.assertValidMembershipRole.mockReset();
+    mockRoleHierarchyService.assertCanGrantRole.mockReset();
+    mockAuthorizationService.assertNoSelfEscalation.mockReset();
+    mockAuthorizationService.evaluateOrganizationAccess.mockResolvedValue({
+      isSuperAdmin: false,
+      roles: [UserRole.MUNICIPALITY_ADMIN],
+      organizationId: 'org-123',
+    });
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -502,15 +510,10 @@ describe('MembershipsService', () => {
       mockRoleGrantRepo.create.mockImplementation((dto) => ({ id: 'g-1', ...dto }));
       mockRoleGrantRepo.save.mockImplementation((g) => Promise.resolve(g));
 
-      const res = await service.grantRole(
-        'org-1',
-        'm-1',
-        { role: UserRole.COORDINATOR },
-        'admin-1',
-      );
+      const res = await service.grantRole('org-1', 'm-1', { role: UserRole.VOLUNTEER }, 'admin-1');
 
       expect(res.id).toBe('g-1');
-      expect(res.role).toBe(UserRole.COORDINATOR);
+      expect(res.role).toBe(UserRole.VOLUNTEER);
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'MEMBERSHIP_ROLE_GRANTED' }),
       );
@@ -522,7 +525,7 @@ describe('MembershipsService', () => {
         membershipId: 'm-1',
         membership: { organizationId: 'org-1' },
         status: RoleGrantStatus.ACTIVE,
-        role: UserRole.COORDINATOR,
+        role: UserRole.VOLUNTEER,
       };
       mockRoleGrantRepo.findOne.mockResolvedValueOnce(grant);
       mockRoleGrantRepo.save.mockImplementation((g) => Promise.resolve(g));
@@ -540,5 +543,61 @@ describe('MembershipsService', () => {
         expect.objectContaining({ eventType: 'MEMBERSHIP_ROLE_REVOKED' }),
       );
     });
+  });
+  it.each([UserRole.SUPER_ADMIN, UserRole.MUNICIPALITY_ADMIN, UserRole.COORDINATOR])(
+    'enforces role hierarchy for %s through membership grants and approvals',
+    async (role) => {
+      const hierarchy = new RoleHierarchyService();
+      mockRoleHierarchyService.assertValidMembershipRole.mockImplementation((target) =>
+        hierarchy.assertValidMembershipRole(target),
+      );
+      mockRoleHierarchyService.assertCanGrantRole.mockImplementation((actor, target) =>
+        hierarchy.assertCanGrantRole(actor, target),
+      );
+      mockAuthorizationService.evaluateOrganizationAccess.mockResolvedValue({
+        isSuperAdmin: false,
+        roles: [UserRole.COORDINATOR],
+        organizationId: 'org',
+      });
+      mockMembershipRepo.findOne.mockResolvedValue({
+        id: 'm',
+        userId: 'target',
+        status: MembershipStatus.APPROVED,
+      });
+      await expect(service.grantRole('org', 'm', { role }, 'actor')).rejects.toThrow(
+        ForbiddenException,
+      );
+      mockMembershipRepo.findOne.mockResolvedValue({
+        id: 'm',
+        userId: 'target',
+        status: MembershipStatus.APPLIED,
+      });
+      await expect(
+        service.approveMembership('org', 'm', 'actor', { initialRole: role }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(mockMembershipRepo.save).not.toHaveBeenCalled();
+      expect(mockRoleGrantRepo.save).not.toHaveBeenCalled();
+    },
+  );
+  it('rejects self approval and self role grants', async () => {
+    mockAuthorizationService.assertNoSelfEscalation.mockImplementation((actor, target) => {
+      if (actor === target) throw new ForbiddenException('Self-escalation denied');
+    });
+    mockMembershipRepo.findOne.mockResolvedValue({
+      id: 'm',
+      userId: 'actor',
+      status: MembershipStatus.APPLIED,
+    });
+    await expect(service.approveMembership('org', 'm', 'actor', {})).rejects.toThrow(
+      ForbiddenException,
+    );
+    mockMembershipRepo.findOne.mockResolvedValue({
+      id: 'm',
+      userId: 'actor',
+      status: MembershipStatus.APPROVED,
+    });
+    await expect(
+      service.grantRole('org', 'm', { role: UserRole.VOLUNTEER }, 'actor'),
+    ).rejects.toThrow(ForbiddenException);
   });
 });

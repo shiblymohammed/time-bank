@@ -614,7 +614,7 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
               <Field name="quota" label="Monthly request quota" type="number" min={1} value={8} />
               <Field
                 name="categories"
-                label="Approved category codes (comma separated, * for all)"
+                label="Approved category IDs (comma separated, * for all)"
                 value="*"
               />
             </ActionForm>

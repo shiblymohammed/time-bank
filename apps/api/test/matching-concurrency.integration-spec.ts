@@ -1,3 +1,6 @@
+import { BeneficiariesService } from '../src/beneficiaries/beneficiaries.service';
+import { BeneficiaryEligibility } from '../src/beneficiaries/entities/beneficiary-eligibility.entity';
+import { CaregiverAuthorization } from '../src/beneficiaries/entities/caregiver-authorization.entity';
 import 'reflect-metadata';
 import { randomUUID } from 'crypto';
 import { join } from 'path';
@@ -7,6 +10,12 @@ import { JwtService } from '@nestjs/jwt';
 import httpRequest from 'supertest';
 import { DataSource } from 'typeorm';
 import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
+import { AuthService } from '../src/auth/auth.service';
+import { OtpChallenge } from '../src/auth/entities/otp-challenge.entity';
+import { AuthenticationSession } from '../src/auth/entities/authentication-session.entity';
+import { SmsService } from '../src/auth/sms/sms.service';
+import { sha256 } from '../src/auth/utils/phone.util';
 import { RequestsService } from '../src/requests/requests.service';
 import { RequestCancellation } from '../src/requests/entities/request-cancellation.entity';
 import { RequestRescheduleHistory } from '../src/requests/entities/request-reschedule.entity';
@@ -38,7 +47,7 @@ import { CommunityCreditPool } from '../src/donations/entities/community-credit-
 import { TimeLedgerService } from '../src/time-ledger/time-ledger.service';
 import { TimeCreditLedgerEntry } from '../src/time-ledger/entities/time-credit-ledger-entry.entity';
 import { UniversalTimeWallet } from '../src/identity/entities/universal-time-wallet.entity';
-import { VolunteerAssignmentStatus } from '@ktb/shared-types';
+import { UserRole, VolunteerAssignmentStatus } from '@ktb/shared-types';
 import { MatchingService } from '../src/matching/matching.service';
 import { AuditService } from '../src/audit/audit.service';
 import { AuditEvent } from '../src/audit/entities/audit-event.entity';
@@ -164,7 +173,9 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
 
   beforeEach(async () => {
     jest.restoreAllMocks();
-    await db.query('TRUNCATE audit_events, users, organizations, service_categories CASCADE');
+    await db.query(
+      'TRUNCATE otp_challenges, audit_events, users, organizations, service_categories CASCADE',
+    );
     sequence = 0;
     orgA = await id(
       "INSERT INTO organizations(code,name,district) VALUES('A','Organization A','Test') RETURNING id",
@@ -246,6 +257,138 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       [org, requestId, member, round],
     );
   }
+
+  describe('OTP concurrency and expiry', () => {
+    const phone = '+919000000001';
+    function authentication() {
+      const sms = { sendOtp: jest.fn().mockResolvedValue(true) };
+      return {
+        sms,
+        auth: new AuthService(
+          db.getRepository(OtpChallenge),
+          db.getRepository(AuthenticationSession),
+          db.getRepository(User),
+          db.getRepository(Organization),
+          db.getRepository(OrganizationMembership),
+          db,
+          new JwtService({ secret: 'disposable-integration-test-secret' }),
+          new ConfigService({ NODE_ENV: 'test' }),
+          audit,
+          sms as unknown as SmsService,
+        ),
+      };
+    }
+    async function challenge(code: string, ageSeconds: number, expiresSeconds = 600) {
+      return db.getRepository(OtpChallenge).save({
+        phoneHash: sha256(phone),
+        codeHash: sha256(code),
+        attemptCount: 0,
+        maxAttempts: 3,
+        createdAt: new Date(Date.now() - ageSeconds * 1000),
+        expiresAt: new Date(Date.now() + expiresSeconds * 1000),
+      });
+    }
+    it('reuses the verified phone account, wallet and approved memberships', async () => {
+      const { auth } = authentication();
+      const before = await db.getRepository(User).count();
+      const session = await auth.signInVerifiedPhone(phone, {});
+      expect(session.user.id).toBe(volunteer);
+      expect(await db.getRepository(User).count()).toBe(before);
+      const profile = await auth.getMe(volunteer);
+      expect(
+        profile.memberships.some(
+          (m) => m.organizationId === orgA && m.roles.includes(UserRole.VOLUNTEER),
+        ),
+      ).toBe(true);
+      expect(session.isSuperAdmin).toBe(false);
+    });
+    it('serializes concurrent first-time Firebase phone provisioning into one account and wallet', async () => {
+      const { auth } = authentication();
+      const freshPhone = '+919000000099';
+      const sessions = await Promise.all(
+        Array.from({ length: 4 }, () => auth.signInVerifiedPhone(freshPhone, {})),
+      );
+      expect(new Set(sessions.map((s) => s.user.id)).size).toBe(1);
+      expect(await db.getRepository(User).countBy({ phoneE164: freshPhone })).toBe(1);
+      expect(
+        await db.getRepository(UniversalTimeWallet).countBy({ userId: sessions[0]!.user.id }),
+      ).toBe(1);
+      expect(sessions.every((s) => s.roles.length === 0 && !s.isSuperAdmin)).toBe(true);
+    });
+    it('does not let a verified phone bypass a suspended Time Bank account', async () => {
+      const { auth } = authentication();
+      await db.query("UPDATE users SET status='SUSPENDED' WHERE id=$1", [volunteer]);
+      await expect(auth.signInVerifiedPhone(phone, {})).rejects.toThrow('suspended');
+      expect(await db.getRepository(AuthenticationSession).count()).toBe(0);
+    });
+
+    it('serializes simultaneous issuance before a challenge row exists', async () => {
+      const { auth, sms } = authentication();
+      const results = await Promise.allSettled(
+        Array.from({ length: 6 }, () => auth.requestOtp({ phone })),
+      );
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(await db.getRepository(OtpChallenge).count()).toBe(1);
+      expect(sms.sendOtp).toHaveBeenCalledTimes(1);
+      for (const result of results) {
+        if (result.status === 'rejected') expect(result.reason.getStatus()).toBe(429);
+      }
+    });
+    it('allows only one session from simultaneous verification and retains the cooldown', async () => {
+      const { auth } = authentication();
+      const issued = await auth.requestOtp({ phone });
+      const results = await Promise.allSettled(
+        Array.from({ length: 6 }, () => auth.verifyOtp({ phone, code: issued.devOtp! })),
+      );
+      expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(await db.getRepository(AuthenticationSession).count()).toBe(1);
+      const used = await db
+        .getRepository(OtpChallenge)
+        .findOneByOrFail({ phoneHash: sha256(phone) });
+      expect(used.consumedAt).not.toBeNull();
+      expect(used.attemptCount).toBe(1);
+      await expect(auth.requestOtp({ phone })).rejects.toMatchObject({ status: 429 });
+    });
+    it('persists every failed attempt without exceeding the shared attempt budget', async () => {
+      const { auth } = authentication();
+      const issued = await auth.requestOtp({ phone });
+      const results = await Promise.allSettled(
+        Array.from({ length: 8 }, () => auth.verifyOtp({ phone, code: '000000' })),
+      );
+      expect(results.every((r) => r.status === 'rejected')).toBe(true);
+      const used = await db
+        .getRepository(OtpChallenge)
+        .findOneByOrFail({ phoneHash: sha256(phone) });
+      expect(used.attemptCount).toBe(3);
+      expect(used.consumedAt).toBeNull();
+      await expect(auth.verifyOtp({ phone, code: issued.devOtp! })).rejects.toThrow(
+        'Maximum verification attempts',
+      );
+      expect(await db.getRepository(AuthenticationSession).count()).toBe(0);
+    });
+    it('does not revive an earlier code after the newest challenge was consumed', async () => {
+      const { auth } = authentication();
+      const older = await challenge('111111', 120);
+      await challenge('222222', 0);
+      await auth.verifyOtp({ phone, code: '222222' });
+      await expect(auth.verifyOtp({ phone, code: '111111' })).rejects.toThrow(
+        'No active verification challenge',
+      );
+      const unchanged = await db.getRepository(OtpChallenge).findOneByOrFail({ id: older.id });
+      expect(unchanged.consumedAt).toBeNull();
+      expect(unchanged.attemptCount).toBe(0);
+      expect(await db.getRepository(AuthenticationSession).count()).toBe(1);
+    });
+    it('does not fall back to an earlier code when the latest challenge expired', async () => {
+      const { auth } = authentication();
+      await challenge('111111', 120);
+      await challenge('222222', 0, -1);
+      await expect(auth.verifyOtp({ phone, code: '111111' })).rejects.toThrow(
+        'No active verification challenge',
+      );
+      expect(await db.getRepository(AuthenticationSession).count()).toBe(0);
+    });
+  });
 
   it('staff matching snapshot is tenant-scoped and excludes non-staff', async () => {
     const req = await request();
@@ -1048,6 +1191,71 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       );
       expect(done.reportedMinutes).toBe(60);
       expect(done.status).toBe('COMPLETED');
+    });
+
+    it('honors separate caregiver verification permission through request details and payment', async () => {
+      const { req, assignment } = await accepted();
+      await service.startAssignment(orgA, assignment, memberA, undefined, at(scheduled));
+      await service.finishAssignment(
+        orgA,
+        assignment,
+        memberA,
+        { minutes: 30 },
+        undefined,
+        at(scheduled),
+      );
+      await db.query(
+        "INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,'CAREGIVER',$2)",
+        [otherMember, coordinator],
+      );
+      const authId = await id(
+        "INSERT INTO caregiver_authorizations(organization_id,beneficiary_membership_id,caregiver_membership_id,status,can_initiate_requests,can_verify_completions,approved_by_user_id) VALUES($1,$2,$3,'APPROVED',true,false,$4) RETURNING id",
+        [orgA, beneficiaryA, otherMember, coordinator],
+      );
+      const verifier = new BeneficiariesService(
+        db.getRepository(BeneficiaryEligibility),
+        db.getRepository(CaregiverAuthorization),
+        db.getRepository(OrganizationMembership),
+        db.getRepository(ServiceRequest),
+        audit,
+        authorization,
+        db.getRepository(MembershipDocument),
+      );
+      const previous = (requests as any).beneficiariesService;
+      (requests as any).beneficiariesService = verifier;
+      try {
+        const context = await authorization.evaluateOrganizationAccess(otherVolunteer, orgA);
+        await expect(
+          requests.confirmCompletion(orgA, req, assignment, otherVolunteer, context, {}),
+        ).rejects.toThrow(ForbiddenException);
+        expect(
+          (
+            await db.query('SELECT confirmed_at FROM volunteer_assignments WHERE id=$1', [
+              assignment,
+            ])
+          )[0].confirmed_at,
+        ).toBeNull();
+        await db.query(
+          'UPDATE caregiver_authorizations SET can_initiate_requests=false, can_verify_completions=true WHERE id=$1',
+          [authId],
+        );
+        await expect(
+          verifier.verifyCaregiverProxyAccess(orgA, otherMember, beneficiaryA),
+        ).rejects.toThrow(ForbiddenException);
+        expect((await requests.getRequestById(orgA, req, otherVolunteer, context)).id).toBe(req);
+        const confirmed = await requests.confirmCompletion(
+          orgA,
+          req,
+          assignment,
+          otherVolunteer,
+          context,
+          {},
+        );
+        expect(confirmed.confirmedMinutes).toBe(30);
+        expect(confirmed.creditsEarned).toBe(0.5);
+      } finally {
+        (requests as any).beneficiariesService = previous;
+      }
     });
 
     it('never lets the volunteer confirm, even when they are also a coordinator', async () => {

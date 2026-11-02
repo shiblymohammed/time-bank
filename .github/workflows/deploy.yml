@@ -27,9 +27,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check confirmation input
+        env:
+          DEPLOY_CONFIRMATION: ${{ inputs.confirm }}
         run: |
-          if [ "${{ github.event.inputs.confirm }}" != "deploy" ]; then
-            echo "Confirmation string must be 'deploy'. Received: ${{ github.event.inputs.confirm }}"
+          if [ "$DEPLOY_CONFIRMATION" != "deploy" ]; then
+            echo "Confirmation string must be 'deploy'."
             exit 1
           fi
 
@@ -46,6 +48,9 @@ jobs:
     runs-on: ubuntu-latest
     # NFR-17: Explicit human approval via GitHub environment protection rules
     environment: production
+    permissions:
+      contents: read
+      packages: write
     outputs:
       image_tag: ${{ steps.meta.outputs.version }}
     steps:
