@@ -192,6 +192,16 @@ export class AuthService {
     // Throw after commit so a wrong code still spends an attempt.
     if (!valid) throw new UnauthorizedException('Invalid verification code');
 
+    return this.signInVerifiedPhone(phoneE164, dto, ipAddress);
+  }
+
+  /** Called only after a server OTP or a verified Firebase phone ID token. */
+  async signInVerifiedPhone(
+    phone: string,
+    dto: Pick<VerifyOtpDto, 'organizationCode' | 'deviceInfo'>,
+    ipAddress?: string,
+  ): Promise<AuthSessionResponse> {
+    const phoneE164 = normalizeToE164(phone);
     // 3. User lookup or onboarding in atomic transaction
     let user: User;
     let isNewUser = false;
@@ -201,6 +211,11 @@ export class AuthService {
     await queryRunner.startTransaction();
 
     try {
+      // Firebase may exchange the same verified phone concurrently on first login.
+      // Serialize provisioning so the unique phone/wallet constraints do not become a 500.
+      await queryRunner.manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [
+        `identity:${phoneE164}`,
+      ]);
       const userRepo = queryRunner.manager.getRepository(User);
       const identityRepo = queryRunner.manager.getRepository(VerifiedIdentity);
       const walletRepo = queryRunner.manager.getRepository(UniversalTimeWallet);

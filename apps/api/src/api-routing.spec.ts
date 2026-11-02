@@ -13,6 +13,7 @@ import { CatalogueController } from './catalogue/catalogue.controller';
 import { BeneficiariesController } from './beneficiaries/beneficiaries.controller';
 import { RequestsController } from './requests/requests.controller';
 import { MatchingController } from './matching/matching.controller';
+import { FirebaseTokenService } from './auth/firebase-token.service';
 import { AuthService } from './auth/auth.service';
 import { AdminService } from './admin/admin.service';
 import { OrganizationsService } from './organizations/organizations.service';
@@ -44,6 +45,7 @@ const controllers = [
   MatchingController,
 ];
 const services = [
+  FirebaseTokenService,
   DonationsService,
   TimeLedgerService,
   AuthService,

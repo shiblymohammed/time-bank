@@ -1,6 +1,6 @@
 # Time Bank application workflow
 
-This describes the implemented backend and live Flutter app as of 1 November 2026. The public landing page contains
+This describes the implemented backend and live Flutter app as of 2 November 2026. The public landing page contains
 demonstration content. Administrative work happens in the web dashboard; member work happens in Flutter. Preview/demo
 mode is separate from the live app.
 
@@ -12,7 +12,7 @@ zones, verify volunteer skills and handle matching exceptions.
 
 ## 2. Sign in and join
 
-1. The member enters a phone number and verifies a server-issued OTP.
+1. The Android member verifies a phone number through Firebase; the backend verifies the ID token and issues a Time Bank session. Legacy server OTP remains available for the dashboard and disposable QA.
 2. The backend creates or finds their global account and universal time-credit wallet. Flutter loads their profile and
    available active organizations.
 3. The member selects an organization and applies as a volunteer, beneficiary or caregiver. Volunteers provide travel
@@ -117,7 +117,7 @@ implemented. After connection problems, refresh the affected screen before repea
 | Fixed              | Confirmation used request-creation permission for caregivers                       | Separate confirmation/view checks; regression includes real PostgreSQL payment                |
 | Fixed              | A profile failure after OTP success forced reuse of a consumed OTP                 | Retry profile loading using the authenticated pending session                                 |
 | Fixed              | A failed wallet refresh could leave old wallet actions visible                     | Clear wallet/pool data before loading                                                         |
-| Production blocker | Production SMS gateway is unimplemented                                            | Development mock OTP only; implement a real gateway before production sign-in                 |
+| Production blocker | Production SMS gateway is unimplemented                                            | Android uses Firebase; the legacy dashboard OTP gateway still needs implementation                 |
 | Workflow gap       | No recurring matching progression worker                                           | Coordinator must evaluate progression/dispatch explicitly                                     |
 | Reliability risk   | Request creation persists before matching/audit finish                             | Creation is not one transaction across those steps; inspect a failed creation before retrying |
 | Unimplemented      | Binary uploads, offline sync, emergency alerts, merchant redemption, pool spending | Do not present these as live features                                                         |
@@ -144,3 +144,7 @@ budget/cooldown, and earlier codes are not revived after resending. Flutter disc
 and clearing volunteer ward preferences now sends an empty list. See [the bug audit](BUG_AUDIT_2026-11-02.md) for
 reproductions, validation and remaining production/recovery risks. This follow-up passed 460 backend tests, 59
 PostgreSQL integration tests, 20 dashboard tests and 56 Flutter tests.
+
+## Firebase phone login — 2 November 2026
+
+Android now uses Firebase phone verification and the backend ID-token exchange. Account restrictions, membership approval and permissions remain controlled by Time Bank. Deployment configuration, signing certificates, SMS quota and untested real-device steps are documented in [Firebase setup](FIREBASE_PHONE_AUTH.md).

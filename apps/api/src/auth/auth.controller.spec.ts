@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { AuthController } from './auth.controller';
+import { FirebaseTokenService } from './firebase-token.service';
 import { AuthService } from './auth.service';
 import { AuthGuard } from './guards/auth.guard';
 import { JwtService } from '@nestjs/jwt';
@@ -9,6 +10,7 @@ describe('AuthController', () => {
   let controller: AuthController;
 
   const mockAuthService = {
+    signInVerifiedPhone: jest.fn().mockResolvedValue({ accessToken: 'firebase-exchanged-session' }),
     requestOtp: jest.fn().mockResolvedValue({
       success: true,
       message: 'OTP sent',
@@ -46,6 +48,10 @@ describe('AuthController', () => {
       controllers: [AuthController],
       providers: [
         { provide: AuthService, useValue: mockAuthService },
+        {
+          provide: FirebaseTokenService,
+          useValue: { verifyPhoneToken: jest.fn().mockResolvedValue('+919876543210') },
+        },
         { provide: AuthGuard, useValue: { canActivate: jest.fn().mockReturnValue(true) } },
         { provide: JwtService, useValue: {} },
         { provide: ConfigService, useValue: { get: jest.fn() } },
@@ -53,6 +59,16 @@ describe('AuthController', () => {
     }).compile();
 
     controller = module.get<AuthController>(AuthController);
+  });
+
+  it('exchanges only the phone derived from the verified Firebase token', async () => {
+    const result = await controller.firebaseSignIn({ idToken: 'signed-token' }, mockReq);
+    expect(result.accessToken).toBe('firebase-exchanged-session');
+    expect(mockAuthService.signInVerifiedPhone).toHaveBeenCalledWith(
+      '+919876543210',
+      { idToken: 'signed-token' },
+      '127.0.0.1',
+    );
   });
 
   it('should be defined', () => {

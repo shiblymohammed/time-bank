@@ -12,7 +12,9 @@ packages:
   # Shared tsconfig bases
   - "packages/tsconfig"
 allowBuilds:
+  '@firebase/util': true
   '@nestjs/core': true
   '@scarf/scarf': false
   bcrypt: true
+  protobufjs: true
   unrs-resolver: true

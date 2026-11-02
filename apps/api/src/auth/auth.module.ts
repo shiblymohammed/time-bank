@@ -12,6 +12,7 @@ import { Organization } from '../organizations/entities/organization.entity';
 import { OrganizationMembership } from '../memberships/entities/organization-membership.entity';
 import { MembershipRoleGrant } from '../memberships/entities/membership-role-grant.entity';
 
+import { FirebaseTokenService } from './firebase-token.service';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { AuthGuard } from './guards/auth.guard';
@@ -42,7 +43,7 @@ import { SmsService } from './sms/sms.service';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, AuthGuard, SmsService],
+  providers: [AuthService, AuthGuard, SmsService, FirebaseTokenService],
   exports: [JwtModule, AuthGuard, AuthService, SmsService],
 })
 export class AuthModule {}

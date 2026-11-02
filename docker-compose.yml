@@ -45,6 +45,7 @@ services:
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
       JWT_ACCESS_TOKEN_EXPIRY: ${JWT_ACCESS_TOKEN_EXPIRY:-15m}
       JWT_REFRESH_TOKEN_EXPIRY: ${JWT_REFRESH_TOKEN_EXPIRY:-7d}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-time-bank-34a1c}
     ports:
       - "127.0.0.1:${API_PORT:-3001}:3001"
     volumes:
@@ -61,6 +62,7 @@ services:
       start_period: 60s
     networks:
       - ktb_internal
+      - ktb_api_egress
 
   # ─── Next.js Web Dashboard ───────────────────────────────────────────────
   # D#96: Next.js + React + TypeScript role-aware dashboards
@@ -110,6 +112,10 @@ volumes:
     driver: local
 
 networks:
+  # Firebase token verification fetches Google's public signing certificates.
+  # This grants API outbound connectivity without giving Postgres an external network.
+  ktb_api_egress:
+    driver: bridge
   # Internal network — only containers can reach postgres and api directly
   ktb_internal:
     driver: bridge

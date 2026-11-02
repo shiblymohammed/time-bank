@@ -38,7 +38,7 @@ import { CommunityCreditPool } from '../src/donations/entities/community-credit-
 import { TimeLedgerService } from '../src/time-ledger/time-ledger.service';
 import { TimeCreditLedgerEntry } from '../src/time-ledger/entities/time-credit-ledger-entry.entity';
 import { UniversalTimeWallet } from '../src/identity/entities/universal-time-wallet.entity';
-import { VolunteerAssignmentStatus } from '@ktb/shared-types';
+import { UserRole, VolunteerAssignmentStatus } from '@ktb/shared-types';
 import { MatchingService } from '../src/matching/matching.service';
 import { AuditService } from '../src/audit/audit.service';
 import { AuditEvent } from '../src/audit/entities/audit-event.entity';
@@ -278,6 +278,40 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         expiresAt: new Date(Date.now() + expiresSeconds * 1000),
       });
     }
+    it('reuses the verified phone account, wallet and approved memberships', async () => {
+      const { auth } = authentication();
+      const before = await db.getRepository(User).count();
+      const session = await auth.signInVerifiedPhone(phone, {});
+      expect(session.user.id).toBe(volunteer);
+      expect(await db.getRepository(User).count()).toBe(before);
+      const profile = await auth.getMe(volunteer);
+      expect(
+        profile.memberships.some(
+          (m) => m.organizationId === orgA && m.roles.includes(UserRole.VOLUNTEER),
+        ),
+      ).toBe(true);
+      expect(session.isSuperAdmin).toBe(false);
+    });
+    it('serializes concurrent first-time Firebase phone provisioning into one account and wallet', async () => {
+      const { auth } = authentication();
+      const freshPhone = '+919000000099';
+      const sessions = await Promise.all(
+        Array.from({ length: 4 }, () => auth.signInVerifiedPhone(freshPhone, {})),
+      );
+      expect(new Set(sessions.map((s) => s.user.id)).size).toBe(1);
+      expect(await db.getRepository(User).countBy({ phoneE164: freshPhone })).toBe(1);
+      expect(
+        await db.getRepository(UniversalTimeWallet).countBy({ userId: sessions[0]!.user.id }),
+      ).toBe(1);
+      expect(sessions.every((s) => s.roles.length === 0 && !s.isSuperAdmin)).toBe(true);
+    });
+    it('does not let a verified phone bypass a suspended Time Bank account', async () => {
+      const { auth } = authentication();
+      await db.query("UPDATE users SET status='SUSPENDED' WHERE id=$1", [volunteer]);
+      await expect(auth.signInVerifiedPhone(phone, {})).rejects.toThrow('suspended');
+      expect(await db.getRepository(AuthenticationSession).count()).toBe(0);
+    });
+
     it('serializes simultaneous issuance before a challenge row exists', async () => {
       const { auth, sms } = authentication();
       const results = await Promise.allSettled(

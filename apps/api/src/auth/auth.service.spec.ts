@@ -92,6 +92,7 @@ describe('AuthService', () => {
     rollbackTransaction: jest.fn(),
     release: jest.fn(),
     manager: {
+      query: jest.fn().mockResolvedValue([]),
       getRepository: jest.fn(),
     },
   };
