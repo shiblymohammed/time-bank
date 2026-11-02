@@ -37,11 +37,11 @@ export function Footer() {
 
         <div className="footer-columns">
           <div className="footer-brand-column">
-            <a href="#" aria-label="Kottakkal Time Bank home" style={{ display: 'inline-flex', alignItems: 'center', color: '#FFFFFF', textDecoration: 'none' }}>
+            <a href="#" aria-label="Kottakkal Time Bank home" style={{ display: 'inline-flex', alignItems: 'center', background: '#FFFFFF', padding: '0.45rem 0.85rem', borderRadius: '12px', boxShadow: '0 4px 16px rgba(0,0,0,0.2)', textDecoration: 'none' }}>
               <img
-                src="/time%20bank%20logo.png"
+                src="/kottakkal-time-bank-logo-1.png"
                 alt="Kottakkal Time Bank"
-                style={{ display: 'block', width: 'clamp(180px, 22vw, 250px)', height: 'auto', maxHeight: '76px', objectFit: 'contain' }}
+                style={{ display: 'block', width: 'clamp(140px, 16vw, 190px)', height: 'auto', maxHeight: '46px', objectFit: 'contain' }}
               />
             </a>
             <p style={{ maxWidth: '390px', color: '#B8BCC7', fontSize: '0.78rem', lineHeight: 1.7, marginTop: '1rem' }}>

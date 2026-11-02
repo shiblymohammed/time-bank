@@ -61,7 +61,7 @@ export function Navbar() {
           }}
         >
           <img
-            src="/time%20bank%20logo.png"
+            src="/kottakkal-time-bank-logo-1.png"
             alt="Kottakkal Time Bank"
             style={{
               display: 'block',
