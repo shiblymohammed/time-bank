@@ -1,8 +1,7 @@
 # Time Bank application workflow
 
-This describes the implemented backend and live Flutter app as of 2 November 2026. The public landing page contains
-demonstration content. Administrative work happens in the web dashboard; member work happens in Flutter. Preview/demo
-mode is separate from the live app.
+This describes the implemented backend, web dashboard and live Flutter app as of 2 November 2026. Administrative work
+happens in the web dashboard; member work happens in Flutter. Preview/demo mode is separate from the live app.
 
 ## 1. Organization setup
 

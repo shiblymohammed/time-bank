@@ -78,7 +78,7 @@ services:
     environment:
       NODE_ENV: development
       API_INTERNAL_URL: http://api:3001
-      NEXT_PUBLIC_API_URL: http://localhost:${API_PORT:-3001}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:3001}
       NEXT_PUBLIC_APP_ENV: development
     ports:
       - "127.0.0.1:${WEB_PORT:-3000}:3000"
@@ -93,13 +93,13 @@ services:
 
   # ─── Nginx reverse proxy ─────────────────────────────────────────────────
   # NFR-08: TLS termination; NFR-02: reverse proxy layer
-  # In dev, Nginx routes both web and API traffic through one port (8080)
+  # Nginx exposes the admin dashboard and API through host port 80.
   nginx:
     image: nginx:1.27-alpine
     container_name: ktb_nginx_dev
     restart: unless-stopped
     ports:
-      - "8080:80"
+      - "80:80"
     volumes:
       - ./infra/nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
     depends_on:

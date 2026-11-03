@@ -18,7 +18,6 @@ kottakkal-time-bank/
 ├── apps/
 │   ├── api/          # @ktb/api     — NestJS + TypeScript + PostgreSQL (D#95)
 │   ├── web/          # @ktb/web     — Next.js + React + TypeScript (D#96)
-│   ├── landing/      # @ktb/landing — Public community landing page
 │   └── mobile/       # ktb_mobile   — Flutter Android (D#94); iOS later
 ├── packages/
 │   ├── shared-types/ # @ktb/shared-types — enums/types shared by api & web
