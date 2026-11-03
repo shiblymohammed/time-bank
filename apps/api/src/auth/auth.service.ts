@@ -116,7 +116,11 @@ export class AuthService {
     const cooldownCutoff = new Date(Date.now() - cooldownSeconds * 1000);
 
     const isDev = this.configService.get('NODE_ENV') !== 'production';
-    const otp = crypto.randomInt(100000, 1000000).toString();
+    const isLocalMockOtp =
+      ['development', 'test'].includes(this.configService.get<string>('NODE_ENV') ?? '') &&
+      this.configService.get<string>('AUTH_ALLOW_MOCK_OTP') === 'true' &&
+      this.configService.get<string>('SMS_PROVIDER', 'local-mock') === 'local-mock';
+    const otp = isLocalMockOtp ? '123456' : crypto.randomInt(100000, 1000000).toString();
     const expirySeconds = Number(this.configService.get('OTP_EXPIRY_SECONDS') ?? 600);
     const expiresAt = new Date(Date.now() + expirySeconds * 1000);
     const maxAttempts = Number(this.configService.get('OTP_MAX_ATTEMPTS') ?? 3);
