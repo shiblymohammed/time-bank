@@ -2,11 +2,12 @@
   "extends": "@ktb/tsconfig/base.json",
   "compilerOptions": {
     "module": "CommonJS",
-    "moduleResolution": "Node",
+    "moduleResolution": "node",
     "emitDecoratorMetadata": true,
     "experimentalDecorators": true,
     "rootDir": "src",
     "outDir": "dist",
+    "ignoreDeprecations": "6.0",
     "baseUrl": ".",
     "paths": {
       "@ktb/shared-types": ["../../packages/shared-types/dist"]

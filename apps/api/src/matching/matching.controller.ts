@@ -16,6 +16,7 @@ import { Request } from 'express';
 import { UserRole } from '@ktb/shared-types';
 
 import { MatchingService } from './matching.service';
+import { TeamService } from './team.service';
 import { UpdateVolunteerAvailabilityDto } from './dto/update-volunteer-availability.dto';
 import { VerifyVolunteerSkillDto } from './dto/verify-volunteer-skill.dto';
 import { AcceptVolunteerOfferDto } from './dto/accept-volunteer-offer.dto';
@@ -27,6 +28,8 @@ import { DispatchVolunteerQueryDto } from './dto/dispatch-volunteer-query.dto';
 import { CreateOperationalZoneDto } from './dto/create-operational-zone.dto';
 import { UpdateOperationalZoneDto } from './dto/update-operational-zone.dto';
 import { AssignVolunteerZoneDto } from './dto/assign-volunteer-zone.dto';
+import { InviteTeammateDto } from './dto/invite-teammate.dto';
+import { RespondInvitationDto } from './dto/respond-invitation.dto';
 
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { OrganizationAccessGuard } from '../authorization/guards/organization-access.guard';
@@ -38,7 +41,10 @@ import { CurrentUserId } from '../authorization/decorators/current-user.decorato
 @ApiBearerAuth('JWT-auth')
 @Controller('organizations/:id')
 export class MatchingController {
-  constructor(private readonly matchingService: MatchingService) {}
+  constructor(
+    private readonly matchingService: MatchingService,
+    private readonly teamService: TeamService,
+  ) {}
 
   // ─── Operational Zones (Coordinator-Managed) ───────────────────────────────
   @Post('zones')
@@ -213,6 +219,7 @@ export class MatchingController {
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('assignmentId', ParseUUIDPipe) assignmentId: string,
     @Body() dto: AcceptVolunteerOfferDto,
+    @CurrentUserId() userId: string,
     @Req() req: Request,
   ) {
     const membershipContext = (req as any).organizationMembership;
@@ -223,6 +230,7 @@ export class MatchingController {
       membershipContext.membershipId,
       dto,
       ip,
+      userId, // passed for cross-org membership resolution
     );
   }
 
@@ -234,6 +242,7 @@ export class MatchingController {
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('assignmentId', ParseUUIDPipe) assignmentId: string,
     @Body() dto: DeclineVolunteerOfferDto,
+    @CurrentUserId() userId: string,
     @Req() req: Request,
   ) {
     const membershipContext = (req as any).organizationMembership;
@@ -244,6 +253,7 @@ export class MatchingController {
       membershipContext.membershipId,
       dto,
       ip,
+      userId,
     );
   }
 
@@ -255,6 +265,7 @@ export class MatchingController {
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('assignmentId', ParseUUIDPipe) assignmentId: string,
     @Body() dto: WithdrawVolunteerAssignmentDto,
+    @CurrentUserId() userId: string,
     @Req() req: Request,
   ) {
     const membershipContext = (req as any).organizationMembership;
@@ -265,6 +276,7 @@ export class MatchingController {
       membershipContext.membershipId,
       dto,
       ip,
+      userId,
     );
   }
 
@@ -382,5 +394,63 @@ export class MatchingController {
     @Param('requestId', ParseUUIDPipe) requestId: string,
   ) {
     return this.matchingService.evaluateRoundProgression(organizationId, requestId);
+  }
+
+  // ─── Team Invitations (Milestone 5, FR-TEAM-02, D#65) ───────────────────────
+
+  @Post('requests/:requestId/invite')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @ApiOperation({ summary: 'Invite a teammate to fill a remaining slot (FR-TEAM-02, D#65)' })
+  @ApiResponse({ status: 201, description: 'Invitation sent' })
+  @ApiResponse({ status: 403, description: 'Caller is not an accepted volunteer on this request' })
+  @ApiResponse({ status: 409, description: 'All slots filled or duplicate invitation' })
+  async inviteTeammate(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @Body() dto: InviteTeammateDto,
+    @CurrentUserId() userId: string,
+    @Req() req: Request,
+  ) {
+    const ip = req.ip ?? req.socket.remoteAddress;
+    return this.teamService.inviteTeammate(organizationId, requestId, dto, userId, ip);
+  }
+
+  @Post('invitations/:invitationId/accept')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @ApiOperation({ summary: 'Accept a team invitation and join the request' })
+  @ApiResponse({ status: 200, description: 'Invitation accepted — assignment created' })
+  async acceptInvitation(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @Param('invitationId', ParseUUIDPipe) invitationId: string,
+    @CurrentUserId() userId: string,
+    @Req() req: Request,
+  ) {
+    const ip = req.ip ?? req.socket.remoteAddress;
+    return this.teamService.acceptInvitation(organizationId, invitationId, userId, ip);
+  }
+
+  @Post('invitations/:invitationId/decline')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @ApiOperation({ summary: 'Decline a team invitation' })
+  @ApiResponse({ status: 200, description: 'Invitation declined' })
+  async declineInvitation(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @Param('invitationId', ParseUUIDPipe) invitationId: string,
+    @Body() dto: RespondInvitationDto,
+    @CurrentUserId() userId: string,
+    @Req() req: Request,
+  ) {
+    const ip = req.ip ?? req.socket.remoteAddress;
+    return this.teamService.declineInvitation(organizationId, invitationId, userId, dto, ip);
+  }
+
+  @Get('invitations/mine')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @ApiOperation({ summary: 'List pending team invitations for the calling volunteer' })
+  async listMyInvitations(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @CurrentUserId() userId: string,
+  ) {
+    return this.teamService.listMyInvitations(organizationId, userId);
   }
 }

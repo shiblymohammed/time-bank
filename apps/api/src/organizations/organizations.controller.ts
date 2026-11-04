@@ -48,12 +48,16 @@ export class OrganizationsController {
 
   /**
    * GET /api/v1/organizations
-   * Lists organizations. Super Admin sees all; regular users see active public summaries.
+   * Lists organizations. Super Admin sees all (including inactive + app builds);
+   * authenticated users see active organizations only (for org selection on join).
+   * Unauthenticated callers get a 401.
    */
   @Get()
+  @UseGuards(AuthGuard)
   @ApiOperation({ summary: 'List onboarded organizations' })
-  async listOrganizations() {
-    const orgs = await this.orgsService.findAll(true);
+  async listOrganizations(@CurrentUserId() userId: string) {
+    const isSuperAdmin = await this.orgsService.isCallerSuperAdmin(userId);
+    const orgs = await this.orgsService.findAll(isSuperAdmin);
     return {
       success: true,
       data: orgs,

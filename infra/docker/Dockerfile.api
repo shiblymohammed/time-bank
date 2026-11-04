@@ -63,4 +63,7 @@ ENV NODE_ENV=production
 HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=3 \
   CMD wget -qO- http://127.0.0.1:3001/api/health/live || exit 1
 
+# Default command: start the API server.
+# To run migrations instead (one-shot container in deploy pipeline):
+#   docker run --rm --env DATABASE_URL=... ktb/api:TAG node apps/api/dist/database/run-migrations.js
 CMD ["node", "apps/api/dist/main.js"]

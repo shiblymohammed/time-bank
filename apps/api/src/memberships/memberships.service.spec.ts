@@ -1,5 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { DataSource } from 'typeorm';
 import {
   BadRequestException,
   ConflictException,
@@ -63,6 +64,45 @@ describe('MembershipsService', () => {
     manager: mockManager,
   };
 
+  // DataSource mock for approveMembership transaction
+  // Routes manager calls back through the individual repo mocks so existing tests
+  // that mock mockMembershipRepo.findOne etc. continue to work unchanged.
+  const mockDataSource = {
+    transaction: jest.fn(async (_isolation: string, action: any) =>
+      action({
+        findOne: jest.fn(async (entity: any, options: any) => {
+          const name: string = entity?.name ?? '';
+          if (name === 'OrganizationMembership') return mockMembershipRepo.findOne(options);
+          if (name === 'MembershipRoleGrant') return mockRoleGrantRepo.findOne(options);
+          return null;
+        }),
+        count: jest.fn(async () => mockMembershipRepo.count()),
+        save: jest.fn(async (entity: any, row: any) => {
+          const name: string = entity?.name ?? '';
+          if (name === 'MembershipRoleGrant') return mockRoleGrantRepo.save(row);
+          if (name === 'MembershipApproval') return mockApprovalRepo.save(row);
+          return mockMembershipRepo.save(row ?? entity);
+        }),
+        create: jest.fn((entity: any, data: any) => {
+          const name: string = entity?.name ?? '';
+          if (name === 'MembershipRoleGrant') return mockRoleGrantRepo.create(data);
+          if (name === 'MembershipApproval') return mockApprovalRepo.create(data);
+          return data ?? entity;
+        }),
+        createQueryBuilder: jest.fn(() => ({
+          select: jest.fn().mockReturnThis(),
+          from: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          getRawOne: jest.fn().mockResolvedValue({ '?column?': 1 }),
+        })),
+        increment: jest.fn().mockResolvedValue(undefined),
+        update: jest.fn().mockResolvedValue({ affected: 1 }),
+      }),
+    ),
+    getRepository: jest.fn(() => mockRoleGrantRepo),
+  };
+
   const mockRoleGrantRepo = {
     findOne: jest.fn(),
     create: jest.fn(),
@@ -120,6 +160,7 @@ describe('MembershipsService', () => {
         { provide: getRepositoryToken(MembershipRoleGrant), useValue: mockRoleGrantRepo },
         { provide: getRepositoryToken(MembershipApproval), useValue: mockApprovalRepo },
         { provide: getRepositoryToken(MembershipDocument), useValue: mockDocumentRepo },
+        { provide: DataSource, useValue: mockDataSource },
         { provide: AuditService, useValue: mockAuditService },
         { provide: AuthorizationService, useValue: mockAuthorizationService },
         { provide: RoleHierarchyService, useValue: mockRoleHierarchyService },
@@ -342,6 +383,7 @@ describe('MembershipsService', () => {
       );
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'MEMBERSHIP_APPROVED' }),
+        expect.anything(), // EntityManager passed inside transaction
       );
     });
   });

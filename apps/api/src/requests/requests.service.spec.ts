@@ -33,6 +33,7 @@ import {
   EvaluatedMembershipContext,
 } from '../authorization/authorization.service';
 import { TimeLedgerService } from '../time-ledger/time-ledger.service';
+import { LoyaltyService } from '../loyalty/loyalty.service';
 
 describe('RequestsService', () => {
   let service: RequestsService;
@@ -131,6 +132,7 @@ describe('RequestsService', () => {
         { provide: MatchingService, useValue: mockMatchingService },
         { provide: AuditService, useValue: mockAuditService },
         { provide: TimeLedgerService, useValue: {} },
+        { provide: LoyaltyService, useValue: { postServiceEarning: jest.fn().mockResolvedValue({ coinsEarned: 0 }) } },
         {
           provide: AuthorizationService,
           useValue: {
@@ -184,9 +186,12 @@ describe('RequestsService', () => {
       );
       expect(mockMatchingService.findCandidatesAndDispatchOffers).toHaveBeenCalledWith(
         expect.objectContaining({ id: 'req-1' }),
+        undefined,
+        expect.objectContaining({ getRepository: expect.any(Function) }),
       );
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'SERVICE_REQUEST_CREATED' }),
+        expect.objectContaining({ getRepository: expect.any(Function) }),
       );
     });
 

@@ -6,7 +6,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import {
   MembershipStatus,
   MembershipApprovalAction,
@@ -56,6 +56,7 @@ export class MembershipsService {
     private readonly approvalRepo: Repository<MembershipApproval>,
     @InjectRepository(MembershipDocument)
     private readonly documentRepo: Repository<MembershipDocument>,
+    private readonly dataSource: DataSource,
     private readonly auditService: AuditService,
     private readonly authorizationService: AuthorizationService,
     private readonly roleHierarchyService: RoleHierarchyService,
@@ -233,21 +234,24 @@ export class MembershipsService {
     dto: ApproveMembershipDto,
     ipAddress?: string,
   ): Promise<OrganizationMembership> {
-    const membership = await this.membershipRepo.findOne({
+    // Note: early membership existence/status checks moved inside the transaction
+    // so they're covered by the pessimistic write lock that prevents race conditions.
+    // The role authorization check still happens here (outside the tx) because it
+    // reads from a different table and doesn't need to be serialized.
+    const earlyCheck = await this.membershipRepo.findOne({
       where: { id: membershipId, organizationId },
-      relations: ['roleGrants'],
+      select: ['id', 'userId', 'status', 'requestedRole'],
     });
 
-    if (!membership) {
+    if (!earlyCheck) {
       throw new NotFoundException('Membership application not found in this organization');
     }
-
-    if (membership.status === MembershipStatus.APPROVED) {
+    if (earlyCheck.status === MembershipStatus.APPROVED) {
       throw new BadRequestException('Membership is already approved');
     }
 
-    const initialRole = dto.initialRole ?? membership.requestedRole ?? UserRole.VOLUNTEER;
-    this.authorizationService.assertNoSelfEscalation(approverId, membership.userId, initialRole);
+    const initialRole = dto.initialRole ?? earlyCheck.requestedRole ?? UserRole.VOLUNTEER;
+    this.authorizationService.assertNoSelfEscalation(approverId, earlyCheck.userId, initialRole);
     await this.assertCanManageRole(organizationId, approverId, initialRole);
 
     const org = await this.orgRepo.findOne({ where: { id: organizationId } });
@@ -255,68 +259,85 @@ export class MembershipsService {
       throw new NotFoundException('Organization not found');
     }
 
-    // Generate formatted sequential membership number: {ORG_CODE}-{YEAR}-{INDEX}
-    const approvedCount = await this.membershipRepo.count({
-      where: { organizationId, status: MembershipStatus.APPROVED },
-    });
-    const year = new Date().getFullYear();
-    const membershipNumber = `${org.code}-${year}-${String(approvedCount + 1).padStart(4, '0')}`;
+    // ── Atomic membership number generation ──────────────────────────────────
+    // Lock the membership row for the duration of this transaction so concurrent
+    // approvals of the same application serialize their COUNT queries.
+    // The org was already fetched and validated above — we reuse it here.
+    return this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      // Row-lock the membership to prevent two coordinators approving simultaneously.
+      // SELECT ... FOR UPDATE on the membership row serializes the count query.
+      await manager
+        .createQueryBuilder()
+        .select('1')
+        .from(OrganizationMembership, 'om')
+        .where('om.id = :id', { id: membershipId })
+        .setLock('pessimistic_write')
+        .getRawOne();
 
-    membership.status = MembershipStatus.APPROVED;
-    membership.approvedAt = new Date();
-    membership.approvedBy = approverId;
-    membership.membershipNumber = membershipNumber;
-    membership.rejectionReason = null;
-    const saved = await this.membershipRepo.save(membership);
+      const membershipLocked = earlyCheck;
 
-    // Grant initial role (default: VOLUNTEER)
-    const existingGrant = await this.roleGrantRepo.findOne({
-      where: {
-        membershipId: saved.id,
-        role: initialRole,
-        status: RoleGrantStatus.ACTIVE,
-      },
-    });
-
-    if (!existingGrant) {
-      const grant = this.roleGrantRepo.create({
-        membershipId: saved.id,
-        role: initialRole,
-        status: RoleGrantStatus.ACTIVE,
-        grantedBy: approverId,
+      // Transactional count inside the lock — guarantees no duplicate numbers
+      const approvedCount = await manager.count(OrganizationMembership, {
+        where: { organizationId, status: MembershipStatus.APPROVED },
       });
-      await this.roleGrantRepo.save(grant);
-    }
-    if (initialRole === UserRole.VOLUNTEER) await this.seedVolunteerProfile(saved);
 
-    // Record approval audit trail
-    const approval = this.approvalRepo.create({
-      membershipId: saved.id,
-      action: MembershipApprovalAction.MEMBERSHIP_APPROVED,
-      actorId: approverId,
-      notes: dto.notes ?? 'Application approved',
-    });
-    await this.approvalRepo.save(approval);
+      const year = new Date().getFullYear();
+      // Bound org code to max 20 chars so number fits in VARCHAR(50):
+      // 20 + '-' + 4 + '-' + 4 = 31 chars max
+      const safeCode = org.code.slice(0, 20).toUpperCase();
+      const membershipNumber = `${safeCode}-${year}-${String(approvedCount + 1).padStart(4, '0')}`;
 
-    await this.auditService.logEvent({
-      eventType: 'MEMBERSHIP_APPROVED',
-      actorId: approverId,
-      targetId: saved.id,
-      targetType: 'ORGANIZATION_MEMBERSHIP',
-      organizationId,
-      ipAddress,
-      payload: {
-        membershipNumber,
-        initialRole,
-        notes: dto.notes ?? null,
-      },
-    });
+      membershipLocked.status = MembershipStatus.APPROVED;
+      membershipLocked.approvedAt = new Date();
+      membershipLocked.approvedBy = approverId;
+      membershipLocked.membershipNumber = membershipNumber;
+      membershipLocked.rejectionReason = null;
+      const saved = await manager.save(OrganizationMembership, membershipLocked);
 
-    const updated = await this.membershipRepo.findOne({
-      where: { id: saved.id },
-      relations: ['roleGrants', 'approvals'],
-    });
-    return updated!;
+      // Grant initial role (default: VOLUNTEER)
+      const existingGrant = await manager.findOne(MembershipRoleGrant, {
+        where: { membershipId: saved.id, role: initialRole, status: RoleGrantStatus.ACTIVE },
+      });
+
+      if (!existingGrant) {
+        const grant = manager.create(MembershipRoleGrant, {
+          membershipId: saved.id,
+          role: initialRole,
+          status: RoleGrantStatus.ACTIVE,
+          grantedBy: approverId,
+        });
+        await manager.save(MembershipRoleGrant, grant);
+      }
+      if (initialRole === UserRole.VOLUNTEER) await this.seedVolunteerProfile(saved);
+
+      // Record approval audit trail
+      const approval = manager.create(MembershipApproval, {
+        membershipId: saved.id,
+        action: MembershipApprovalAction.MEMBERSHIP_APPROVED,
+        actorId: approverId,
+        notes: dto.notes ?? 'Application approved',
+      });
+      await manager.save(MembershipApproval, approval);
+
+      await this.auditService.logEvent(
+        {
+          eventType: 'MEMBERSHIP_APPROVED',
+          actorId: approverId,
+          targetId: saved.id,
+          targetType: 'ORGANIZATION_MEMBERSHIP',
+          organizationId,
+          ipAddress,
+          payload: { membershipNumber, initialRole, notes: dto.notes ?? null },
+        },
+        manager,
+      );
+
+      const updated = await manager.findOne(OrganizationMembership, {
+        where: { id: saved.id },
+        relations: ['roleGrants', 'approvals'],
+      });
+      return updated!;
+    });;
   }
 
   /**

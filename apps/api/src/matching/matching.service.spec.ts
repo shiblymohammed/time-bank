@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   GlobalRestrictionStatus,
@@ -17,6 +17,7 @@ import {
 
 import { OrganizationServiceCatalog } from '../catalogue/entities/organization-service-catalog.entity';
 import { MatchingService } from './matching.service';
+import { TeamService } from './team.service';
 import { VolunteerSkill } from './entities/volunteer-skill.entity';
 import { VolunteerAvailability } from './entities/volunteer-availability.entity';
 import { VolunteerAssignment } from './entities/volunteer-assignment.entity';
@@ -122,13 +123,24 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
   };
   const mockTransactionalManager = {
     findOne: jest.fn(async (entity, options) => {
-      if (entity === OrganizationMembership)
+      if (entity === OrganizationMembership) {
+        // assertNotBeneficiary queries with { select: ['id','userId'] } — return a
+        // different userId so volunteer ≠ beneficiary in the default (happy) path.
+        const isSelectOnly =
+          options?.select &&
+          Array.isArray(options.select) &&
+          options.select.includes('userId') &&
+          !options.select.includes('roleGrants');
+        if (isSelectOnly) {
+          return { id: options.where?.id, userId: 'user-ben-other' };
+        }
         return {
           id: options.where.id,
           userId: 'user-vol-1',
           status: MembershipStatus.APPROVED,
           roleGrants: [{ role: UserRole.VOLUNTEER, status: RoleGrantStatus.ACTIVE }],
         };
+      }
       if (entity === User) return { id: 'user-vol-1', status: AccountStatus.ACTIVE };
       if (entity === GlobalAccountRestriction) return null;
       return mockAssignmentLookup(entity, options);
@@ -213,6 +225,7 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
         { provide: DataSource, useValue: mockDataSource },
         { provide: AuditService, useValue: mockAuditService },
         { provide: AuthorizationService, useValue: { assertMembershipAccess: jest.fn() } },
+        { provide: TeamService, useValue: { handleSubMinimumAfterWithdrawal: jest.fn().mockResolvedValue(undefined) } },
       ],
     }).compile();
 
@@ -751,6 +764,134 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
         expect.objectContaining({ eventType: 'REQUEST_ESCALATED_TO_COORDINATOR' }),
         mockTransactionalManager,
       );
+    });
+  });
+
+  // ─── Self-service prevention (D#5 / assertNotBeneficiary) ─────────────────
+
+  describe('assertNotBeneficiary — cross-org self-match prevention (D#5)', () => {
+    /**
+     * Setup: the default mockTransactionalManager.findOne returns userId 'user-vol-1'
+     * for any OrganizationMembership lookup.  To simulate a self-match we configure
+     * the request's beneficiaryMembershipId to point at a membership that also
+     * resolves to userId 'user-vol-1' — exactly what happens when a volunteer holds
+     * a second membership in the same or another org and that membership is the
+     * beneficiary on the request.
+     */
+    const selfMatchRequest = {
+      id: 'req-self',
+      organizationId: 'org-1',
+      status: ServiceRequestStatus.MATCHING_ACTIVE,
+      minVolunteers: 1,
+      preferredVolunteers: 999, // large value — slot-fill check never triggers in tests
+      scheduledStartTime: new Date('2030-06-01T10:00:00Z'),
+      expectedDurationMinutes: 60,
+      beneficiaryMembershipId: 'ben-mem-same-user',
+      latestRescheduleId: null,
+      serviceCatalog: {
+        requiresCoordinatorDispatch: false,
+        isEnabled: true,
+        globalService: { requiresSkills: false, requiredSkillCodes: [] },
+      },
+    };
+
+    beforeEach(() => {
+      // Default assignment lookup for acceptOffer
+      mockAssignmentLookup.mockResolvedValue({
+        id: 'assign-self',
+        organizationId: 'org-1',
+        serviceRequestId: 'req-self',
+        volunteerMembershipId: 'vol-mem-1',
+        status: VolunteerAssignmentStatus.OFFERED,
+        offerExpiresAt: new Date(Date.now() + 10 * 60 * 1000),
+        matchingRoundId: null,
+        rescheduleId: null,
+      });
+
+      // Request query builder returns the self-match request
+      mockTransactionalManager.createQueryBuilder.mockReturnValue({
+        setLock: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue(selfMatchRequest),
+      });
+
+      // Slot count: 0 accepted so far
+      mockTransactionalManager.count.mockResolvedValue(0);
+    });
+
+    it('blocks acceptOffer when volunteer userId matches beneficiary userId (cross-org self-match)', async () => {
+      mockTransactionalManager.count.mockResolvedValue(0);
+      // findOne for OrganizationMembership returns userId 'user-vol-1' for BOTH
+      // the volunteer membership AND the beneficiary membership lookup.
+      mockTransactionalManager.findOne.mockImplementation(async (entity: unknown, options: any) => {
+        if (entity === OrganizationMembership) {
+          return {
+            id: options?.where?.id ?? 'some-mem',
+            userId: 'user-vol-1',
+            status: MembershipStatus.APPROVED,
+            roleGrants: [{ role: UserRole.VOLUNTEER, status: RoleGrantStatus.ACTIVE }],
+          };
+        }
+        if (entity === User) return { id: 'user-vol-1', status: AccountStatus.ACTIVE };
+        if (entity === GlobalAccountRestriction) return null;
+        return mockAssignmentLookup(entity, options);
+      });
+
+      await expect(
+        service.acceptOffer('org-1', 'assign-self', 'vol-mem-1', {}),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('allows acceptOffer when volunteer and beneficiary are different users', async () => {
+      mockTransactionalManager.count.mockResolvedValue(0);
+      // Volunteer is 'user-vol-1'; beneficiary membership resolves to 'user-ben-2'
+      mockTransactionalManager.findOne.mockImplementation(async (entity: unknown, options: any) => {
+        if (entity === OrganizationMembership) {
+          const memId: string = options?.where?.id ?? '';
+          const userId = memId === 'ben-mem-same-user' ? 'user-ben-2' : 'user-vol-1';
+          return {
+            id: memId,
+            userId,
+            status: MembershipStatus.APPROVED,
+            roleGrants: [{ role: UserRole.VOLUNTEER, status: RoleGrantStatus.ACTIVE }],
+          };
+        }
+        if (entity === User) return { id: 'user-vol-1', status: AccountStatus.ACTIVE };
+        if (entity === GlobalAccountRestriction) return null;
+        return mockAssignmentLookup(entity, options);
+      });
+
+      await expect(
+        service.acceptOffer('org-1', 'assign-self', 'vol-mem-1', {}),
+      ).resolves.toBeDefined();
+    });
+
+    it('blocks coordinatorDispatch when dispatched volunteer is the beneficiary', async () => {
+      mockTransactionalManager.count.mockResolvedValue(0);
+      mockTransactionalManager.findOne.mockImplementation(async (entity: unknown, options: any) => {
+        if (entity === OrganizationMembership) {
+          return {
+            id: options?.where?.id ?? 'mem',
+            userId: 'user-vol-1', // same user for both volunteer and beneficiary
+            status: MembershipStatus.APPROVED,
+            roleGrants: [{ role: UserRole.VOLUNTEER, status: RoleGrantStatus.ACTIVE }],
+          };
+        }
+        if (entity === User) return { id: 'user-vol-1', status: AccountStatus.ACTIVE };
+        if (entity === GlobalAccountRestriction) return null;
+        // No existing assignment
+        return null;
+      });
+
+      await expect(
+        service.coordinatorDispatch(
+          'org-1',
+          'req-self',
+          { volunteerMembershipId: 'vol-mem-1' },
+          'coord-1',
+        ),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 });

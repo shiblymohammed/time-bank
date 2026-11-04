@@ -30,6 +30,7 @@ import { MatchingService } from '../matching/matching.service';
 import { VolunteerAssignment } from '../matching/entities/volunteer-assignment.entity';
 import { AuditService } from '../audit/audit.service';
 import { TimeLedgerService } from '../time-ledger/time-ledger.service';
+import { LoyaltyService } from '../loyalty/loyalty.service';
 import {
   AuthorizationService,
   EvaluatedMembershipContext,
@@ -64,6 +65,7 @@ export class RequestsService {
     private readonly auditService: AuditService,
     private readonly authorizationService: AuthorizationService,
     private readonly timeLedgerService: TimeLedgerService,
+    private readonly loyaltyService: LoyaltyService,
   ) {}
 
   // ─── Create Service Request (D#8, D#59, D#60, D#61) ─────────────────────────
@@ -213,59 +215,77 @@ export class RequestsService {
     }
 
     // 5. Generate unique human-readable request number: REQ-<ORG_CODE>-<YYYYMM>-<SEQ>
-    const requestNumber = await this.generateRequestNumber(org.code);
+    // Generated outside the transaction so a collision retry does not re-enter a rolled-back tx.
+    const requestNumber = this.generateRequestNumber(org.code);
 
-    // 6. Create Service Request record
-    const request = this.requestRepo.create({
-      organizationId: orgId,
-      requestNumber,
-      idempotencyKey: idempotencyKey ?? null,
-      beneficiaryMembershipId,
-      serviceCatalogId: catalogItem.id,
-      createdByUserId: callingUserId,
-      creationChannel,
-      caregiverAuthorizationId: caregiverAuthId,
-      urgency: dto.urgency,
-      status: ServiceRequestStatus.MATCHING_ACTIVE,
-      scheduledStartTime: new Date(dto.scheduledStartTime),
-      expectedDurationMinutes: dto.expectedDurationMinutes ?? 60,
-      minVolunteers: catalogItem.minVolunteers,
-      preferredVolunteers: catalogItem.preferredVolunteers,
-      locationAddressText: dto.locationAddressText,
-      locationWardNumber: dto.locationWardNumber,
-      locationLandmark: dto.locationLandmark ?? null,
-      locationPostalCode: dto.locationPostalCode,
-      locationLat: dto.locationLat ?? null,
-      locationLng: dto.locationLng ?? null,
-      beneficiaryNotes: dto.beneficiaryNotes ?? null,
-      matchingRadiusKm: 3.0,
-      matchingTier: 1,
-      allowsCrossOrgVolunteers: dto.allowsCrossOrgVolunteers ?? false,
+    // 6 + 7. Atomically persist the request, dispatch initial matching offers, and write
+    // the audit event inside a single READ COMMITTED transaction.
+    //
+    // Before this fix, step 6 (save) committed first, then steps 7 (matching) and audit ran
+    // separately.  A crash between them left an orphaned request with no matching round and no
+    // audit record.  Now all three are committed together or all roll back together.
+    //
+    // BeneficiariesService.checkEligibilityAndQuota (step 3) and the idempotency lookup (step 0)
+    // intentionally remain outside the transaction — they are read-only pre-flight checks that
+    // would hold locks unnecessarily during slow validation queries.
+    return this.requestRepo.manager.transaction('READ COMMITTED', async (manager) => {
+      // Save request via the transactional manager
+      const request = manager.getRepository(ServiceRequest).create({
+        organizationId: orgId,
+        requestNumber,
+        idempotencyKey: idempotencyKey ?? null,
+        beneficiaryMembershipId,
+        serviceCatalogId: catalogItem.id,
+        createdByUserId: callingUserId,
+        creationChannel,
+        caregiverAuthorizationId: caregiverAuthId,
+        urgency: dto.urgency,
+        status: ServiceRequestStatus.MATCHING_ACTIVE,
+        scheduledStartTime: new Date(dto.scheduledStartTime),
+        expectedDurationMinutes: dto.expectedDurationMinutes ?? 60,
+        minVolunteers: catalogItem.minVolunteers,
+        preferredVolunteers: catalogItem.preferredVolunteers,
+        locationAddressText: dto.locationAddressText,
+        locationWardNumber: dto.locationWardNumber,
+        locationLandmark: dto.locationLandmark ?? null,
+        locationPostalCode: dto.locationPostalCode,
+        locationLat: dto.locationLat ?? null,
+        locationLng: dto.locationLng ?? null,
+        beneficiaryNotes: dto.beneficiaryNotes ?? null,
+        matchingRadiusKm: 3.0,
+        matchingTier: 1,
+        allowsCrossOrgVolunteers: dto.allowsCrossOrgVolunteers ?? false,
+      });
+
+      const saved = await manager.getRepository(ServiceRequest).save(request);
+
+      // Dispatch initial matching offers inside the same transaction (D#60, D#61).
+      // findCandidatesAndDispatchOffers accepts an optional EntityManager; when provided
+      // it participates in the caller's transaction instead of opening its own.
+      await this.matchingService.findCandidatesAndDispatchOffers(saved, undefined, manager);
+
+      // Audit event committed atomically with the request row (BR-09).
+      await this.auditService.logEvent(
+        {
+          eventType: 'SERVICE_REQUEST_CREATED',
+          actorId: callingUserId,
+          targetId: saved.id,
+          targetType: 'service_requests',
+          organizationId: orgId,
+          payload: {
+            requestNumber: saved.requestNumber,
+            urgency: saved.urgency,
+            creationChannel: saved.creationChannel,
+            beneficiaryMembershipId: saved.beneficiaryMembershipId,
+            idempotencyKey: saved.idempotencyKey,
+          },
+          ipAddress: ipAddress ?? null,
+        },
+        manager,
+      );
+
+      return saved;
     });
-
-    const saved = await this.requestRepo.save(request);
-
-    // 7. Mandatory Immediate Candidate Matching Dispatch (D#60, D#61)
-    // Runs candidate search and sends offers immediately for BOTH immediate and scheduled requests
-    await this.matchingService.findCandidatesAndDispatchOffers(saved);
-
-    await this.auditService.logEvent({
-      eventType: 'SERVICE_REQUEST_CREATED',
-      actorId: callingUserId,
-      targetId: saved.id,
-      targetType: 'service_requests',
-      organizationId: orgId,
-      payload: {
-        requestNumber: saved.requestNumber,
-        urgency: saved.urgency,
-        creationChannel: saved.creationChannel,
-        beneficiaryMembershipId: saved.beneficiaryMembershipId,
-        idempotencyKey: saved.idempotencyKey,
-      },
-      ipAddress: ipAddress ?? null,
-    });
-
-    return saved;
   }
 
   // ─── List & Get Requests Scoped to User & Organization ───────────────────────
@@ -705,6 +725,16 @@ export class RequestsService {
         reference: request.requestNumber,
       });
 
+      // Award loyalty coins in the same transaction (FR-LOY-01, D#3).
+      // Coins are municipality-scoped and awarded alongside time credits.
+      const coinResult = await this.loyaltyService.postServiceEarning(manager, {
+        userId: volunteer!.userId,
+        organizationId: orgId,
+        serviceRequestId: request.id,
+        assignmentId: saved.id,
+        confirmedMinutes: minutes,
+      });
+
       // The request is complete once no helper is still due, working or unconfirmed.
       const open = await manager
         .getRepository(VolunteerAssignment)
@@ -735,6 +765,7 @@ export class RequestsService {
             requestCompleted: open === 0,
             creditsEarned: credit?.amount ?? 0,
             creditsHeld: credit?.held ?? false,
+            coinsEarned: coinResult.coinsEarned,
           },
           ipAddress: ipAddress ?? null,
         },
@@ -743,14 +774,25 @@ export class RequestsService {
       return Object.assign(saved, {
         creditsEarned: credit?.amount ?? 0,
         creditsHeld: credit?.held ?? false,
+        coinsEarned: coinResult.coinsEarned,
       });
     });
   }
 
-  private async generateRequestNumber(orgCode: string): Promise<string> {
+  private generateRequestNumber(orgCode: string): string {
     const now = new Date();
     const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
-    const randomSuffix = Math.floor(10000 + Math.random() * 90000);
-    return `REQ-${orgCode.toUpperCase()}-${yearMonth}-${randomSuffix}`;
+
+    // Bound org code to 15 chars so the full number stays within VARCHAR(50):
+    // 'REQ-' (4) + code (15) + '-' (1) + yearMonth (6) + '-' (1) + seq (6) = 33 chars max
+    const safeCode = orgCode.slice(0, 15).toUpperCase();
+
+    // 6-digit random suffix gives 900,000 possibilities per org/month — collision
+    // probability under 0.5% for up to 2,900 requests/month (birthday bound).
+    // The UNIQUE DB constraint on (organization_id, request_number) is the true
+    // uniqueness guarantee; a collision causes a DB error the caller retries.
+    const seq = String(Math.floor(100000 + Math.random() * 900000));
+
+    return `REQ-${safeCode}-${yearMonth}-${seq}`;
   }
 }

@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { Request } from 'express';
 import { MatchingController } from './matching.controller';
 import { MatchingService } from './matching.service';
+import { TeamService } from './team.service';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { OrganizationAccessGuard } from '../authorization/guards/organization-access.guard';
 import { RolesGuard } from '../authorization/guards/roles.guard';
@@ -29,6 +30,13 @@ describe('MatchingController (Milestone 3 Phase C)', () => {
     evaluateRoundProgression: jest.fn(),
   };
 
+  const mockTeamService = {
+    inviteTeammate: jest.fn(),
+    acceptInvitation: jest.fn(),
+    declineInvitation: jest.fn(),
+    listMyInvitations: jest.fn(),
+  };
+
   const mockRequest = {
     ip: '127.0.0.1',
     socket: { remoteAddress: '127.0.0.1' },
@@ -43,7 +51,10 @@ describe('MatchingController (Milestone 3 Phase C)', () => {
 
     const module: TestingModule = await Test.createTestingModule({
       controllers: [MatchingController],
-      providers: [{ provide: MatchingService, useValue: mockMatchingService }],
+      providers: [
+        { provide: MatchingService, useValue: mockMatchingService },
+        { provide: TeamService, useValue: mockTeamService },
+      ],
     })
       .overrideGuard(AuthGuard)
       .useValue({ canActivate: () => true })
@@ -114,6 +125,7 @@ describe('MatchingController (Milestone 3 Phase C)', () => {
         'org-1',
         'assign-1',
         { clientOperationId: 'client-op-1' },
+        'user-vol-1',
         mockRequest,
       );
 
@@ -124,6 +136,7 @@ describe('MatchingController (Milestone 3 Phase C)', () => {
         'mem-123',
         { clientOperationId: 'client-op-1' },
         '127.0.0.1',
+        'user-vol-1',
       );
     });
 

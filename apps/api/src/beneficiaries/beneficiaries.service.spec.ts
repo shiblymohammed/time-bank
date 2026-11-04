@@ -201,6 +201,130 @@ describe('BeneficiariesService', () => {
     });
   });
 
+  // ─── assertBeneficiaryAccess — relationship-level authorization (P1 security fix) ──
+
+  describe('assertBeneficiaryAccess — relationship-level authorization', () => {
+    const ORG = 'org-1';
+    const BEN_MEM = 'ben-mem-1';
+
+    // Helper: override the module's AuthorizationService mock for a single test
+    function withContext(
+      membershipId: string,
+      roles: string[] = [],
+      isSuperAdmin = false,
+    ) {
+      const { AuthorizationService: AS } = jest.requireActual(
+        '../authorization/authorization.service',
+      ) as { AuthorizationService: unknown };
+      void AS;
+      (
+        service['authorizationService']
+          .evaluateOrganizationAccess as jest.Mock
+      ).mockResolvedValue({ isSuperAdmin, roles, membershipId });
+    }
+
+    it('allows the beneficiary member to read their own eligibility', async () => {
+      withContext(BEN_MEM, ['BENEFICIARY']);
+      mockMembershipRepo.findOne.mockResolvedValue({ id: BEN_MEM, organizationId: ORG });
+      mockEligibilityRepo.findOne.mockResolvedValue({ id: 'elig-1', membershipId: BEN_MEM });
+
+      await expect(service.getEligibility(ORG, BEN_MEM, 'user-ben')).resolves.toBeDefined();
+    });
+
+    it('allows a coordinator to read any beneficiary eligibility', async () => {
+      withContext('coordinator-mem', ['COORDINATOR']);
+      mockMembershipRepo.findOne.mockResolvedValue({ id: BEN_MEM, organizationId: ORG });
+      mockEligibilityRepo.findOne.mockResolvedValue({ id: 'elig-1', membershipId: BEN_MEM });
+
+      await expect(service.getEligibility(ORG, BEN_MEM, 'user-coord')).resolves.toBeDefined();
+    });
+
+    it('allows a municipality admin to read any beneficiary eligibility', async () => {
+      withContext('admin-mem', ['MUNICIPALITY_ADMIN']);
+      mockMembershipRepo.findOne.mockResolvedValue({ id: BEN_MEM, organizationId: ORG });
+      mockEligibilityRepo.findOne.mockResolvedValue({ id: 'elig-1', membershipId: BEN_MEM });
+
+      await expect(service.getEligibility(ORG, BEN_MEM, 'user-admin')).resolves.toBeDefined();
+    });
+
+    it('allows an approved caregiver to read their beneficiary eligibility', async () => {
+      const CAREGIVER_MEM = 'caregiver-mem-1';
+      withContext(CAREGIVER_MEM, ['CAREGIVER']);
+      mockMembershipRepo.findOne.mockResolvedValue({ id: BEN_MEM, organizationId: ORG });
+      mockCaregiverAuthRepo.findOne.mockResolvedValue({
+        id: 'auth-1',
+        caregiverMembershipId: CAREGIVER_MEM,
+        beneficiaryMembershipId: BEN_MEM,
+        status: 'APPROVED',
+      });
+      mockEligibilityRepo.findOne.mockResolvedValue({ id: 'elig-1', membershipId: BEN_MEM });
+
+      await expect(service.getEligibility(ORG, BEN_MEM, 'user-caregiver')).resolves.toBeDefined();
+    });
+
+    it('denies an unrelated volunteer from reading another member\'s eligibility', async () => {
+      withContext('volunteer-mem-other', ['VOLUNTEER']);
+      mockMembershipRepo.findOne.mockResolvedValue({ id: BEN_MEM, organizationId: ORG });
+      // No caregiver relationship
+      mockCaregiverAuthRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.getEligibility(ORG, BEN_MEM, 'user-other')).rejects.toThrow(
+        ForbiddenException,
+      );
+      // Eligibility record must never be fetched for unauthorised callers
+      expect(mockEligibilityRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('denies a caregiver from reading a different beneficiary\'s eligibility', async () => {
+      const CAREGIVER_MEM = 'caregiver-mem-1';
+      const OTHER_BEN_MEM = 'other-ben-mem';
+      withContext(CAREGIVER_MEM, ['CAREGIVER']);
+      mockMembershipRepo.findOne.mockResolvedValue({ id: OTHER_BEN_MEM, organizationId: ORG });
+      // No relationship to this OTHER beneficiary
+      mockCaregiverAuthRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.getEligibility(ORG, OTHER_BEN_MEM, 'user-caregiver')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(mockEligibilityRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('denies a revoked caregiver from reading beneficiary eligibility', async () => {
+      const CAREGIVER_MEM = 'caregiver-mem-revoked';
+      withContext(CAREGIVER_MEM, ['CAREGIVER']);
+      mockMembershipRepo.findOne.mockResolvedValue({ id: BEN_MEM, organizationId: ORG });
+      // Relationship exists but is REVOKED — findOne returns null because we filter by APPROVED
+      mockCaregiverAuthRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.getEligibility(ORG, BEN_MEM, 'user-caregiver')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(mockEligibilityRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('denies an unrelated member from listing caregivers for another beneficiary', async () => {
+      withContext('random-mem', ['VOLUNTEER']);
+      mockMembershipRepo.findOne.mockResolvedValue({ id: BEN_MEM, organizationId: ORG });
+      mockCaregiverAuthRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.listCaregiversForBeneficiary(ORG, BEN_MEM, 'user-random'),
+      ).rejects.toThrow(ForbiddenException);
+      // find (the data fetch) must never be called — access denied before that
+      expect(mockCaregiverAuthRepo.find).not.toHaveBeenCalled();
+    });
+
+    it('throws NotFoundException when beneficiary membership does not exist in this org', async () => {
+      withContext('any-mem', ['COORDINATOR']);
+      // Membership not found in this org
+      mockMembershipRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.getEligibility(ORG, 'ghost-mem', 'user-coord')).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
   describe('checkEligibilityAndQuota (AT-M3-20, D#24, D#25, D#26)', () => {
     it('passes when eligibility is active and within quota', async () => {
       const futureDate = new Date(Date.now() + 100 * 24 * 60 * 60 * 1000);

@@ -1,4 +1,5 @@
 import { Controller, Post, Get, Body, Req, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
+import { Throttle, SkipThrottle } from '@nestjs/throttler';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Request } from 'express';
 import { FirebaseTokenService } from './firebase-token.service';
@@ -20,6 +21,7 @@ export class AuthController {
 
   @Post('otp/request')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ global: { ttl: 60_000, limit: 10 } })
   @ApiOperation({
     summary: 'Request mobile OTP verification code',
     description:
@@ -34,6 +36,7 @@ export class AuthController {
 
   @Post('otp/verify')
   @HttpCode(HttpStatus.OK)
+  @Throttle({ global: { ttl: 60_000, limit: 20 } })
   @ApiOperation({
     summary: 'Verify mobile OTP code and authenticate',
     description:

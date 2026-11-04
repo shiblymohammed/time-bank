@@ -2,8 +2,10 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
+import helmet from 'helmet';
 
 import { AppModule } from './app.module';
+import { IdempotencyInterceptor } from './offline/idempotency.interceptor';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule, {
@@ -13,6 +15,15 @@ async function bootstrap(): Promise<void> {
   const configService = app.get(ConfigService);
   const port = configService.get<number>('API_PORT', 3001);
   const nodeEnv = configService.get<string>('NODE_ENV', 'development');
+
+  // ─── Security headers (NFR-08, NFR-18) ───────────────────────────────
+  // helmet sets sane HTTP security headers in production.
+  // ContentSecurityPolicy disabled for dev (Swagger UI inline scripts).
+  if (nodeEnv === 'production') {
+    app.use(helmet());
+  } else {
+    app.use(helmet({ contentSecurityPolicy: false }));
+  }
 
   // ─── Versioning (URI strategy: /api/v1/...) ──────────────────────────
   // NFR-01: Versioned APIs allow safe incremental rollout across milestones
@@ -30,6 +41,11 @@ async function bootstrap(): Promise<void> {
       transformOptions: { enableImplicitConversion: false },
     }),
   );
+
+  // ─── Idempotency interceptor (FR-OFF-03, NFR-11) ─────────────────────
+  // Reads X-Client-Operation-Id / X-Idempotency-Key headers and injects
+  // them into the request body so all mutation DTOs get idempotency for free.
+  app.useGlobalInterceptors(new IdempotencyInterceptor());
 
   // ─── CORS ────────────────────────────────────────────────────────────
   // NFR-08: Allow only known origins in production
