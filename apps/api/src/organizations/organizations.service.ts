@@ -7,11 +7,15 @@ import {
   RoleGrantStatus,
   UserRole,
   MembershipApprovalAction,
+  IdentityVerificationStatus,
+  IdentityVerificationLevel,
 } from '@ktb/shared-types';
 import { Organization } from './entities/organization.entity';
 import { OrganizationBranding } from './entities/organization-branding.entity';
 import { OrganizationAppBuild } from './entities/organization-app-build.entity';
 import { User } from '../identity/entities/user.entity';
+import { VerifiedIdentity } from '../identity/entities/verified-identity.entity';
+import { UniversalTimeWallet } from '../identity/entities/universal-time-wallet.entity';
 import { OrganizationMembership } from '../memberships/entities/organization-membership.entity';
 import { MembershipRoleGrant } from '../memberships/entities/membership-role-grant.entity';
 import { MembershipApproval } from '../memberships/entities/membership-approval.entity';
@@ -94,6 +98,25 @@ export class OrganizationsService {
             primaryOrgId: savedOrg.id,
           });
           adminUser = await manager.save(User, adminUser);
+
+          // Provision VerifiedIdentity and UniversalTimeWallet atomically with the User
+          // so the admin can log in without encountering null wallet/identity records.
+          // (Bug: pre-provisioned users created without these records cannot use the platform
+          // until they happen to trigger an OTP login that creates them — Oct 29 audit, P2.)
+          const identity = manager.create(VerifiedIdentity, {
+            userId: adminUser.id,
+            verificationStatus: IdentityVerificationStatus.UNVERIFIED,
+            verificationLevel: IdentityVerificationLevel.BASIC,
+          });
+          await manager.save(VerifiedIdentity, identity);
+
+          const wallet = manager.create(UniversalTimeWallet, {
+            userId: adminUser.id,
+            balanceCredits: 0,
+            frozenCredits: 0,
+            status: 'ACTIVE',
+          });
+          await manager.save(UniversalTimeWallet, wallet);
         }
 
         const membership = manager.create(OrganizationMembership, {
@@ -145,6 +168,24 @@ export class OrganizationsService {
 
       return savedOrg;
     });
+  }
+
+  /**
+   * Checks whether the given userId holds an active SUPER_ADMIN role grant.
+   * Used by the listOrganizations controller to decide visibility scope
+   * without requiring a full OrganizationAccessGuard context.
+   */
+  async isCallerSuperAdmin(userId: string): Promise<boolean> {
+    const grant = await this.dataSource
+      .getRepository(MembershipRoleGrant)
+      .createQueryBuilder('grant')
+      .innerJoin('grant.membership', 'm')
+      .where('m.userId = :userId', { userId })
+      .andWhere('grant.role = :role', { role: UserRole.SUPER_ADMIN })
+      .andWhere('grant.status = :status', { status: RoleGrantStatus.ACTIVE })
+      .andWhere('m.status = :mStatus', { mStatus: MembershipStatus.APPROVED })
+      .getOne();
+    return Boolean(grant);
   }
 
   /**

@@ -168,16 +168,20 @@ export class BeneficiariesService {
       );
     }
 
-    // Compute requests in current calendar month
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
+    // Compute requests in current calendar month using India Standard Time (IST, UTC+5:30).
+    // Without explicit timezone handling, a UTC production container enforces different month
+    // boundaries than business expectations. We compute the IST month start manually.
+    const IST_OFFSET_MS = 5.5 * 60 * 60 * 1000; // UTC+5:30
+    const nowIst = new Date(Date.now() + IST_OFFSET_MS);
+    const startOfMonthIst = new Date(
+      Date.UTC(nowIst.getUTCFullYear(), nowIst.getUTCMonth(), 1, 0, 0, 0, 0) - IST_OFFSET_MS,
+    );
 
     const monthCount = await (manager?.withRepository(this.requestRepo) ?? this.requestRepo)
       .createQueryBuilder('req')
       .where('req.organizationId = :orgId', { orgId })
       .andWhere('req.beneficiaryMembershipId = :membershipId', { membershipId })
-      .andWhere('req.createdAt >= :startOfMonth', { startOfMonth })
+      .andWhere('req.createdAt >= :startOfMonth', { startOfMonth: startOfMonthIst })
       .andWhere('req.status != :cancelled', { cancelled: 'CANCELLED' })
       .getCount();
 

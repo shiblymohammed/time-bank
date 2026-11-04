@@ -2,10 +2,22 @@ name: Deploy to Production
 
 # D#101: Docker Compose on VPS + GitHub Actions CI/CD + approved production releases
 # UC-30: GitHub Actions checks → build images → approval gate → deploy → health check/rollback
+# NFR-17: Human review required for production deployments.
+# NFR-18: Security-sensitive changes require human sign-off before production adoption.
 #
-# IMPORTANT: This workflow requires a manual approval step (environment protection rule).
-# Configure GitHub environment "production" with required reviewers before enabling.
-# NFR-18: Human review required for production deployments.
+# SETUP CHECKLIST (one-time, per repository):
+#   1. Create a GitHub environment named "production" with required reviewers.
+#   2. Add repository secrets:
+#        VPS_HOST          — server IP or hostname
+#        VPS_USER          — SSH username (e.g. ktb)
+#        VPS_SSH_KEY       — private key (Ed25519 recommended)
+#        VPS_SSH_PORT      — SSH port (default: 22)
+#        VPS_DEPLOY_PATH   — absolute path on VPS (e.g. /opt/ktb)
+#   3. On the VPS, create /etc/ktb/prod.env with all required environment
+#      variables (see .env.example — never commit real secrets).
+#   4. Install Docker and Docker Compose v2 on the VPS.
+#   5. Set up TLS certificates at /etc/letsencrypt (Certbot/Let's Encrypt).
+#   6. Create /backups directory owned by the deploy user.
 
 on:
   workflow_dispatch:
@@ -30,18 +42,23 @@ jobs:
         env:
           DEPLOY_CONFIRMATION: ${{ inputs.confirm }}
         run: |
-          if [ "$DEPLOY_CONFIRMATION" != "deploy" ]; then
-            echo "Confirmation string must be 'deploy'."
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::Production deployments can only be triggered from main. Current ref: '$GITHUB_REF'"
             exit 1
           fi
+          if [ "$DEPLOY_CONFIRMATION" != "deploy" ]; then
+            echo "::error::Confirmation must be exactly 'deploy'. Got: '$DEPLOY_CONFIRMATION'"
+            exit 1
+          fi
+          echo "Deployment confirmed by ${{ github.actor }}"
 
-  # ─── CI must pass first ───────────────────────────────────────────────────
+  # ─── CI must pass on the exact ref being deployed ─────────────────────────
   ci:
     name: Run CI (required before deploy)
     needs: gate
     uses: ./.github/workflows/ci.yml
 
-  # ─── Build and push versioned images ─────────────────────────────────────
+  # ─── Build and push versioned images ──────────────────────────────────────
   build-and-push:
     name: Build & Push Production Images
     needs: ci
@@ -54,10 +71,12 @@ jobs:
     outputs:
       image_tag: ${{ steps.meta.outputs.version }}
     steps:
-      - name: Checkout
+      - name: Checkout (exact SHA being deployed)
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
 
-      - name: Docker meta — generate image tags
+      - name: Docker meta — deterministic tag from Git SHA
         id: meta
         uses: docker/metadata-action@v5
         with:
@@ -103,64 +122,167 @@ jobs:
           cache-to: type=gha,mode=max
           labels: ${{ steps.meta.outputs.labels }}
 
-  # ─── Deploy to VPS ────────────────────────────────────────────────────────
+  # ─── Deploy to VPS ─────────────────────────────────────────────────────────
   deploy:
     name: Deploy to VPS
     needs: build-and-push
     runs-on: ubuntu-latest
     environment: production
     steps:
-      - name: Checkout (for scripts)
+      - name: Checkout compose + infra files only (no source code needed on runner)
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          sparse-checkout: |
+            docker-compose.prod.yml
+            infra/
+
+      - name: Copy compose and nginx config to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT }}
+          source: "docker-compose.prod.yml,infra/"
+          target: ${{ secrets.VPS_DEPLOY_PATH }}
 
       - name: Deploy via SSH
+        env:
+          IMAGE_TAG: ${{ needs.build-and-push.outputs.image_tag }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         uses: appleboy/ssh-action@v1.1.0
         with:
           host: ${{ secrets.VPS_HOST }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_SSH_PORT }}
+          # Pass these as env vars into the SSH session
+          envs: IMAGE_TAG,GITHUB_REPOSITORY
+          script_stop: true
           script: |
             set -euo pipefail
+            cd "${{ secrets.VPS_DEPLOY_PATH }}"
 
-            cd ${{ secrets.VPS_DEPLOY_PATH }}
+            # ── Load production secrets from the VPS env file ──────────────
+            # shellcheck disable=SC1091
+            set -a
+            source /etc/ktb/prod.env
+            set +a
 
-            # Pull latest compose file and scripts
-            git pull origin main
+            # Inject the image tag and repo from the workflow
+            export IMAGE_TAG="${IMAGE_TAG}"
+            export GITHUB_REPOSITORY="${GITHUB_REPOSITORY}"
 
-            # Export image tag for docker compose
-            export IMAGE_TAG=${{ needs.build-and-push.outputs.image_tag }}
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo " Deploy: ${IMAGE_TAG}"
+            echo " Actor:  ${{ github.actor }}"
+            echo " SHA:    ${{ github.sha }}"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-            echo "[deploy] Pulling images for tag: $IMAGE_TAG"
-            docker compose pull
+            # ── 1. Capture the currently-running image tag for rollback ─────
+            PREVIOUS_TAG=$(
+              docker inspect --format \
+                '{{index .Config.Labels "org.opencontainers.image.version"}}' \
+                ktb_api_prod 2>/dev/null || echo ""
+            )
+            echo "[deploy] Previous tag: '${PREVIOUS_TAG:-none}'"
 
-            # NFR-17: Back up DB before risky changes
-            echo "[deploy] Creating pre-deploy backup..."
-            docker compose exec -T postgres pg_dump \
-              -U "$POSTGRES_USER" "$POSTGRES_DB" \
-              | gzip > "/backups/pre-deploy-$(date +%Y%m%d-%H%M%S).sql.gz"
+            # ── 2. Pull new images BEFORE touching running containers ───────
+            echo "[deploy] Pulling new images..."
+            docker compose -f docker-compose.prod.yml pull --quiet api web
+            echo "[deploy] Images pulled."
 
-            # Run migrations
+            # ── 3. Pre-deploy database backup (NFR-05) ──────────────────────
+            BACKUP_DIR="/backups"
+            mkdir -p "${BACKUP_DIR}"
+            BACKUP_FILE="${BACKUP_DIR}/pre-deploy-${IMAGE_TAG}-$(date +%Y%m%d-%H%M%S).sql.gz"
+            echo "[deploy] Creating pre-deploy backup → ${BACKUP_FILE}"
+            docker compose -f docker-compose.prod.yml exec -T postgres \
+              pg_dump -U "${POSTGRES_USER}" "${POSTGRES_DB}" \
+              | gzip > "${BACKUP_FILE}"
+            echo "[deploy] Backup: $(du -sh "${BACKUP_FILE}" | cut -f1)"
+
+            # ── 4. Run migrations (one-shot, uses compiled runner) ──────────
+            # The API image ships dist/database/run-migrations.js built from
+            # apps/api/src/database/run-migrations.ts (NFR-17).
             echo "[deploy] Running database migrations..."
-            docker compose run --rm api node apps/api/dist/database/migrations/run.js
+            docker run --rm \
+              --network "$(docker inspect ktb_postgres_prod \
+                --format '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' \
+                2>/dev/null | head -1 || echo 'ktb_internal')" \
+              --env DATABASE_URL="${DATABASE_URL}" \
+              --env DATABASE_SSL="${DATABASE_SSL:-false}" \
+              "ghcr.io/${GITHUB_REPOSITORY}/api:${IMAGE_TAG}" \
+              node apps/api/dist/database/run-migrations.js
+            echo "[deploy] Migrations complete."
 
-            # Rolling update
-            echo "[deploy] Updating services..."
-            docker compose up -d --no-deps --build api web nginx
+            # ── 5. Rolling update — pull only, no --build ───────────────────
+            echo "[deploy] Starting rolling update..."
+            docker compose -f docker-compose.prod.yml up -d \
+              --no-build --remove-orphans api web nginx
+            echo "[deploy] Containers updated."
 
-            # Health check (UC-30: health check/rollback)
-            echo "[deploy] Waiting for health checks..."
-            sleep 15
-            docker compose exec api wget -qO- http://localhost:3001/health/ready || {
-              echo "[deploy] Health check failed — initiating rollback..."
-              # TODO(operations): Implement automated rollback to previous image tag
+            # ── 6. Health check with retry (UC-30) ──────────────────────────
+            echo "[deploy] Waiting for health check..."
+            MAX_ATTEMPTS=18   # 18 × 10s = 3 minutes
+            ATTEMPT=0
+            HEALTHY=false
+            until [ "${ATTEMPT}" -ge "${MAX_ATTEMPTS}" ]; do
+              ATTEMPT=$((ATTEMPT + 1))
+              HTTP_CODE=$(curl -so /dev/null -w "%{http_code}" \
+                http://localhost/api/health/ready 2>/dev/null || echo "000")
+              if [ "${HTTP_CODE}" = "200" ]; then
+                echo "[deploy] ✓ Health check passed (attempt ${ATTEMPT})"
+                HEALTHY=true
+                break
+              fi
+              echo "[deploy] Attempt ${ATTEMPT}/${MAX_ATTEMPTS}: HTTP ${HTTP_CODE} — waiting 10s..."
+              sleep 10
+            done
+
+            # ── 7. Rollback on health check failure ─────────────────────────
+            if [ "${HEALTHY}" != "true" ]; then
+              echo "::error::[deploy] Health check failed after ${MAX_ATTEMPTS} attempts."
+
+              if [ -n "${PREVIOUS_TAG}" ]; then
+                echo "[deploy] Rolling back to ${PREVIOUS_TAG}..."
+                docker compose -f docker-compose.prod.yml pull --quiet api web \
+                  2>/dev/null || true
+
+                IMAGE_TAG="${PREVIOUS_TAG}" \
+                  docker compose -f docker-compose.prod.yml up -d \
+                  --no-build api web nginx
+
+                echo "[deploy] Rollback containers started. Verifying..."
+                sleep 15
+                ROLLBACK_CODE=$(curl -so /dev/null -w "%{http_code}" \
+                  http://localhost/api/health/ready 2>/dev/null || echo "000")
+                if [ "${ROLLBACK_CODE}" = "200" ]; then
+                  echo "[deploy] ✓ Rollback to ${PREVIOUS_TAG} succeeded."
+                else
+                  echo "::error::[deploy] Rollback also unhealthy (HTTP ${ROLLBACK_CODE}). Manual intervention required."
+                fi
+              else
+                echo "[deploy] No previous tag recorded — cannot auto-rollback. Manual intervention required."
+              fi
+
+              # Always exit non-zero so the workflow is marked failed
               exit 1
-            }
+            fi
 
-            echo "[deploy] Deployment successful: $IMAGE_TAG"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo " Deployment successful: ${IMAGE_TAG}"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-      - name: Record deployment
+      - name: Record deployment in job summary
+        if: always()
         run: |
-          echo "Deployed image tag: ${{ needs.build-and-push.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "Deployed at: $(date -u)" >> $GITHUB_STEP_SUMMARY
-          echo "Deployed by: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| Image tag | \`${{ needs.build-and-push.outputs.image_tag }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Git SHA | \`${{ github.sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | \`${{ github.ref_name }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deployed by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deployed at | $(date -u) |" >> $GITHUB_STEP_SUMMARY

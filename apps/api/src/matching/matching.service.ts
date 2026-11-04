@@ -42,6 +42,8 @@ import {
   CandidateMatchProfile,
 } from './ranking/ranking-strategy.interface';
 
+import { TeamService } from './team.service';
+
 import { UpdateVolunteerAvailabilityDto } from './dto/update-volunteer-availability.dto';
 import { VerifyVolunteerSkillDto } from './dto/verify-volunteer-skill.dto';
 import { AcceptVolunteerOfferDto } from './dto/accept-volunteer-offer.dto';
@@ -87,6 +89,7 @@ export class MatchingService {
     private readonly dataSource: DataSource,
     private readonly auditService: AuditService,
     private readonly authorizationService: AuthorizationService,
+    private readonly teamService: TeamService,
   ) {}
 
   // ─── Operational Zones (Coordinator-Managed) ─────────────────────────────────
@@ -417,12 +420,33 @@ export class MatchingService {
     if (!context.roles.includes(UserRole.VOLUNTEER)) {
       throw new ForbiddenException('Approved volunteer role required');
     }
-    const assignments = await this.assignmentRepo.find({
-      where: { organizationId: orgId, volunteerMembershipId: context.membershipId },
-      relations: ['serviceRequest', 'serviceRequest.reschedules', 'reschedule'],
-      order: { offeredAt: 'DESC' },
-      take: 100,
+
+    // Find all approved volunteer memberships the user holds across all orgs.
+    // This covers cross-org assignments where the assignment's organizationId is
+    // the requesting org but the volunteer's membership belongs to another org.
+    const allMemberships = await this.membershipRepo.find({
+      where: { userId: actorId, status: MembershipStatus.APPROVED },
+      select: ['id'],
     });
+    const membershipIds = allMemberships.map((m) => m.id);
+
+    // Always include the home-org membership even if the role-grant check
+    // above only validated one org — membershipIds may be empty only if the
+    // user has no approved memberships (should not happen after the guard above).
+    if (!membershipIds.includes(context.membershipId)) {
+      membershipIds.push(context.membershipId);
+    }
+
+    const assignments =
+      membershipIds.length === 0
+        ? []
+        : await this.assignmentRepo.find({
+            where: { volunteerMembershipId: In(membershipIds) },
+            relations: ['serviceRequest', 'serviceRequest.reschedules', 'reschedule'],
+            order: { offeredAt: 'DESC' },
+            take: 100,
+          });
+
     return assignments.map((assignment) => ({
       id: assignment.id,
       organizationId: assignment.organizationId,
@@ -980,19 +1004,72 @@ export class MatchingService {
     }
   }
 
+  /**
+   * resolveVolunteerMembershipId
+   *
+   * For same-org assignments the callerMembershipId matches the assignment's
+   * volunteerMembershipId directly. For cross-org assignments the assignment's
+   * volunteerMembershipId belongs to a different org than the one the caller
+   * authenticated against. This helper looks up the assignment by ID and verifies
+   * ownership via userId, returning the correct membershipId to use.
+   *
+   * This is the key fix for cross-org offer discoverability (ITB-006 audit finding).
+   */
+  private async resolveVolunteerMembershipId(
+    assignmentId: string,
+    callerMembershipId: string,
+    callerUserId: string,
+  ): Promise<string> {
+    // Fast path: caller's home-org membership directly owns this assignment
+    const direct = await this.assignmentRepo.findOne({
+      where: { id: assignmentId, volunteerMembershipId: callerMembershipId },
+      select: ['id', 'volunteerMembershipId'],
+    });
+    if (direct) return callerMembershipId;
+
+    // Cross-org path: find the assignment by ID, then verify the caller owns it
+    const assignment = await this.assignmentRepo.findOne({
+      where: { id: assignmentId },
+      select: ['id', 'volunteerMembershipId'],
+    });
+    if (!assignment) throw new NotFoundException(`Assignment '${assignmentId}' not found`);
+
+    // Look up the membership and confirm it belongs to the calling user
+    const membership = await this.membershipRepo.findOne({
+      where: { id: assignment.volunteerMembershipId, userId: callerUserId },
+      select: ['id', 'userId'],
+    });
+    if (!membership) {
+      throw new ForbiddenException('This assignment does not belong to you');
+    }
+    return assignment.volunteerMembershipId;
+  }
+
   async acceptOffer(
     orgId: string,
     assignmentId: string,
     volunteerMembershipId: string,
     dto: AcceptVolunteerOfferDto,
     ipAddress?: string,
+    callerUserId?: string,
   ): Promise<VolunteerAssignment> {
+    // Resolve the correct membership for cross-org assignments before entering
+    // the transaction. For same-org offers this is a no-op fast path.
+    if (callerUserId) {
+      volunteerMembershipId = await this.resolveVolunteerMembershipId(
+        assignmentId,
+        volunteerMembershipId,
+        callerUserId,
+      );
+    }
+
     const outcome = await this.dataSource.transaction('READ COMMITTED', async (manager) => {
-      // 1. Find and validate assignment
+      // 1. Find and validate assignment — search by assignmentId + volunteerMembershipId.
+      // For cross-org, the assignment's organizationId is the requesting org (not the
+      // volunteer's org), so we omit organizationId from this initial lookup.
       let assignment = await manager.findOne(VolunteerAssignment, {
         where: {
           id: assignmentId,
-          organizationId: orgId,
           volunteerMembershipId,
         },
       });
@@ -1001,14 +1078,18 @@ export class MatchingService {
         throw new NotFoundException(`Assignment offer '${assignmentId}' not found`);
       }
 
-      const volunteer = await this.lockVolunteer(manager, orgId, volunteerMembershipId);
+      // Use the assignment's organizationId as the authoritative org for all
+      // subsequent checks (request lock, slot count, etc.)
+      const assignmentOrgId = assignment.organizationId;
+
+      const volunteer = await this.lockVolunteer(manager, assignmentOrgId, volunteerMembershipId);
 
       // 2. Lock the service request row for atomic slot count check
       const request = await manager
         .createQueryBuilder(ServiceRequest, 'req')
         .setLock('pessimistic_write')
         .where('req.id = :id', { id: assignment.serviceRequestId })
-        .andWhere('req.organizationId = :orgId', { orgId })
+        .andWhere('req.organizationId = :orgId', { orgId: assignmentOrgId })
         .getOne();
 
       if (!request) {
@@ -1017,7 +1098,7 @@ export class MatchingService {
 
       // A concurrent acceptance may have committed while this transaction waited.
       assignment = await manager.findOne(VolunteerAssignment, {
-        where: { id: assignmentId, organizationId: orgId, volunteerMembershipId },
+        where: { id: assignmentId, volunteerMembershipId },
         lock: { mode: 'pessimistic_write' },
       });
       if (!assignment) throw new NotFoundException('Assignment offer not found');
@@ -1043,6 +1124,12 @@ export class MatchingService {
         return { error: new ConflictException('Offer has expired (D#12)') };
       }
 
+      // Self-service guard: volunteer cannot serve their own request (D#5).
+      // Checked before the slot-count query — cheaper and fails fast.
+      // This re-validates what auto-matching already filters, preventing
+      // cross-org self-match races inside the acceptance transaction.
+      await this.assertNotBeneficiary(manager, volunteer.userId, request);
+
       // 3. Count currently accepted assignments
       const acceptedCount = await manager.count(VolunteerAssignment, {
         where: {
@@ -1061,6 +1148,7 @@ export class MatchingService {
       }
 
       await this.assertRequiredSkills(manager, request, volunteer.id);
+
       await this.assertNoScheduleConflict(manager, volunteer.userId, request, assignment.id);
 
       // 4. Accept position & record idempotency key
@@ -1104,7 +1192,7 @@ export class MatchingService {
           actorId: volunteer.userId,
           targetId: savedAssignment.id,
           targetType: 'volunteer_assignments',
-          organizationId: orgId,
+          organizationId: assignmentOrgId,
           payload: {
             serviceRequestId: request.id,
             volunteerMembershipId,
@@ -1130,11 +1218,19 @@ export class MatchingService {
     volunteerMembershipId: string,
     dto: DeclineVolunteerOfferDto,
     ipAddress?: string,
+    callerUserId?: string,
   ): Promise<VolunteerAssignment> {
+    // Resolve cross-org membership before looking up the assignment
+    if (callerUserId) {
+      volunteerMembershipId = await this.resolveVolunteerMembershipId(
+        assignmentId,
+        volunteerMembershipId,
+        callerUserId,
+      );
+    }
     const assignment = await this.assignmentRepo.findOne({
       where: {
         id: assignmentId,
-        organizationId: orgId,
         volunteerMembershipId,
       },
     });
@@ -1158,7 +1254,7 @@ export class MatchingService {
       actorId: null,
       targetId: saved.id,
       targetType: 'volunteer_assignments',
-      organizationId: orgId,
+      organizationId: assignment.organizationId,
       payload: { reason: saved.declineReason },
       ipAddress: ipAddress ?? null,
     });
@@ -1173,12 +1269,24 @@ export class MatchingService {
     volunteerMembershipId: string,
     dto: WithdrawVolunteerAssignmentDto,
     ipAddress?: string,
+    callerUserId?: string,
   ): Promise<VolunteerAssignment> {
-    return this.dataSource.transaction(async (manager) => {
+    // Resolve cross-org membership before entering the transaction
+    if (callerUserId) {
+      volunteerMembershipId = await this.resolveVolunteerMembershipId(
+        assignmentId,
+        volunteerMembershipId,
+        callerUserId,
+      );
+    }
+
+    // Run transaction and capture result + serviceRequestId for post-commit work
+    let serviceRequestIdForPostCommit: string | undefined;
+
+    const result = await this.dataSource.transaction(async (manager) => {
       let assignment = await manager.findOne(VolunteerAssignment, {
         where: {
           id: assignmentId,
-          organizationId: orgId,
           volunteerMembershipId,
         },
       });
@@ -1243,8 +1351,23 @@ export class MatchingService {
         manager,
       );
 
+      // Capture for post-commit sub-minimum check
+      serviceRequestIdForPostCommit = assignment.serviceRequestId;
+
       return savedAssignment;
     });
+
+    // After the withdrawal commits, check if the team dropped below minimum
+    // and trigger re-matching / coordinator alert as needed (FR-TEAM-05, D#69).
+    if (serviceRequestIdForPostCommit) {
+      void this.teamService
+        .handleSubMinimumAfterWithdrawal(orgId, serviceRequestIdForPostCommit, volunteerMembershipId)
+        .catch(() => {
+          // Logged inside the method — don't block the withdrawal response
+        });
+    }
+
+    return result;
   }
 
   // ─── Service Start and Finish ───────────────────────────────────────────────
@@ -1696,6 +1819,10 @@ export class MatchingService {
 
       await this.assertNoScheduleConflict(manager, volunteer.userId, request, existing?.id);
 
+      // Coordinator dispatch must also enforce that a volunteer cannot be
+      // assigned to a request they are the beneficiary of (D#5).
+      await this.assertNotBeneficiary(manager, volunteer.userId, request);
+
       let assignment: VolunteerAssignment;
       if (existing) {
         existing.status = VolunteerAssignmentStatus.ACCEPTED;
@@ -1905,6 +2032,34 @@ export class MatchingService {
 
       return saved;
     });
+  }
+
+  /**
+   * assertNotBeneficiary — prevents a volunteer from serving themselves.
+   *
+   * A user may hold memberships in multiple organizations.  Auto-matching
+   * already excludes the requesting user's identity (cross-org self-match fix,
+   * Oct 29 audit).  This re-check enforces the same rule at acceptance and
+   * coordinator-dispatch time, inside the acceptance transaction, so it is
+   * impossible to race past it.
+   *
+   * D#5 / BR-02: A volunteer can never confirm or serve their own request,
+   * including when they also hold a staff role.
+   */
+  private async assertNotBeneficiary(
+    manager: EntityManager,
+    volunteerUserId: string,
+    request: ServiceRequest,
+  ): Promise<void> {
+    const beneficiaryMembership = await manager.findOne(OrganizationMembership, {
+      where: { id: request.beneficiaryMembershipId },
+      select: ['id', 'userId'],
+    });
+    if (beneficiaryMembership?.userId === volunteerUserId) {
+      throw new ForbiddenException(
+        'A volunteer cannot accept or be dispatched to their own service request (D#5)',
+      );
+    }
   }
 
   private calculateHaversineDistance(

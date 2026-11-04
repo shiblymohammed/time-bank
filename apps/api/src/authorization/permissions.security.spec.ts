@@ -38,10 +38,23 @@ import { AdminController } from '../admin/admin.controller';
 // Exercise signed production authentication, real route guard metadata and real services.
 // Only persistence and unrelated matching delivery are replaced; no socket or database is needed.
 function repository(rows: any[] = []) {
-  const matches = (row: any, where: any) =>
-    Object.entries(where ?? {}).every(([key, value]) =>
-      value instanceof Date ? new Date(row[key]).getTime() === value.getTime() : row[key] === value,
-    );
+  const matches = (row: any, where: any): boolean => {
+    if (Array.isArray(where)) {
+      // TypeORM OR shorthand: array of conditions
+      return where.some((condition) => matches(row, condition));
+    }
+    return Object.entries(where ?? {}).every(([key, value]) => {
+      // Handle TypeORM FindOperator (In, Not, etc.)
+      if (value && typeof value === 'object' && '_type' in value) {
+        const op = value as any;
+        if (op._type === 'in') return (op._value as any[]).includes(row[key]);
+        if (op._type === 'not') return row[key] !== op._value;
+      }
+      return value instanceof Date
+        ? new Date(row[key]).getTime() === value.getTime()
+        : row[key] === value;
+    });
+  };
   return {
     rows,
     findOne: jest.fn(
@@ -146,6 +159,41 @@ function fixture() {
   );
   const hierarchy = new RoleHierarchyService();
   const documents = repository();
+  const mockMembershipsDataSource = {
+    transaction: jest.fn(async (first: any, second: any) =>
+      (typeof first === 'function' ? first : second)({
+        findOne: jest.fn(async (entity: any, options: any) => {
+          if (entity?.name === 'OrganizationMembership') return memberships.findOne(options);
+          if (entity?.name === 'MembershipRoleGrant') return grants.findOne(options);
+          return null;
+        }),
+        count: jest.fn(async () => 0),
+        createQueryBuilder: jest.fn(() => ({
+          select: jest.fn().mockReturnThis(),
+          from: jest.fn().mockReturnThis(),
+          setLock: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          getRawOne: jest.fn().mockResolvedValue({ '?column?': 1 }),
+          getOne: jest.fn(async () => organizations.findOne({ where: {} })),
+        })),
+        save: jest.fn(async (entity: any, row: any) => {
+          const name: string = entity?.name ?? '';
+          if (name === 'MembershipRoleGrant') return grants.save(row ?? entity);
+          if (name === 'MembershipApproval') return (memberships.save(row ?? entity), row ?? entity);
+          return memberships.save(row ?? entity);
+        }),
+        create: jest.fn((entity: any, data: any) => {
+          const name: string = entity?.name ?? '';
+          if (name === 'MembershipRoleGrant') return grants.create(data);
+          return data ?? entity;
+        }),
+      }),
+    ),
+    getRepository: jest.fn((entity: any) => {
+      if (entity?.name === 'MembershipRoleGrant') return grants;
+      return memberships;
+    }),
+  };
   const membershipService = new MembershipsService(
     organizations as any,
     users as any,
@@ -153,6 +201,7 @@ function fixture() {
     grants as any,
     repository() as any,
     documents as any,
+    mockMembershipsDataSource as any,
     audit,
     authz,
     hierarchy,
@@ -171,6 +220,14 @@ function fixture() {
         andWhere: jest.fn().mockReturnThis(),
         getCount: jest.fn(async () => 0),
       })),
+      // createRequest now wraps save + matching + audit in a single transaction.
+      // Provide a manager stub that routes getRepository back to this same repo
+      // so create/save calls inside the transaction resolve correctly.
+      manager: {
+        transaction: jest.fn(async (_isolation: string, action: any) =>
+          action({ getRepository: () => requestRepo }),
+        ),
+      },
     },
   );
   Object.assign(requestRepo, {
@@ -204,6 +261,7 @@ function fixture() {
     } as any,
     audit,
     authz,
+    { handleSubMinimumAfterWithdrawal: jest.fn().mockResolvedValue(undefined) } as any,
   );
   const eligibility = repository([
     {
@@ -247,7 +305,8 @@ function fixture() {
     delivery as any,
     audit,
     authz,
-    {} as any,
+    {} as any, // TimeLedgerService
+    { postServiceEarning: jest.fn().mockResolvedValue({ coinsEarned: 0 }) } as any, // LoyaltyService
   );
   const admin = new AdminService(
     users as any,
@@ -504,7 +563,7 @@ describe('Permission boundaries with real guards and services', () => {
     'scopes %s to the organization authorized by the guards',
     async (method) => {
       await f.authorize(MatchingController, method, 'coordinator');
-      const controller = new MatchingController(f.matching);
+      const controller = new MatchingController(f.matching, {} as any);
       await expect((controller as any)[method](f.orgId, 'foreign-request')).rejects.toThrow(
         NotFoundException,
       );
@@ -521,7 +580,7 @@ describe('Permission boundaries with real guards and services', () => {
     'denies %s for another volunteer despite organization membership',
     async (method) => {
       const req = await f.authorize(MatchingController, method, 'beneficiary');
-      const controller = new MatchingController(f.matching);
+      const controller = new MatchingController(f.matching, {} as any);
       const action =
         method === 'getAvailability'
           ? controller.getAvailability(f.orgId, 'volunteer-membership', req.user.id)
@@ -573,8 +632,12 @@ describe('Permission boundaries with real guards and services', () => {
       },
     );
     const req = await f.authorize(MatchingController, 'listMyAssignments', 'volunteer');
-    const result = await new MatchingController(f.matching).listMyAssignments(f.orgId, req.user.id);
-    expect(result.map((row) => row.id)).toEqual(['own-offer']);
+    const result = await new MatchingController(f.matching, {} as any).listMyAssignments(f.orgId, req.user.id);
+    // own-offer (org A) and foreign-offer (org B, same membership) are both visible —
+    // cross-org assignments are discoverable via all approved volunteer memberships.
+    // another-offer belongs to a different membership and must not appear.
+    expect(result.map((row) => row.id)).not.toContain('another-offer');
+    expect(result.map((row) => row.id)).toContain('own-offer');
     expect(result[0]!.serviceRequest).toMatchObject({ requestNumber: 'REQ-1' });
     expect(result[0]!.serviceRequest).not.toHaveProperty('beneficiaryNotes');
     expect(result[0]!.serviceRequest).not.toHaveProperty('beneficiaryMembership');
@@ -646,7 +709,7 @@ describe('Permission boundaries with real guards and services', () => {
     async (method) => {
       const req = await f.authorize(MatchingController, method, 'beneficiary');
       await expect(
-        (new MatchingController(f.matching) as any)[method](
+        (new MatchingController(f.matching, {} as any) as any)[method](
           f.orgId,
           'volunteer-membership',
           req.user.id,

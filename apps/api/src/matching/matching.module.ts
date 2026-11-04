@@ -7,11 +7,14 @@ import { VolunteerAssignment } from './entities/volunteer-assignment.entity';
 import { OperationalZone } from './entities/operational-zone.entity';
 import { VolunteerZoneAssignment } from './entities/volunteer-zone-assignment.entity';
 import { MatchingRound } from './entities/matching-round.entity';
+import { TeamInvitation } from './entities/team-invitation.entity';
 import { ServiceRequest } from '../requests/entities/service-request.entity';
 import { OrganizationMembership } from '../memberships/entities/organization-membership.entity';
 import { GlobalAccountRestriction } from '../identity/entities/global-account-restriction.entity';
 
 import { MatchingService } from './matching.service';
+import { MatchingSchedulerService } from './matching-scheduler.service';
+import { TeamService } from './team.service';
 import { MatchingController } from './matching.controller';
 import { MatchingConfigService } from './matching-config.service';
 import { CANDIDATE_RANKING_STRATEGY } from './ranking/ranking-strategy.interface';
@@ -29,6 +32,7 @@ import { RequestsModule } from '../requests/requests.module';
       OperationalZone,
       VolunteerZoneAssignment,
       MatchingRound,
+      TeamInvitation,
       ServiceRequest,
       OrganizationMembership,
       GlobalAccountRestriction,
@@ -45,7 +49,9 @@ import { RequestsModule } from '../requests/requests.module';
       useClass: DeterministicCandidateRankingStrategy,
     },
     MatchingService,
+    MatchingSchedulerService,
+    TeamService,
   ],
-  exports: [MatchingService, MatchingConfigService, CANDIDATE_RANKING_STRATEGY],
+  exports: [MatchingService, MatchingConfigService, CANDIDATE_RANKING_STRATEGY, TeamService],
 })
 export class MatchingModule {}

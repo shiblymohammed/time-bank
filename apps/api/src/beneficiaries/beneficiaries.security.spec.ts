@@ -132,7 +132,8 @@ describe('Milestone 3 Phase B Security & Boundary Invariants', () => {
             membershipId: 'caller-mem',
           }),
         } as unknown as AuthorizationService,
-        {} as any,
+        {} as any, // TimeLedgerService
+        { postServiceEarning: jest.fn().mockResolvedValue({ coinsEarned: 0 }) } as any, // LoyaltyService
       );
     });
 

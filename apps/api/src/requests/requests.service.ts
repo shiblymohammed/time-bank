@@ -32,6 +32,7 @@ import { MatchingService } from '../matching/matching.service';
 import { VolunteerAssignment } from '../matching/entities/volunteer-assignment.entity';
 import { AuditService } from '../audit/audit.service';
 import { TimeLedgerService } from '../time-ledger/time-ledger.service';
+import { LoyaltyService } from '../loyalty/loyalty.service';
 import {
   AuthorizationService,
   EvaluatedMembershipContext,
@@ -66,6 +67,7 @@ export class RequestsService {
     private readonly auditService: AuditService,
     private readonly authorizationService: AuthorizationService,
     private readonly timeLedgerService: TimeLedgerService,
+    private readonly loyaltyService: LoyaltyService,
   ) {}
 
   // ─── Create Service Request (D#8, D#59, D#60, D#61) ─────────────────────────
@@ -742,6 +744,16 @@ export class RequestsService {
         reference: request.requestNumber,
       });
 
+      // Award loyalty coins in the same transaction (FR-LOY-01, D#3).
+      // Coins are municipality-scoped and awarded alongside time credits.
+      const coinResult = await this.loyaltyService.postServiceEarning(manager, {
+        userId: volunteer!.userId,
+        organizationId: orgId,
+        serviceRequestId: request.id,
+        assignmentId: saved.id,
+        confirmedMinutes: minutes,
+      });
+
       // The request is complete once no helper is still due, working or unconfirmed.
       const open = await manager
         .getRepository(VolunteerAssignment)
@@ -772,6 +784,7 @@ export class RequestsService {
             requestCompleted: open === 0,
             creditsEarned: credit?.amount ?? 0,
             creditsHeld: credit?.held ?? false,
+            coinsEarned: coinResult.coinsEarned,
           },
           ipAddress: ipAddress ?? null,
         },
@@ -780,11 +793,12 @@ export class RequestsService {
       return Object.assign(saved, {
         creditsEarned: credit?.amount ?? 0,
         creditsHeld: credit?.held ?? false,
+        coinsEarned: coinResult.coinsEarned,
       });
     });
   }
 
-  private async generateRequestNumber(orgCode: string): Promise<string> {
+  private generateRequestNumber(orgCode: string): string {
     const now = new Date();
     const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
     const suffix = randomUUID().replace(/-/g, '').slice(0, 16).toUpperCase();

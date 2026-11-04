@@ -11,6 +11,10 @@ import { TimeCreditLedger1729118400007 } from './migrations/1729118400007-TimeCr
 import { CreditDonations1729118400008 } from './migrations/1729118400008-CreditDonations';
 import { MembershipApplications1729118400009 } from './migrations/1729118400009-MembershipApplications';
 import { CreditControls1729118400010 } from './migrations/1729118400010-CreditControls';
+import { TeamInvitations1729118400011 } from './migrations/1729118400011-TeamInvitations';
+import { LoyaltyCoinsAndMerchants1729118400012 } from './migrations/1729118400012-LoyaltyCoinsAndMerchants';
+import { GovernanceAndReporting1729118400013 } from './migrations/1729118400013-GovernanceAndReporting';
+import { OfflineReliability1729118400014 } from './migrations/1729118400014-OfflineReliability';
 describe('entity and migration schema contract', () => {
   it('defines every mapped entity column in the migration SQL', async () => {
     const queries: string[] = [];
@@ -31,6 +35,10 @@ describe('entity and migration schema contract', () => {
       new CreditDonations1729118400008(),
       new MembershipApplications1729118400009(),
       new CreditControls1729118400010(),
+      new TeamInvitations1729118400011(),
+      new LoyaltyCoinsAndMerchants1729118400012(),
+      new GovernanceAndReporting1729118400013(),
+      new OfflineReliability1729118400014(),
     ]) {
       await migration.up(runner);
     }
@@ -56,7 +64,7 @@ describe('entity and migration schema contract', () => {
       entities: [path.join(__dirname, '../**/*.entity.ts')],
     });
     await (source as unknown as { buildMetadatas(): Promise<void> }).buildMetadatas();
-    expect(source.entityMetadatas).toHaveLength(33);
+    expect(source.entityMetadatas).toHaveLength(46);
     for (const entity of source.entityMetadatas) {
       expect(tables.has(entity.tableName)).toBe(true);
       for (const column of entity.columns) {

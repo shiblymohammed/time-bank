@@ -33,6 +33,7 @@ import {
   EvaluatedMembershipContext,
 } from '../authorization/authorization.service';
 import { TimeLedgerService } from '../time-ledger/time-ledger.service';
+import { LoyaltyService } from '../loyalty/loyalty.service';
 
 describe('RequestsService', () => {
   let service: RequestsService;
@@ -133,6 +134,7 @@ describe('RequestsService', () => {
         { provide: MatchingService, useValue: mockMatchingService },
         { provide: AuditService, useValue: mockAuditService },
         { provide: TimeLedgerService, useValue: {} },
+        { provide: LoyaltyService, useValue: { postServiceEarning: jest.fn().mockResolvedValue({ coinsEarned: 0 }) } },
         {
           provide: AuthorizationService,
           useValue: {

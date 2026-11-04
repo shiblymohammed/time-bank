@@ -110,7 +110,7 @@ export class CatalogueController {
   @ApiQuery({ name: 'activeOnly', required: false, type: Boolean })
   @ApiResponse({ status: 200, description: 'Services retrieved' })
   async listGlobalServices(
-    @Query('categoryId') categoryId?: string,
+    @Query('categoryId', new ParseUUIDPipe({ optional: true })) categoryId?: string,
     @Query('activeOnly') activeOnly?: string,
   ) {
     const isActiveOnly = activeOnly !== 'false';

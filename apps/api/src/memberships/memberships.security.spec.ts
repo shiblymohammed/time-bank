@@ -15,7 +15,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { ForbiddenException } from '@nestjs/common';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, DataSource } from 'typeorm';
 import { UserRole, MembershipStatus, RoleGrantStatus } from '@ktb/shared-types';
 
 import { MembershipsService } from './memberships.service';
@@ -122,6 +122,26 @@ describe('MembershipsService - Role Escalation Security (Finding #1)', () => {
           provide: getRepositoryToken(MembershipDocument),
           useValue: {
             findOne: jest.fn(),
+          },
+        },
+        {
+          provide: DataSource,
+          useValue: {
+            transaction: jest.fn(async (_isolation: any, action: any) =>
+              action({
+                findOne: jest.fn(),
+                count: jest.fn(),
+                save: jest.fn(async (_e: any, row: any) => row ?? _e),
+                create: jest.fn((_e: any, data: any) => data),
+                createQueryBuilder: jest.fn(() => ({
+                  select: jest.fn().mockReturnThis(),
+                  from: jest.fn().mockReturnThis(),
+                  setLock: jest.fn().mockReturnThis(),
+                  where: jest.fn().mockReturnThis(),
+                  getRawOne: jest.fn().mockResolvedValue({ '?column?': 1 }),
+                })),
+              }),
+            ),
           },
         },
         {

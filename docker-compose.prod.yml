@@ -1,0 +1,116 @@
+# ─── Production Docker Compose ───────────────────────────────────────────────
+# Uses pre-built, versioned images from GHCR — never builds from source on the VPS.
+#
+# Usage (managed by deploy.yml — do NOT run manually in production):
+#   IMAGE_TAG=sha-abc1234 docker compose -f docker-compose.prod.yml up -d
+#
+# Required environment variables (set in /etc/ktb/prod.env on the VPS,
+# loaded via env_file below):
+#   DATABASE_URL, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+#   JWT_SECRET, FIREBASE_PROJECT_ID
+#   SMS_PROVIDER, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, SMS_FROM
+#   (or AWS / MSG91 equivalents — see .env.example)
+#   IMAGE_TAG — injected by the deploy workflow
+#
+# NFR-02: Docker Compose on VPS
+# NFR-04: Production uses isolated databases and secrets — never dev values
+# NFR-08: TLS termination at nginx; API/DB never exposed to the internet
+
+services:
+  # ─── PostgreSQL ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    container_name: ktb_postgres_prod
+    restart: always
+    env_file: /etc/ktb/prod.env
+    environment:
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=en_US.utf8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/docker/postgres-init:/docker-entrypoint-initdb.d:ro
+      # Point-in-time recovery: WAL archive directory (configure archive_command separately)
+      - postgres_wal:/var/lib/postgresql/wal_archive
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # Postgres is intentionally NOT exposed to any external network
+    networks:
+      - ktb_internal
+
+  # ─── NestJS API ────────────────────────────────────────────────────────────
+  api:
+    image: ghcr.io/${GITHUB_REPOSITORY}/api:${IMAGE_TAG:?IMAGE_TAG must be set}
+    container_name: ktb_api_prod
+    restart: always
+    env_file: /etc/ktb/prod.env
+    environment:
+      NODE_ENV: production
+      APP_ENV: production
+    # API is NOT exposed directly — only reachable through nginx on ktb_internal
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/api/health/live || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    networks:
+      - ktb_internal
+      - ktb_api_egress
+
+  # ─── Next.js Web Dashboard ─────────────────────────────────────────────────
+  web:
+    image: ghcr.io/${GITHUB_REPOSITORY}/web:${IMAGE_TAG:?IMAGE_TAG must be set}
+    container_name: ktb_web_prod
+    restart: always
+    env_file: /etc/ktb/prod.env
+    environment:
+      NODE_ENV: production
+      API_INTERNAL_URL: http://api:3001
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - ktb_internal
+      - ktb_web
+
+  # ─── Nginx (TLS termination + reverse proxy) ───────────────────────────────
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: ktb_nginx_prod
+    restart: always
+    ports:
+      # Only 80 (redirect) and 443 (TLS) are exposed to the internet
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx/nginx.prod.conf:/etc/nginx/nginx.conf:ro
+      # TLS certificates — provision with Certbot/Let's Encrypt before first deploy
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
+    depends_on:
+      - web
+      - api
+    networks:
+      - ktb_internal
+      - ktb_web
+
+volumes:
+  postgres_data:
+    driver: local
+  postgres_wal:
+    driver: local
+
+networks:
+  ktb_api_egress:
+    driver: bridge
+  ktb_internal:
+    driver: bridge
+    internal: true
+  ktb_web:
+    driver: bridge

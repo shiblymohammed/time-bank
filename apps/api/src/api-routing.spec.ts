@@ -22,6 +22,18 @@ import { CatalogueService } from './catalogue/catalogue.service';
 import { BeneficiariesService } from './beneficiaries/beneficiaries.service';
 import { RequestsService } from './requests/requests.service';
 import { MatchingService } from './matching/matching.service';
+import { TeamService } from './matching/team.service';
+import { LoyaltyService } from './loyalty/loyalty.service';
+import { LoyaltyController } from './loyalty/loyalty.controller';
+import { GovernanceService } from './governance/governance.service';
+import {
+  GovernanceController,
+  GlobalReportsController,
+  NomineeController,
+} from './governance/governance.controller';
+import { SyncService } from './offline/sync.service';
+import { OutboxService } from './offline/outbox.service';
+import { SyncController } from './offline/sync.controller';
 import { AuthGuard } from './auth/guards/auth.guard';
 import { OrganizationAccessGuard } from './authorization/guards/organization-access.guard';
 import { RolesGuard } from './authorization/guards/roles.guard';
@@ -43,6 +55,11 @@ const controllers = [
   BeneficiariesController,
   RequestsController,
   MatchingController,
+  LoyaltyController,
+  GovernanceController,
+  GlobalReportsController,
+  NomineeController,
+  SyncController,
 ];
 const services = [
   FirebaseTokenService,
@@ -56,6 +73,11 @@ const services = [
   BeneficiariesService,
   RequestsService,
   MatchingService,
+  TeamService,
+  LoyaltyService,
+  GovernanceService,
+  SyncService,
+  OutboxService,
 ];
 const uuid = '00000000-0000-4000-8000-000000000001';
 const routes = controllers.flatMap((controller) =>

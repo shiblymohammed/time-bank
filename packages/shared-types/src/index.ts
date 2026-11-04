@@ -318,3 +318,130 @@ export enum MatchingEscalationReason {
   START_TIME_IMMINENT = 'START_TIME_IMMINENT',
   MANUAL_COORDINATOR_TRIGGER = 'MANUAL_COORDINATOR_TRIGGER',
 }
+
+// ─── Milestone 5: Team & Transfer Workflows ──────────────────────────────────
+
+/**
+ * Team invitation lifecycle state (FR-TEAM-02, D#65).
+ * An accepted volunteer invites a teammate to fill a remaining slot on a
+ * multi-volunteer request. The invitation bypasses the matching engine and
+ * creates an assignment directly when accepted.
+ */
+export enum TeamInvitationStatus {
+  PENDING = 'PENDING',
+  ACCEPTED = 'ACCEPTED',
+  DECLINED = 'DECLINED',
+  EXPIRED = 'EXPIRED',
+  CANCELLED = 'CANCELLED',
+}
+
+// ─── Milestone 6: Loyalty Coins & Merchants ──────────────────────────────────
+
+/**
+ * Lifecycle state of a merchant offer (FR-LOY-03, D#20).
+ * Proposed by merchant → reviewed by Municipality Admin → ACTIVE/REJECTED.
+ */
+export enum MerchantOfferStatus {
+  PENDING_REVIEW = 'PENDING_REVIEW',
+  ACTIVE = 'ACTIVE',
+  REJECTED = 'REJECTED',
+  EXPIRED = 'EXPIRED',
+  WITHDRAWN = 'WITHDRAWN',
+}
+
+/**
+ * Loyalty coin ledger transaction types.
+ */
+export enum LoyaltyCoinTxType {
+  SERVICE_EARNED = 'SERVICE_EARNED',
+  OFFER_REDEEMED = 'OFFER_REDEEMED',
+  ADMIN_ADJUSTMENT = 'ADMIN_ADJUSTMENT',
+}
+
+/**
+ * Merchant status within an organization.
+ */
+export enum MerchantStatus {
+  PENDING_APPROVAL = 'PENDING_APPROVAL',
+  ACTIVE = 'ACTIVE',
+  SUSPENDED = 'SUSPENDED',
+}
+
+// ─── Milestone 7: Governance & Reporting ─────────────────────────────────────
+
+/** Safety alert lifecycle (FR-SAFE-01, FR-SAFE-02, D#70–D#74). */
+export enum SafetyAlertStatus {
+  RAISED = 'RAISED',
+  ACKNOWLEDGED = 'ACKNOWLEDGED',
+  SERVICE_PAUSED = 'SERVICE_PAUSED',
+  RESOLVED = 'RESOLVED',
+  DISMISSED = 'DISMISSED',
+}
+
+/** Who raised the alert. */
+export enum SafetyAlertRaisedBy {
+  VOLUNTEER = 'VOLUNTEER',
+  BENEFICIARY = 'BENEFICIARY',
+  CAREGIVER = 'CAREGIVER',
+}
+
+/** Complaint lifecycle (FR-SAFE-03, D#75, D#76). */
+export enum ComplaintStatus {
+  SUBMITTED = 'SUBMITTED',
+  UNDER_REVIEW = 'UNDER_REVIEW',
+  RESOLVED = 'RESOLVED',
+  ESCALATED = 'ESCALATED',
+  DISMISSED = 'DISMISSED',
+}
+
+/** Who the complaint is against — determines routing (D#75, D#76). */
+export enum ComplaintTargetRole {
+  COORDINATOR = 'COORDINATOR',
+  MUNICIPALITY_ADMIN = 'MUNICIPALITY_ADMIN',
+}
+
+/** Appeal lifecycle (FR-SAFE-04, D#77, D#78, BR-11). */
+export enum AppealStatus {
+  SUBMITTED = 'SUBMITTED',
+  UNDER_REVIEW = 'UNDER_REVIEW',
+  UPHELD = 'UPHELD',
+  DISMISSED = 'DISMISSED',
+}
+
+/** What the appeal is contesting. */
+export enum AppealSubjectType {
+  SUSPENSION = 'SUSPENSION',
+  BAN = 'BAN',
+  MEMBERSHIP_REVOCATION = 'MEMBERSHIP_REVOCATION',
+  COMPLAINT_RESOLUTION = 'COMPLAINT_RESOLUTION',
+}
+
+/** Account closure type (FR-IDENT-07, FR-IDENT-08). */
+export enum AccountClosureType {
+  DECEASED = 'DECEASED',
+  DUPLICATE = 'DUPLICATE',
+}
+
+/** Account closure lifecycle. */
+export enum AccountClosureStatus {
+  PENDING_REVIEW = 'PENDING_REVIEW',
+  APPROVED = 'APPROVED',
+  REJECTED = 'REJECTED',
+}
+
+// ─── Milestone 8: Offline Reliability ────────────────────────────────────────
+
+/** Outbox event status for the transactional outbox pattern (FR-OFF-02, D#99). */
+export enum OutboxEventStatus {
+  PENDING = 'PENDING',
+  PROCESSING = 'PROCESSING',
+  DELIVERED = 'DELIVERED',
+  FAILED = 'FAILED',
+}
+
+/** Sync state for a client-initiated operation. */
+export enum SyncOperationStatus {
+  PENDING = 'PENDING',
+  SUCCESS = 'SUCCESS',
+  FAILED = 'FAILED',
+}
