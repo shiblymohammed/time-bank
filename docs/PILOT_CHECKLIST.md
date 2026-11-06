@@ -1,0 +1,61 @@
+# One-municipality pilot checklist
+
+The gate between the test server and real people using the service. A pilot is a small, supervised run with one
+municipality. It is a decision for the project owner and the municipality, and nothing here is approved by finishing it.
+
+## Before anyone real signs up
+
+### Sign-off by people
+
+- [ ] A named person has reviewed the credit ledger, authorization rules and migrations.
+- [ ] The municipality has agreed to the pilot and named a coordinator and an administrator.
+- [ ] Privacy notices and consent for phone numbers, addresses and care details have been reviewed.
+- [ ] Someone is named to respond when a service goes wrong, with a phone number that is answered.
+
+### Technical
+
+- [ ] [Every check in the test server guide](TEST_SERVER.md#checks-after-deploying) has passed on the deployed server.
+- [ ] A database backup has been restored successfully at least once, onto a separate database.
+- [ ] All CI jobs pass on the deployed commit, including Matching Concurrency.
+- [ ] Android release build works on a real phone with Firebase sign-in, not test sign-in.
+- [ ] Real SMS delivery and quota are confirmed for the expected number of users.
+- [ ] Push messages arrive on a real phone with the app closed.
+
+### Data
+
+- [ ] The municipality, wards and operational zones are set up.
+- [ ] The enabled service list is reviewed by the coordinator.
+- [ ] No test or demo accounts remain on the pilot database.
+
+## A safe first scope
+
+- Start with 5 to 10 verified volunteers and a few beneficiaries known to the coordinator.
+- Start with low-risk services. Keep sensitive ones on coordinator dispatch.
+- Use scheduled requests first. Add immediate requests once matching is trusted.
+- Review every credit award during the first weeks.
+
+## During the pilot
+
+Check these weekly with the coordinator:
+
+- Requests made, matched, escalated and cancelled, and how long matching took.
+- Volunteers who never respond, or who received no push message.
+- Sign-in failures and SMS costs.
+- Any credit correction or review, and why it was needed.
+- Complaints. There is no complaints workflow yet, so log them by hand and act on them the same day.
+
+## Stop the pilot if
+
+- A beneficiary is left without promised help because of a system fault.
+- Credits are wrong and the cause is not understood.
+- Personal data reaches someone who should not have it.
+- Backups are failing.
+
+## Known gaps to accept or close first
+
+- Safety alerts, complaints, appeals and reports (Milestone 7) are not built.
+- Offline use (Milestone 8) is not built, so volunteers need a connection.
+- Load, security and accessibility reviews and Malayalam validation (Milestone 9) have not been done.
+- Team services and transfers (Milestone 5) are not built, so start with services for one volunteer.
+- [Other remaining issues](FULL_APPLICATION_AUDIT_2026-11-02.md), including request-key reuse and quota month
+  boundaries.

@@ -204,6 +204,7 @@ function fixture() {
     } as any,
     audit,
     authz,
+    {} as any,
   );
   const eligibility = repository([
     {

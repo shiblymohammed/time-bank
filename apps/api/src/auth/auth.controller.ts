@@ -1,5 +1,6 @@
 import { Controller, Post, Get, Body, Req, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
 import { FirebaseTokenService } from './firebase-token.service';
 import { FirebaseSignInDto } from './dto/firebase-sign-in.dto';
@@ -10,6 +11,11 @@ import { RefreshTokenDto } from './dto/refresh-token.dto';
 import { AuthGuard } from './guards/auth.guard';
 import { CurrentUserId } from '../authorization/decorators/current-user.decorator';
 
+// Sign-in routes are stricter than the API-wide limit because each attempt can create a session.
+const signInLimit = {
+  default: { limit: () => Number(process.env['AUTH_RATE_LIMIT_PER_MINUTE'] ?? 30), ttl: 60_000 },
+};
+
 @ApiTags('Authentication & Identity')
 @Controller('auth')
 export class AuthController {
@@ -19,6 +25,7 @@ export class AuthController {
   ) {}
 
   @Post('otp/request')
+  @Throttle(signInLimit)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Request mobile OTP verification code',
@@ -33,6 +40,7 @@ export class AuthController {
   }
 
   @Post('otp/verify')
+  @Throttle(signInLimit)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Verify mobile OTP code and authenticate',
@@ -48,6 +56,7 @@ export class AuthController {
   }
 
   @Post('firebase')
+  @Throttle(signInLimit)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Exchange a verified Firebase phone ID token for a Time Bank session' })
   async firebaseSignIn(@Body() dto: FirebaseSignInDto, @Req() req: Request) {
@@ -56,6 +65,7 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @Throttle(signInLimit)
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Refresh expired access token',

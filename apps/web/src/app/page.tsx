@@ -9,6 +9,7 @@ import { TimeCredits } from '@/components/time-credits';
 import { ApiManagement } from '@/components/api-management';
 import { BrandMark, Icon, type IconName } from '@/components/icons';
 import { api, ApiError, backend } from '@/lib/api';
+import { firebaseMessage, sendPhoneCode, type FirebaseWebConfig } from '@/lib/firebase-phone';
 
 type Tab =
   | 'overview'
@@ -204,6 +205,18 @@ function SignIn({ onSignedIn }: { onSignedIn: (profile: Profile) => void }) {
   const [sent, setSent] = useState(false),
     [busy, setBusy] = useState(false),
     [development, setDevelopment] = useState(false);
+  // undefined while loading; null means this deployment uses the private QA code instead.
+  const [firebase, setFirebase] = useState<FirebaseWebConfig | null>();
+  const confirmCode = useRef<((code: string) => Promise<string>) | null>(null);
+  const recaptcha = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    api<Partial<FirebaseWebConfig>>('/api/firebase-config')
+      .then((config) => setFirebase(config.apiKey ? (config as FirebaseWebConfig) : null))
+      .catch(() => {
+        setFirebase(null);
+        setError('Sign-in is unavailable. Reload the page to try again.');
+      });
+  }, []);
   return (
     <main className="login-shell">
       <section className="glass-panel login-panel">
@@ -220,7 +233,10 @@ function SignIn({ onSignedIn }: { onSignedIn: (profile: Profile) => void }) {
             setError('');
             const normalized = phone.startsWith('+') ? phone : `+91${phone}`;
             try {
-              if (!sent) {
+              if (!sent && firebase) {
+                confirmCode.current = await sendPhoneCode(firebase, normalized, recaptcha.current!);
+                setSent(true);
+              } else if (!sent) {
                 const result = await api<{ devOtp?: string }>('/api/session', 'POST', {
                   action: 'request-code',
                   phone: normalized,
@@ -228,6 +244,11 @@ function SignIn({ onSignedIn }: { onSignedIn: (profile: Profile) => void }) {
                 setCode(result.devOtp ?? '');
                 setDevelopment(Boolean(result.devOtp));
                 setSent(true);
+              } else if (firebase) {
+                const idToken = await confirmCode.current!(code);
+                onSignedIn(
+                  await api<Profile>('/api/session', 'POST', { action: 'firebase', idToken }),
+                );
               } else
                 onSignedIn(
                   await api<Profile>('/api/session', 'POST', {
@@ -237,7 +258,10 @@ function SignIn({ onSignedIn }: { onSignedIn: (profile: Profile) => void }) {
                   }),
                 );
             } catch (cause) {
-              setError(cause instanceof Error ? cause.message : 'Unable to sign in');
+              setError(
+                firebaseMessage(cause) ??
+                  (cause instanceof Error ? cause.message : 'Unable to sign in'),
+              );
             } finally {
               setBusy(false);
             }
@@ -282,7 +306,8 @@ function SignIn({ onSignedIn }: { onSignedIn: (profile: Profile) => void }) {
               {error}
             </p>
           )}
-          <button className="btn btn-primary" disabled={busy}>
+          <div ref={recaptcha} />
+          <button className="btn btn-primary" disabled={busy || firebase === undefined}>
             {busy ? 'Please wait…' : sent ? 'Verify and sign in' : 'Send code'}
           </button>
           {sent && (
@@ -294,6 +319,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (profile: Profile) => void }) {
                 setSent(false);
                 setCode('');
                 setDevelopment(false);
+                confirmCode.current = null;
                 setError('');
               }}
             >
@@ -537,7 +563,7 @@ export default function AdminDashboard(): React.JSX.Element {
     setDetail(null);
     async function load() {
       const result = await backend<{ data: Organization[] }>(
-        '/v1/organizations',
+        isGlobal ? '/v1/organizations/manage' : '/v1/organizations',
         'GET',
         undefined,
         controller.signal,

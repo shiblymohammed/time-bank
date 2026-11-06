@@ -132,6 +132,7 @@ jobs:
             export IMAGE_TAG=${{ needs.build-and-push.outputs.image_tag }}
 
             echo "[deploy] Pulling images for tag: $IMAGE_TAG"
+            export COMPOSE_FILE=docker-compose.server.yml
             docker compose pull
 
             # NFR-17: Back up DB before risky changes
@@ -142,16 +143,16 @@ jobs:
 
             # Run migrations
             echo "[deploy] Running database migrations..."
-            docker compose run --rm api node apps/api/dist/database/migrations/run.js
+            docker compose run --rm api node apps/api/dist/database/run-migrations.js
 
             # Rolling update
             echo "[deploy] Updating services..."
-            docker compose up -d --no-deps --build api web nginx
+            docker compose up -d --no-deps api web nginx
 
             # Health check (UC-30: health check/rollback)
             echo "[deploy] Waiting for health checks..."
             sleep 15
-            docker compose exec api wget -qO- http://localhost:3001/health/ready || {
+            docker compose exec api wget -qO- http://127.0.0.1:3001/api/health/ready || {
               echo "[deploy] Health check failed — initiating rollback..."
               # TODO(operations): Implement automated rollback to previous image tag
               exit 1

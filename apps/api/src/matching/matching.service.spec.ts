@@ -28,6 +28,7 @@ import { OrganizationMembership } from '../memberships/entities/organization-mem
 import { GlobalAccountRestriction } from '../identity/entities/global-account-restriction.entity';
 import { User } from '../identity/entities/user.entity';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { MatchingConfigService } from './matching-config.service';
 import { CANDIDATE_RANKING_STRATEGY } from './ranking/ranking-strategy.interface';
@@ -201,6 +202,7 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
           provide: CANDIDATE_RANKING_STRATEGY,
           useClass: DeterministicCandidateRankingStrategy,
         },
+        { provide: NotificationsService, useValue: { enqueue: jest.fn() } },
         { provide: getRepositoryToken(VolunteerSkill), useValue: mockSkillRepo },
         { provide: getRepositoryToken(VolunteerAvailability), useValue: mockAvailabilityRepo },
         { provide: getRepositoryToken(VolunteerAssignment), useValue: mockAssignmentRepo },

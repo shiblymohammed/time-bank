@@ -1,0 +1,88 @@
+# Hosted test or production server. Runs released images with production settings; the
+# development docker-compose.yml builds from source and must not be exposed publicly.
+# Setup and checks: docs/TEST_SERVER.md
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ktb_internal
+
+  api:
+    image: ghcr.io/${IMAGE_REPOSITORY:?IMAGE_REPOSITORY must be set in .env}/api:${IMAGE_TAG:?IMAGE_TAG must be set}
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      API_PORT: 3001
+      API_BASE_URL: ${DASHBOARD_ORIGIN:?DASHBOARD_ORIGIN must be set in .env}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set in .env}
+      JWT_ACCESS_TOKEN_EXPIRY: ${JWT_ACCESS_TOKEN_EXPIRY:-15m}
+      JWT_REFRESH_TOKEN_EXPIRY: ${JWT_REFRESH_TOKEN_EXPIRY:-7d}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:?FIREBASE_PROJECT_ID must be set in .env}
+      FIREBASE_SERVICE_ACCOUNT_JSON: ${FIREBASE_SERVICE_ACCOUNT_JSON:-}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
+      AUTH_RATE_LIMIT_PER_MINUTE: ${AUTH_RATE_LIMIT_PER_MINUTE:-30}
+      TRUST_PROXY_HOPS: ${TRUST_PROXY_HOPS:-1}
+      # Fixed here so that no .env value can turn test sign-in on for a public server.
+      AUTH_ALLOW_MOCK_OTP: 'false'
+      AUTH_ALLOW_DEV_HEADERS: 'false'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - ktb_internal
+      - ktb_api_egress
+
+  web:
+    image: ghcr.io/${IMAGE_REPOSITORY}/web:${IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      API_INTERNAL_URL: http://api:3001
+      DASHBOARD_ORIGIN: ${DASHBOARD_ORIGIN}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
+      FIREBASE_WEB_API_KEY: ${FIREBASE_WEB_API_KEY:-}
+      FIREBASE_WEB_AUTH_DOMAIN: ${FIREBASE_WEB_AUTH_DOMAIN:-}
+      FIREBASE_WEB_APP_ID: ${FIREBASE_WEB_APP_ID:-}
+    depends_on:
+      - api
+    networks:
+      - ktb_internal
+      - ktb_web
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - '${NGINX_PORT:-127.0.0.1:8080}:80'
+    volumes:
+      - ./infra/nginx/nginx.dev.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - web
+      - api
+    networks:
+      - ktb_internal
+      - ktb_web
+
+volumes:
+  postgres_data:
+
+networks:
+  ktb_api_egress:
+    driver: bridge
+  ktb_internal:
+    driver: bridge
+    internal: true
+  ktb_web:
+    driver: bridge

@@ -31,6 +31,7 @@ import { TimeCreditLedger1729118400007 } from '../src/database/migrations/172911
 import { CreditDonations1729118400008 } from '../src/database/migrations/1729118400008-CreditDonations';
 import { MembershipApplications1729118400009 } from '../src/database/migrations/1729118400009-MembershipApplications';
 import { CreditControls1729118400010 } from '../src/database/migrations/1729118400010-CreditControls';
+import { PushNotifications1729118400011 } from '../src/database/migrations/1729118400011-PushNotifications';
 import { CreditControlsService } from '../src/time-ledger/credit-controls.service';
 import { CreditControlsController } from '../src/time-ledger/credit-controls.controller';
 import { AuthGuard } from '../src/auth/guards/auth.guard';
@@ -59,6 +60,14 @@ import { MatchingRound } from '../src/matching/entities/matching-round.entity';
 import { ServiceRequest } from '../src/requests/entities/service-request.entity';
 import { OrganizationMembership } from '../src/memberships/entities/organization-membership.entity';
 import { GlobalAccountRestriction } from '../src/identity/entities/global-account-restriction.entity';
+import { NotificationsService } from '../src/notifications/notifications.service';
+import { MatchingWorker } from '../src/matching/matching.worker';
+import {
+  NotificationOutbox,
+  NotificationStatus,
+} from '../src/notifications/entities/notification-outbox.entity';
+import { PushSender } from '../src/notifications/push-sender.service';
+import { PushDevice } from '../src/notifications/entities/push-device.entity';
 import { Foundation1729118400001 } from '../src/database/migrations/1729118400001-Foundation';
 import { IdentityAndOrganizations1729118400002 } from '../src/database/migrations/1729118400002-IdentityAndOrganizations';
 import { ServiceCatalogueAndRequests1729118400003 } from '../src/database/migrations/1729118400003-ServiceCatalogueAndRequests';
@@ -87,6 +96,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       CreditDonations1729118400008,
       MembershipApplications1729118400009,
       CreditControls1729118400010,
+      PushNotifications1729118400011,
     ],
     synchronize: false,
     extra: {
@@ -149,6 +159,11 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       db,
       audit,
       authorization,
+      new NotificationsService(
+        db.getRepository(PushDevice),
+        db,
+        new PushSender(new ConfigService()),
+      ),
     );
     requests = new RequestsService(
       db.getRepository(ServiceRequest),
@@ -870,6 +885,104 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
     expect(await db.getRepository(AuditEvent).count()).toBe(0);
     await expect(service.acceptOffer(orgA, assignment, memberA, {})).resolves.toBeDefined();
   });
+  describe('automatic matching rounds', () => {
+    const worker = () => new MatchingWorker(service, new ConfigService());
+    const status = async (requestId: string) =>
+      (await db.getRepository(ServiceRequest).findOneByOrFail({ id: requestId })).status;
+    const queued = () => db.getRepository(NotificationOutbox).count();
+    const start = async () => {
+      const requestId = await request();
+      const entity = await db.getRepository(ServiceRequest).findOneByOrFail({ id: requestId });
+      await service.findCandidatesAndDispatchOffers(entity);
+      return requestId;
+    };
+
+    it('queues one message per offer and leaves the request alone while offers are open', async () => {
+      const requestId = await start();
+
+      expect(await queued()).toBe(2);
+      await worker().tick();
+
+      expect(await status(requestId)).toBe('MATCHING_ACTIVE');
+      expect(await queued()).toBe(2);
+    });
+
+    it('escalates after the rounds run out, without asking the same volunteers again', async () => {
+      const requestId = await start();
+      await db.query(
+        `UPDATE volunteer_assignments SET offer_expires_at = NOW() - interval '1 minute'`,
+      );
+
+      await worker().tick();
+      await worker().tick();
+      await worker().tick();
+
+      expect(await status(requestId)).toBe('ESCALATED_TO_COORDINATOR');
+      expect(await queued()).toBe(2);
+      expect(await db.getRepository(VolunteerAssignment).count()).toBe(2);
+      expect(await service.findRequestsDueForProgression()).toEqual([]);
+    });
+
+    it('finds a replacement after a withdrawal', async () => {
+      const requestId = await request();
+      const taken = await offer(requestId);
+      await service.acceptOffer(orgA, taken, memberA, {});
+      await service.withdrawAssignment(orgA, taken, memberA, { withdrawalReason: 'Fell ill' });
+
+      expect(await service.findRequestsDueForProgression()).toEqual([
+        { id: requestId, organizationId: orgA },
+      ]);
+      await worker().tick();
+
+      const offers = await db
+        .getRepository(VolunteerAssignment)
+        .findBy({ serviceRequestId: requestId, status: VolunteerAssignmentStatus.OFFERED });
+      expect(offers.map((row) => row.volunteerMembershipId)).toEqual([otherMember]);
+    });
+
+    it('does not touch a filled request', async () => {
+      const requestId = await request();
+      await service.acceptOffer(orgA, await offer(requestId), memberA, {});
+
+      expect(await service.findRequestsDueForProgression()).toEqual([]);
+    });
+
+    it('sends nothing for an offer whose transaction rolled back', async () => {
+      const requestId = await request();
+      const entity = await db.getRepository(ServiceRequest).findOneByOrFail({ id: requestId });
+      await expect(
+        db.transaction(async (manager) => {
+          await service.findCandidatesAndDispatchOffers(entity, undefined, manager);
+          throw new Error('Failure after dispatch');
+        }),
+      ).rejects.toThrow('Failure after dispatch');
+
+      expect(await queued()).toBe(0);
+    });
+
+    it('lets two senders share the queue without sending a message twice', async () => {
+      await start();
+      await db.query(
+        'INSERT INTO push_devices(user_id,token,platform) VALUES($1,$2,$3),($4,$5,$6)',
+        [volunteer, 'token-1', 'ANDROID', otherVolunteer, 'token-2', 'ANDROID'],
+      );
+      const send = jest.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        return { delivered: 1, staleTokens: [] };
+      });
+      const sender = { configured: true, send } as unknown as PushSender;
+      const notifications = () =>
+        new NotificationsService(db.getRepository(PushDevice), db, sender);
+
+      await Promise.all([notifications().deliverDue(), notifications().deliverDue()]);
+
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(
+        await db.getRepository(NotificationOutbox).countBy({ status: NotificationStatus.SENT }),
+      ).toBe(2);
+    });
+  });
+
   const reschedule = (requestId: string, time = '2030-01-02T10:00:00Z', actor = coordinator) =>
     requests.rescheduleRequest(orgA, requestId, actor, undefined, {
       newStartTime: time,

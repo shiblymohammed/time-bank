@@ -1,4 +1,5 @@
 import { NestFactory } from '@nestjs/core';
+import type { NestExpressApplication } from '@nestjs/platform-express';
 import { ValidationPipe, VersioningType } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
@@ -6,13 +7,18 @@ import { ConfigService } from '@nestjs/config';
 import { AppModule } from './app.module';
 
 async function bootstrap(): Promise<void> {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: ['error', 'warn', 'log', 'debug', 'verbose'],
   });
 
   const configService = app.get(ConfigService);
   const port = configService.get<number>('API_PORT', 3001);
   const nodeEnv = configService.get<string>('NODE_ENV', 'development');
+
+  // ─── Client IP ───────────────────────────────────────────────────────
+  // Rate limits and audit IPs need the real caller. Set this to the number of proxies
+  // in front of the API; left at 0, X-Forwarded-For is ignored so it cannot be spoofed.
+  app.set('trust proxy', Number(configService.get('TRUST_PROXY_HOPS') ?? 0));
 
   // ─── Versioning (URI strategy: /api/v1/...) ──────────────────────────
   // NFR-01: Versioned APIs allow safe incremental rollout across milestones

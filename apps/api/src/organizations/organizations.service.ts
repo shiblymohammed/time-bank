@@ -21,6 +21,41 @@ import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { UpdateBrandingDto } from './dto/update-branding.dto';
 import { CreateAppBuildDto } from './dto/create-app-build.dto';
 
+export type PublicOrganization = Pick<
+  Organization,
+  'id' | 'code' | 'name' | 'type' | 'status' | 'stateCode' | 'district'
+> & {
+  branding:
+    | (Pick<
+        OrganizationBranding,
+        'appDisplayName' | 'primaryColor' | 'secondaryColor' | 'themeConfig'
+      > & { logoKey: string | null; supportEmail: string | null })
+    | null;
+};
+
+function publicOrganization(organization: Organization): PublicOrganization {
+  const { id, code, name, type, status, stateCode, district, branding } = organization;
+  return {
+    id,
+    code,
+    name,
+    type,
+    status,
+    stateCode,
+    district,
+    branding: branding
+      ? {
+          appDisplayName: branding.appDisplayName,
+          logoKey: branding.logoKey ?? null,
+          primaryColor: branding.primaryColor,
+          secondaryColor: branding.secondaryColor,
+          themeConfig: branding.themeConfig,
+          supportEmail: branding.supportEmail ?? null,
+        }
+      : null,
+  };
+}
+
 @Injectable()
 export class OrganizationsService {
   constructor(
@@ -148,21 +183,39 @@ export class OrganizationsService {
   }
 
   /**
-   * Lists organizations. Super Admin sees all; regular users see active public summaries.
+   * Every organization with its branding and app builds, for Super Admin management.
    */
-  async findAll(isSuperAdmin = false): Promise<Organization[]> {
-    if (isSuperAdmin) {
-      return this.orgRepo.find({
-        relations: ['branding', 'appBuilds'],
-        order: { name: 'ASC' },
-      });
-    }
-
+  async findAll(): Promise<Organization[]> {
     return this.orgRepo.find({
+      relations: ['branding', 'appBuilds'],
+      order: { name: 'ASC' },
+    });
+  }
+
+  /**
+   * Active organizations, reduced to what an unauthenticated visitor may see.
+   */
+  async findPublic(): Promise<PublicOrganization[]> {
+    const organizations = await this.orgRepo.find({
       where: { status: OrganizationStatus.ACTIVE },
       relations: ['branding'],
       order: { name: 'ASC' },
     });
+    return organizations.map(publicOrganization);
+  }
+
+  /**
+   * One active organization as a public summary. Inactive ones read as not found.
+   */
+  async findPublicById(id: string): Promise<PublicOrganization> {
+    const organization = await this.orgRepo.findOne({
+      where: { id, status: OrganizationStatus.ACTIVE },
+      relations: ['branding'],
+    });
+    if (!organization) {
+      throw new NotFoundException(`Organization with ID '${id}' not found`);
+    }
+    return publicOrganization(organization);
   }
 
   /**

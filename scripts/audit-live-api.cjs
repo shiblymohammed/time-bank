@@ -84,7 +84,12 @@ async function main() {
       platform: 'ANDROID',
       buildVersion: '1.0.0',
     });
-    await call('GET', `${orgPath}/app-builds`, undefined, null);
+    await call('GET', `${orgPath}/app-builds`);
+    await call('GET', `${orgPath}/manage`);
+    await call('GET', '/api/v1/organizations/manage');
+    const device = { token: `audit-${suffix}`, platform: 'ANDROID' };
+    await call('PUT', '/api/notifications/devices', device);
+    await call('DELETE', '/api/notifications/devices', { token: device.token });
     const ben = await login(),
       vol = await login(),
       caregiver = await login();

@@ -3,6 +3,8 @@ import * as path from 'path';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { TerminusModule } from '@nestjs/terminus';
+import { APP_GUARD } from '@nestjs/core';
+import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 
 import { HealthModule } from './health/health.module';
 import { AuditModule } from './audit/audit.module';
@@ -17,6 +19,7 @@ import { RequestsModule } from './requests/requests.module';
 import { MatchingModule } from './matching/matching.module';
 import { TimeLedgerModule } from './time-ledger/time-ledger.module';
 import { DonationsModule } from './donations/donations.module';
+import { NotificationsModule } from './notifications/notifications.module';
 
 /**
  * Root application module.
@@ -42,6 +45,16 @@ import { DonationsModule } from './donations/donations.module';
       expandVariables: true,
       // In production, all values come from environment — no .env file needed
       ignoreEnvFile: process.env['NODE_ENV'] === 'production',
+    }),
+
+    // ─── Rate limiting ───────────────────────────────────────────────
+    // Per client IP and route. Counts live in this process, so several API instances
+    // each apply the limit separately.
+    ThrottlerModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService) => [
+        { ttl: 60_000, limit: Number(config.get('RATE_LIMIT_PER_MINUTE') ?? 600) },
+      ],
     }),
 
     // ─── Database ────────────────────────────────────────────────────
@@ -85,6 +98,8 @@ import { DonationsModule } from './donations/donations.module';
     // ─── Milestone 4 Time Credits ─────────────────────────────────────
     TimeLedgerModule,
     DonationsModule,
+    NotificationsModule,
   ],
+  providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })
 export class AppModule {}

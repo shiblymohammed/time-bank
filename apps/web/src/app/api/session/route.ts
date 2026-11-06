@@ -37,11 +37,20 @@ export async function POST(request: NextRequest) {
       if (process.env.NODE_ENV === 'production') delete result['devOtp'];
       return respond(result);
     }
-    if (body.action !== 'verify') throw new GatewayError('Unknown sign-in action', 400);
-    const session = (await upstream('/auth/otp/verify', {
-      method: 'POST',
-      body: { phone: body.phone, code: body.code },
-    })) as Record<string, unknown>;
+    if (body.action !== 'verify' && body.action !== 'firebase')
+      throw new GatewayError('Unknown sign-in action', 400);
+    if (body.action === 'firebase' && typeof body.idToken !== 'string')
+      throw new GatewayError('Invalid sign-in request', 400);
+    const session = (await upstream(
+      body.action === 'firebase' ? '/auth/firebase' : '/auth/otp/verify',
+      {
+        method: 'POST',
+        body:
+          body.action === 'firebase'
+            ? { idToken: body.idToken }
+            : { phone: body.phone, code: body.code },
+      },
+    )) as Record<string, unknown>;
     const profile = (await upstream('/auth/me', {
       token: session['accessToken'] as string,
     })) as Record<string, unknown>;

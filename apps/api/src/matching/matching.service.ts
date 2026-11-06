@@ -33,6 +33,7 @@ import { OrganizationMembership } from '../memberships/entities/organization-mem
 import { GlobalAccountRestriction } from '../identity/entities/global-account-restriction.entity';
 import { User } from '../identity/entities/user.entity';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { MatchingConfigService } from './matching-config.service';
 import { assignmentSchedule } from './assignment-schedule';
@@ -59,6 +60,9 @@ import { AssignVolunteerZoneDto } from './dto/assign-volunteer-zone.dto';
 export const START_EARLY_MINUTES = 60;
 /** The longest single service a volunteer can report. */
 export const MAX_SERVICE_MINUTES = 720;
+
+/** Unfilled requests handled per worker run; the next run picks up any remainder. */
+const PROGRESSION_BATCH_SIZE = 50;
 
 @Injectable()
 export class MatchingService {
@@ -87,6 +91,7 @@ export class MatchingService {
     private readonly dataSource: DataSource,
     private readonly auditService: AuditService,
     private readonly authorizationService: AuthorizationService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   // ─── Operational Zones (Coordinator-Managed) ─────────────────────────────────
@@ -671,15 +676,25 @@ export class MatchingService {
     const existingAssignments = await manager.getRepository(VolunteerAssignment).find({
       where: { serviceRequestId: request.id },
     });
+    // Someone who passed on this booking is not asked again each round, but a new time
+    // after rescheduling is a new question.
+    const passedOn = [
+      VolunteerAssignmentStatus.DECLINED,
+      VolunteerAssignmentStatus.TIMED_OUT,
+      VolunteerAssignmentStatus.WITHDRAWN,
+    ];
     const alreadyHandledMemIds = new Set(
       existingAssignments
-        .filter((a) =>
-          [
-            VolunteerAssignmentStatus.OFFERED,
-            VolunteerAssignmentStatus.ACCEPTED,
-            VolunteerAssignmentStatus.IN_PROGRESS,
-            VolunteerAssignmentStatus.COMPLETED,
-          ].includes(a.status),
+        .filter(
+          (a) =>
+            [
+              VolunteerAssignmentStatus.OFFERED,
+              VolunteerAssignmentStatus.ACCEPTED,
+              VolunteerAssignmentStatus.IN_PROGRESS,
+              VolunteerAssignmentStatus.COMPLETED,
+            ].includes(a.status) ||
+            (passedOn.includes(a.status) &&
+              (a.rescheduleId ?? null) === (request.latestRescheduleId ?? null)),
         )
         .map((a) => a.volunteerMembershipId),
     );
@@ -869,6 +884,14 @@ export class MatchingService {
 
       const saved = await manager.getRepository(VolunteerAssignment).save(assignment);
       dispatchedAssignments.push(saved);
+      await this.notifications.enqueue(manager, {
+        userId: ranked.profile.userId,
+        type: 'VOLUNTEER_OFFER',
+        title: 'New help request',
+        body: 'Someone nearby needs help. Open the app to respond.',
+        data: { assignmentId: saved.id, organizationId: request.organizationId },
+        expiresAt: offerExpiresAt,
+      });
     }
 
     // Update round stats
@@ -1726,6 +1749,15 @@ export class MatchingService {
       }
       await manager.save(ServiceRequest, request);
 
+      await this.notifications.enqueue(manager, {
+        userId: volunteer.userId,
+        type: 'VOLUNTEER_ASSIGNED',
+        title: 'You have a new assignment',
+        body: 'A coordinator assigned you to help. Open the app for details.',
+        data: { assignmentId: assignment.id, organizationId: orgId },
+        expiresAt: new Date(request.scheduledStartTime),
+      });
+
       await this.auditService.logEvent(
         {
           eventType: 'COORDINATOR_DISPATCH_ASSIGNED',
@@ -1759,6 +1791,40 @@ export class MatchingService {
       { status: VolunteerAssignmentStatus.TIMED_OUT },
     );
     return result.affected ?? 0;
+  }
+
+  /**
+   * Unfilled requests with nothing left to wait for: no offer is still open, or the
+   * round's time ran out. A withdrawal reopens a request, so replacement arrives here too.
+   */
+  async findRequestsDueForProgression(): Promise<{ id: string; organizationId: string }[]> {
+    return this.requestRepo
+      .createQueryBuilder('request')
+      .select('request.id', 'id')
+      .addSelect('request.organizationId', 'organizationId')
+      .where('request.status IN (:...statuses)', {
+        statuses: [ServiceRequestStatus.MATCHING_ACTIVE, ServiceRequestStatus.PARTIALLY_ACCEPTED],
+      })
+      .andWhere(
+        `(SELECT COUNT(*) FROM volunteer_assignments accepted
+          WHERE accepted.service_request_id = request.id
+            AND accepted.status = :accepted) < request.min_volunteers`,
+        { accepted: VolunteerAssignmentStatus.ACCEPTED },
+      )
+      .andWhere(
+        `(NOT EXISTS (SELECT 1 FROM volunteer_assignments open_offer
+            WHERE open_offer.service_request_id = request.id
+              AND open_offer.status = :offered
+              AND open_offer.offer_expires_at > NOW())
+          OR EXISTS (SELECT 1 FROM matching_rounds round
+            WHERE round.service_request_id = request.id
+              AND round.status = :activeRound
+              AND round.expires_at < NOW()))`,
+        { offered: VolunteerAssignmentStatus.OFFERED, activeRound: MatchingRoundStatus.ACTIVE },
+      )
+      .orderBy('request.createdAt', 'ASC')
+      .limit(PROGRESSION_BATCH_SIZE)
+      .getRawMany();
   }
 
   async evaluateRoundProgression(orgId: string, requestId: string): Promise<ServiceRequest> {

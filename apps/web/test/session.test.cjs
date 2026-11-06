@@ -9,6 +9,7 @@ const { NextRequest } = require('next/server');
 let server,
   session,
   proxy,
+  firebaseConfig,
   gateway,
   calls = [],
   revoked = new Set(),
@@ -65,6 +66,12 @@ before(async () => {
         accessToken: `access-${body.phone}`,
         refreshToken: `refresh-${body.phone}`,
       });
+    if (req.url === '/api/auth/firebase') {
+      if (!body.idToken.startsWith('verified-'))
+        return send(401, { message: 'Firebase phone verification failed. Request a new code.' });
+      const actor = body.idToken.replace('verified-', '');
+      return send(200, { accessToken: `access-${actor}`, refreshToken: `refresh-${actor}` });
+    }
     if (req.url === '/api/auth/refresh') {
       if (revoked.has(body.refreshToken)) return send(401, { message: 'Session revoked' });
       return send(200, { accessToken: body.refreshToken.replace('refresh-', 'access-') });
@@ -105,6 +112,7 @@ before(async () => {
   gateway = load('lib/server-api.ts');
   session = load('app/api/session/route.ts');
   proxy = load('app/api/backend/[...path]/route.ts');
+  firebaseConfig = load('app/api/firebase-config/route.ts');
 });
 after(async () => {
   await new Promise((resolve) => server.close(resolve));
@@ -118,6 +126,60 @@ test('anonymous sessions and forged development headers cannot access the gatewa
     (await proxy.GET(forged, { params: Promise.resolve({ path: ['admin', 'overview'] }) })).status,
     401,
   );
+});
+test('a verified Firebase token opens a staff session with HTTP-only cookies', async () => {
+  const response = await session.POST(
+    request('POST', { action: 'firebase', idToken: 'verified-admin' }),
+  );
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.id, 'admin');
+  assert.equal(body.accessToken, undefined);
+  assert.equal(response.cookies.get('ktb_admin_refresh').httpOnly, true);
+});
+test('Firebase sign-in rejects forged tokens and revokes non-staff sessions', async () => {
+  assert.equal(
+    (await session.POST(request('POST', { action: 'firebase', idToken: 'forged' }))).status,
+    401,
+  );
+  assert.equal((await session.POST(request('POST', { action: 'firebase' }))).status, 400);
+  const denied = await session.POST(
+    request('POST', { action: 'firebase', idToken: 'verified-volunteer' }),
+  );
+  assert.equal(denied.status, 403);
+  assert.equal(denied.cookies.get('ktb_admin_refresh'), undefined);
+  assert.equal(revoked.has('refresh-volunteer'), true);
+  revoked.delete('refresh-volunteer');
+});
+test('Firebase sign-in also requires a same-origin request', async () => {
+  const response = await session.POST(
+    request(
+      'POST',
+      { action: 'firebase', idToken: 'verified-admin' },
+      '',
+      'http://attacker.example',
+    ),
+  );
+  assert.equal(response.status, 403);
+});
+test('the web config is offered only when fully configured', async () => {
+  const keys = {
+    FIREBASE_WEB_API_KEY: 'key',
+    FIREBASE_WEB_AUTH_DOMAIN: 'time-bank.firebaseapp.com',
+    FIREBASE_PROJECT_ID: 'time-bank',
+    FIREBASE_WEB_APP_ID: 'app',
+  };
+  for (const name of Object.keys(keys)) delete process.env[name];
+  assert.deepEqual(await firebaseConfig.GET().json(), {});
+  Object.assign(process.env, keys);
+  assert.deepEqual(await firebaseConfig.GET().json(), {
+    apiKey: 'key',
+    authDomain: 'time-bank.firebaseapp.com',
+    projectId: 'time-bank',
+    appId: 'app',
+  });
+  delete process.env.FIREBASE_WEB_APP_ID;
+  assert.deepEqual(await firebaseConfig.GET().json(), {});
 });
 test('sign-in uses HTTP-only cookies and never returns tokens to JavaScript', async () => {
   const response = await login();

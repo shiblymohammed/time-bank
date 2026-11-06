@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { ConflictException } from '@nestjs/common';
+import { ConflictException, NotFoundException } from '@nestjs/common';
 import { OrganizationType, OrganizationStatus } from '@ktb/shared-types';
 import { OrganizationsService } from './organizations.service';
 import { Organization } from './entities/organization.entity';
@@ -246,5 +246,43 @@ describe('OrganizationsService', () => {
       service.createOrUpdateAppBuild('other', { applicationId: 'in.example.app' }, 'admin'),
     ).rejects.toThrow(ConflictException);
     expect(mockAppBuildRepo.save).not.toHaveBeenCalled();
+  });
+
+  describe('public organization summaries', () => {
+    const organization = {
+      id: 'org-1',
+      code: 'KTB',
+      name: 'Kottakkal',
+      type: OrganizationType.MUNICIPALITY,
+      status: OrganizationStatus.ACTIVE,
+      stateCode: 'KL',
+      district: 'Malappuram',
+      createdBy: 'admin-1',
+      appBuilds: [{ applicationId: 'in.internal' }],
+      branding: { id: 'brand-1', version: 3, appDisplayName: 'Time Bank', primaryColor: '#111111' },
+    };
+
+    it('asks for active organizations and drops internal fields', async () => {
+      mockOrgRepo.find.mockResolvedValue([organization]);
+
+      const [summary] = await service.findPublic();
+
+      expect(mockOrgRepo.find).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { status: OrganizationStatus.ACTIVE } }),
+      );
+      expect(summary).not.toHaveProperty('createdBy');
+      expect(summary).not.toHaveProperty('appBuilds');
+      expect(summary?.branding).not.toHaveProperty('version');
+      expect(summary?.branding?.appDisplayName).toBe('Time Bank');
+    });
+
+    it('treats an inactive organization as not found', async () => {
+      mockOrgRepo.findOne.mockResolvedValue(null);
+
+      await expect(service.findPublicById('org-1')).rejects.toBeInstanceOf(NotFoundException);
+      expect(mockOrgRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'org-1', status: OrganizationStatus.ACTIVE } }),
+      );
+    });
   });
 });

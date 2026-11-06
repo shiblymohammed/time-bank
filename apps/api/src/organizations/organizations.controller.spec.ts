@@ -1,10 +1,12 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { GUARDS_METADATA } from '@nestjs/common/constants';
 import { OrganizationsController } from './organizations.controller';
 import { OrganizationsService } from './organizations.service';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { OrganizationAccessGuard } from '../authorization/guards/organization-access.guard';
 import { RolesGuard } from '../authorization/guards/roles.guard';
-import { OrganizationType, OrganizationStatus } from '@ktb/shared-types';
+import { ROLES_KEY } from '../authorization/decorators/roles.decorator';
+import { OrganizationType, OrganizationStatus, UserRole } from '@ktb/shared-types';
 
 describe('OrganizationsController', () => {
   let controller: OrganizationsController;
@@ -13,6 +15,8 @@ describe('OrganizationsController', () => {
     createOrganization: jest.fn(),
     findAll: jest.fn(),
     findById: jest.fn(),
+    findPublic: jest.fn(),
+    findPublicById: jest.fn(),
     updateOrganization: jest.fn(),
     getBranding: jest.fn(),
     updateBranding: jest.fn(),
@@ -64,6 +68,34 @@ describe('OrganizationsController', () => {
       expect(response.data).toEqual(mockResult);
       expect(response.timestamp).toBeDefined();
     });
+  });
+
+  describe('public and managed listings', () => {
+    it('serves unauthenticated callers public summaries only', async () => {
+      mockOrgsService.findPublic.mockResolvedValue([{ id: 'org-1' }]);
+      mockOrgsService.findPublicById.mockResolvedValue({ id: 'org-1' });
+
+      await expect(controller.listOrganizations()).resolves.toMatchObject({
+        data: [{ id: 'org-1' }],
+      });
+      await expect(controller.getOrganization('org-1')).resolves.toMatchObject({
+        data: { id: 'org-1' },
+      });
+      expect(mockOrgsService.findAll).not.toHaveBeenCalled();
+      expect(mockOrgsService.findById).not.toHaveBeenCalled();
+    });
+
+    it.each(['listManagedOrganizations', 'getManagedOrganization', 'getAppBuilds'] as const)(
+      '%s requires a Super Admin',
+      (handler) => {
+        const method = OrganizationsController.prototype[handler];
+        expect(Reflect.getMetadata(GUARDS_METADATA, method)).toContain(AuthGuard);
+        expect(Reflect.getMetadata(GUARDS_METADATA, method)).toContain(RolesGuard);
+        expect(Reflect.getMetadata(ROLES_KEY, method)).toEqual([UserRole.SUPER_ADMIN]);
+        // A suspended organization must stay manageable.
+        expect(Reflect.getMetadata(GUARDS_METADATA, method)).not.toContain(OrganizationAccessGuard);
+      },
+    );
   });
 
   describe('getBranding()', () => {

@@ -14,11 +14,13 @@ import { GlobalAccountRestriction } from '../identity/entities/global-account-re
 import { MatchingService } from './matching.service';
 import { MatchingController } from './matching.controller';
 import { MatchingConfigService } from './matching-config.service';
+import { MatchingWorker } from './matching.worker';
 import { CANDIDATE_RANKING_STRATEGY } from './ranking/ranking-strategy.interface';
 import { DeterministicCandidateRankingStrategy } from './ranking/deterministic-ranking.strategy';
 import { AuditModule } from '../audit/audit.module';
 import { AuthorizationModule } from '../authorization/authorization.module';
 import { RequestsModule } from '../requests/requests.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -35,6 +37,7 @@ import { RequestsModule } from '../requests/requests.module';
     ]),
     AuditModule,
     AuthorizationModule,
+    NotificationsModule,
     forwardRef(() => RequestsModule),
   ],
   controllers: [MatchingController],
@@ -45,6 +48,7 @@ import { RequestsModule } from '../requests/requests.module';
       useClass: DeterministicCandidateRankingStrategy,
     },
     MatchingService,
+    MatchingWorker,
   ],
   exports: [MatchingService, MatchingConfigService, CANDIDATE_RANKING_STRATEGY],
 })

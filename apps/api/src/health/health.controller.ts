@@ -1,6 +1,7 @@
 import { Controller, Get, VERSION_NEUTRAL } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
 import { HealthCheck, HealthCheckService, TypeOrmHealthIndicator } from '@nestjs/terminus';
+import { SkipThrottle } from '@nestjs/throttler';
 
 import type { HealthCheckResponse } from '@ktb/shared-types';
 
@@ -13,6 +14,7 @@ import type { HealthCheckResponse } from '@ktb/shared-types';
  * The /health/live endpoint is a lightweight ping (no DB check) for liveness probes.
  */
 @ApiTags('Health')
+@SkipThrottle()
 @Controller({ path: 'health', version: VERSION_NEUTRAL })
 export class HealthController {
   constructor(

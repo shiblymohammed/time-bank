@@ -48,12 +48,30 @@ export class OrganizationsController {
 
   /**
    * GET /api/v1/organizations
-   * Lists organizations. Super Admin sees all; regular users see active public summaries.
+   * Public summaries of active organizations, used before sign-in.
    */
   @Get()
-  @ApiOperation({ summary: 'List onboarded organizations' })
+  @ApiOperation({ summary: 'List active organizations as public summaries' })
   async listOrganizations() {
-    const orgs = await this.orgsService.findAll(true);
+    const orgs = await this.orgsService.findPublic();
+    return {
+      success: true,
+      data: orgs,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * GET /api/v1/organizations/manage
+   * Every organization, including suspended ones, with app builds (Super Admin only).
+   */
+  @Get('manage')
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List all organizations for management (Super Admin)' })
+  async listManagedOrganizations() {
+    const orgs = await this.orgsService.findAll();
     return {
       success: true,
       data: orgs,
@@ -63,11 +81,30 @@ export class OrganizationsController {
 
   /**
    * GET /api/v1/organizations/:orgId
-   * Retrieves organization details, branding, and registered app builds.
+   * Public summary of one active organization.
    */
   @Get(':orgId')
-  @ApiOperation({ summary: 'Get organization details by ID' })
+  @ApiOperation({ summary: 'Get the public summary of an active organization' })
   async getOrganization(@Param('orgId', ParseUUIDPipe) orgId: string) {
+    const org = await this.orgsService.findPublicById(orgId);
+    return {
+      success: true,
+      data: org,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * GET /api/v1/organizations/:orgId/manage
+   * Full organization record, whatever its status (Super Admin only).
+   */
+  @Get(':orgId/manage')
+  // No organization guard: it turns away suspended organizations, which are managed here.
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Get a full organization record for management (Super Admin)' })
+  async getManagedOrganization(@Param('orgId', ParseUUIDPipe) orgId: string) {
     const org = await this.orgsService.findById(orgId);
     return {
       success: true,
@@ -137,10 +174,14 @@ export class OrganizationsController {
 
   /**
    * GET /api/v1/organizations/:orgId/app-builds
-   * Lists registered release builds for an organization.
+   * Lists registered release builds for an organization (Super Admin only).
    */
   @Get(':orgId/app-builds')
-  @ApiOperation({ summary: 'List registered app builds for an organization' })
+  // No organization guard: it turns away suspended organizations, which are managed here.
+  @UseGuards(AuthGuard, RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'List registered app builds for an organization (Super Admin)' })
   async getAppBuilds(@Param('orgId', ParseUUIDPipe) orgId: string) {
     const builds = await this.orgsService.getAppBuilds(orgId);
     return {

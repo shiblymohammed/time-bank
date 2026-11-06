@@ -60,7 +60,7 @@ export function ApiManagement({ target, onClose, onChanged, onError }: Props) {
     const load = async () => {
       if (target.kind === 'organization') {
         const [org, releases] = await Promise.all([
-          api<{ data: Organization }>(orgPath, options),
+          api<{ data: Organization }>(`${orgPath}/manage`, options),
           api<{ data: AppBuild[] }>(`${orgPath}/app-builds`, options),
         ]);
         if (controller.signal.aborted) return;
