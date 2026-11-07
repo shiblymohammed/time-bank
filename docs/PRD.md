@@ -14,8 +14,8 @@ Amendments | **Date:** 17 October 2026
 ## 1. Executive summary
 
 **Indian Time Bank** is a centrally governed, multi-organization volunteer assistance platform supporting municipal
-corporations, municipalities, and local administrative bodies across India (e.g., Kozhikode Time Bank, Kottakkal Time
-Bank).
+corporations, municipalities, local administrative bodies and NGOs across India (e.g., Kozhikode Time Bank, Kottakkal
+Time Bank). Kottakkal is the pilot organization; further organizations are onboarded after the pilot.
 
 Under this architecture:
 
@@ -24,8 +24,8 @@ Under this architecture:
   cross-organization wallet.
 - Eligible beneficiaries receive approved assistance **without needing or spending credits**.
 - A distinct **loyalty-coin** system enables local merchant-funded promotional offers and civic recognition.
-- Each onboarded municipality or corporation receives a **dedicated, branded mobile app** built from a shared
-  white-label codebase.
+- Each onboarded municipality, corporation or NGO receives a **dedicated, branded mobile app** built from a shared
+  white-label codebase, and a staff dashboard on its own subdomain of `indiantimebank.com`.
 - A user maintains **exactly one permanent verified Indian Time Bank identity**, but must receive **independent
   membership approval** to log in to each organization's branded application.
 
@@ -220,20 +220,24 @@ ORGANIZATIONS DOMAIN (Multi-Tenant Local Operations)
 This register defines the explicit amendments adopted in PRD v2.0. These supersede conflicting assumptions in v1.0
 without discarding confirmed core policies.
 
-| Change ID   | Requirement update                                                              | Scope / Impact                       | Rationale & Superseded Rule                                                                                                                               |
-| ----------- | ------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **ITB-001** | Rename central governance platform to **Indian Time Bank**                      | Branding, Documentation, Root Config | Supersedes "Kottakkal Time Bank" as the master platform title. Kottakkal becomes the inaugural tenant organization alongside Kozhikode and future cities. |
-| **ITB-002** | Support municipal corporations and municipalities as independent organizations  | Backend Data Model, API              | Formalizes multi-tenant entity modeling. Replaces informal municipal tag with formal `organizations` and `organization_branding` tables.                  |
-| **ITB-003** | Provide dedicated branded mobile application per onboarded organization         | Flutter Mobile, CI/CD Pipeline       | Replaces the single generic mobile app with white-label flavor builds (e.g. Kozhikode Time Bank APK, Kottakkal Time Bank APK).                            |
-| **ITB-004** | Maintain exactly one centrally verified user identity nationwide                | Auth, Identity, KYC                  | Reaffirms and strengthens D#39 & D#42: One permanent human identity, verified once, spanning all civic organizations.                                     |
-| **ITB-005** | Require organization-specific membership approval for app login                 | Authentication & Auth Guards         | Extends D#42: Global identity creation alone does not grant app entry; local membership must be in `APPROVED` state to access an organization's app.      |
-| **ITB-006** | Enforce organization-specific role grants                                       | RBAC / Authorization                 | Refines D#2: A user's role (Volunteer, Coordinator) is scoped strictly to an organization membership, allowing different roles in different cities.       |
-| **ITB-007** | Restrict branded app access to approved organization members                    | Flutter Client & API Gateway         | Mobile login gateway validates that the authenticated global user possesses an active approved membership in the app's configured tenant.                 |
-| **ITB-008** | Maintain one universal lifetime time-credit wallet per user                     | Ledger & Accounting                  | Preserves D#17 & D#18: All credits earned across any approved organization flow into the user's single universal wallet with lifetime validity.           |
-| **ITB-009** | Preserve origin-organization references for all wallet postings                 | Audit, Reporting, Ledger             | Enhances BR-09: Every credit award, donation, or debit record retains `originating_org_id` for municipal impact accounting and audits.                    |
-| **ITB-010** | Support central creation, branding, activation, and suspension of organizations | Web Admin Dashboard                  | Extends D#52: Super Admin provisions organizations, configures branding tokens, sets package IDs, and can suspend an organization if needed.              |
-| **ITB-011** | Establish a distinct build, signing, and release lifecycle per organization     | DevOps, CI/CD, Distribution          | Automates multi-flavor Flutter builds via GitHub Actions. Creating a new organization in DB is decoupled from building/publishing its signed APK.         |
-| **ITB-012** | Preserve central oversight, global appeals, and platform governance             | Super Admin Governance               | Reaffirms D#78 & D#83: Super Admin retains global audit inspection, platform-wide ban authority, and final internal dispute appeals.                      |
+| Change ID   | Requirement update                                                                | Scope / Impact                       | Rationale & Superseded Rule                                                                                                                               |
+| ----------- | --------------------------------------------------------------------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **ITB-001** | Rename central governance platform to **Indian Time Bank**                        | Branding, Documentation, Root Config | Supersedes "Kottakkal Time Bank" as the master platform title. Kottakkal becomes the inaugural tenant organization alongside Kozhikode and future cities. |
+| **ITB-002** | Support municipal corporations and municipalities as independent organizations    | Backend Data Model, API              | Formalizes multi-tenant entity modeling. Replaces informal municipal tag with formal `organizations` and `organization_branding` tables.                  |
+| **ITB-003** | Provide dedicated branded mobile application per onboarded organization           | Flutter Mobile, CI/CD Pipeline       | Replaces the single generic mobile app with white-label flavor builds (e.g. Kozhikode Time Bank APK, Kottakkal Time Bank APK).                            |
+| **ITB-004** | Maintain exactly one centrally verified user identity nationwide                  | Auth, Identity, KYC                  | Reaffirms and strengthens D#39 & D#42: One permanent human identity, verified once, spanning all civic organizations.                                     |
+| **ITB-005** | Require organization-specific membership approval for app login                   | Authentication & Auth Guards         | Extends D#42: Global identity creation alone does not grant app entry; local membership must be in `APPROVED` state to access an organization's app.      |
+| **ITB-006** | Enforce organization-specific role grants                                         | RBAC / Authorization                 | Refines D#2: A user's role (Volunteer, Coordinator) is scoped strictly to an organization membership, allowing different roles in different cities.       |
+| **ITB-007** | Restrict branded app access to approved organization members                      | Flutter Client & API Gateway         | Mobile login gateway validates that the authenticated global user possesses an active approved membership in the app's configured tenant.                 |
+| **ITB-008** | Maintain one universal lifetime time-credit wallet per user                       | Ledger & Accounting                  | Preserves D#17 & D#18: All credits earned across any approved organization flow into the user's single universal wallet with lifetime validity.           |
+| **ITB-009** | Preserve origin-organization references for all wallet postings                   | Audit, Reporting, Ledger             | Enhances BR-09: Every credit award, donation, or debit record retains `originating_org_id` for municipal impact accounting and audits.                    |
+| **ITB-010** | Support central creation, branding, activation, and suspension of organizations   | Web Admin Dashboard                  | Extends D#52: Super Admin provisions organizations, configures branding tokens, sets package IDs, and can suspend an organization if needed.              |
+| **ITB-011** | Establish a distinct build, signing, and release lifecycle per organization       | DevOps, CI/CD, Distribution          | Automates multi-flavor Flutter builds via GitHub Actions. Creating a new organization in DB is decoupled from building/publishing its signed APK.         |
+| **ITB-012** | Preserve central oversight, global appeals, and platform governance               | Super Admin Governance               | Reaffirms D#78 & D#83: Super Admin retains global audit inspection, platform-wide ban authority, and final internal dispute appeals.                      |
+| **ITB-013** | Use `com.indiantimebank.<organization>` app IDs; onboard NGOs like municipalities | Flutter, Stores, Firebase            | Supersedes `in.gov.kerala.timebank.*`, which needs a government domain the platform does not own and does not fit NGOs.                                   |
+| **ITB-014** | One shared Firebase project (`indian-time-bank`) with apps per organization       | Auth, Push, Operations               | Keeps one identity per phone number and one push key for all apps. Separate projects only on an organization's explicit request.                          |
+| **ITB-015** | Staff dashboards on `<organization>.indiantimebank.com`                           | Web, Firebase, API                   | Each subdomain is an authorized Firebase domain and an allowed API origin.                                                                                |
+| **ITB-016** | Pilot with Kottakkal before onboarding further organizations                      | Delivery                             | Organization lock, push per app and flavor builds are completed before a second organization goes live.                                                   |
 
 ---
 
@@ -267,27 +271,41 @@ Each configuration file defines tenant identity and visual branding:
   "tenantId": "KOZHIKODE",
   "organizationName": "Kozhikode Municipal Corporation",
   "appDisplayName": "Kozhikode Time Bank",
-  "applicationId": "in.gov.kerala.timebank.kozhikode",
+  "applicationId": "com.indiantimebank.kozhikode",
   "primaryColor": "#0D5C75",
   "secondaryColor": "#F59E0B",
   "logoAssetPath": "assets/branding/kozhikode/logo.png",
-  "supportEmail": "timebank@kozhikodecorporation.lsgkerala.gov.in",
-  "apiBaseUrl": "https://api.indiantimebank.in"
+  "supportEmail": "kozhikode@indiantimebank.com",
+  "apiBaseUrl": "https://api.indiantimebank.com"
 }
 ```
 
-### 6.2 Comparison of initial release builds
+### 6.2 Identifiers, Firebase and domains
 
-| Property                 | Kozhikode Time Bank                | Kottakkal Time Bank                |
-| ------------------------ | ---------------------------------- | ---------------------------------- |
-| **Display Name**         | Kozhikode Time Bank                | Kottakkal Time Bank                |
-| **Tenant Slug**          | `kozhikode`                        | `kottakkal`                        |
-| **Application ID**       | `in.gov.kerala.timebank.kozhikode` | `in.gov.kerala.timebank.kottakkal` |
-| **App Icon & Branding**  | Kozhikode Corporation motif        | Kottakkal Municipality motif       |
-| **Login Eligibility**    | Approved Kozhikode members         | Approved Kottakkal members         |
-| **Backend API**          | Shared Indian Time Bank API        | Shared Indian Time Bank API        |
-| **Time-Credit Wallet**   | Universal Lifetime Wallet          | Universal Lifetime Wallet          |
-| **Local Loyalty Offers** | Kozhikode approved merchants       | Kottakkal approved merchants       |
+- **Application and bundle IDs:** `com.indiantimebank.<organization>`, for municipalities and NGOs alike (for example
+  `com.indiantimebank.kottakkal`). An ID can never change after store release, so it is fixed when the organization is
+  onboarded. Government domains such as `in.gov...` are not used.
+- **Firebase:** one Firebase project, `indian-time-bank`, holds an Android, iOS and Web app per organization. Phone
+  sign-in, push and billing are shared, so one phone number is one identity in every app and one server key sends push
+  to all apps. A separate Firebase project is created only for an organization that requires its own; the backend would
+  then accept a list of projects.
+- **Domains:** the API is `api.indiantimebank.com`; each organization's staff dashboard is
+  `<organization>.indiantimebank.com`, added to Firebase's authorized domains and the API's allowed origins.
+- **Push per app:** each registered device records its organization's app, so a person in two organizations receives
+  each organization's notifications only in that organization's app.
+
+### 6.3 Comparison of initial release builds
+
+| Property                 | Kozhikode Time Bank            | Kottakkal Time Bank            |
+| ------------------------ | ------------------------------ | ------------------------------ |
+| **Display Name**         | Kozhikode Time Bank            | Kottakkal Time Bank            |
+| **Tenant Slug**          | `kozhikode`                    | `kottakkal`                    |
+| **Application ID**       | `com.indiantimebank.kozhikode` | `com.indiantimebank.kottakkal` |
+| **App Icon & Branding**  | Kozhikode Corporation motif    | Kottakkal Municipality motif   |
+| **Login Eligibility**    | Approved Kozhikode members     | Approved Kottakkal members     |
+| **Backend API**          | Shared Indian Time Bank API    | Shared Indian Time Bank API    |
+| **Time-Credit Wallet**   | Universal Lifetime Wallet      | Universal Lifetime Wallet      |
+| **Local Loyalty Offers** | Kozhikode approved merchants   | Kottakkal approved merchants   |
 
 ---
 
@@ -464,64 +482,22 @@ Each configuration file defines tenant identity and visual branding:
 
 ## 9. Delivery strategy & milestone alignment
 
-The platform is delivered in progressive, testable milestones by a solo developer:
+The platform is delivered in testable milestones by a solo developer. [MILESTONES.md](MILESTONES.md) tracks scope and
+status; this table is the summary.
 
-```
-┌────────────────────────────────────────────────────────────────────────┐
-│ MILESTONE 1: Foundation & Architecture (COMPLETE ✓)                    │
-│ Monorepo, pnpm workspace, NestJS API shell, Next.js dashboard shell,   │
-│ Flutter mobile shell, Docker Compose, CI/CD, and DB migrations.        │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ MILESTONE 2: Multi-Organization Governance & Verified Identity         │
-│ Organizations & branding, global identity, OTP auth, local membership  │
-│ approval, role grants, white-label Flutter flavor builds.              │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ MILESTONE 3: Core Service Catalogue & Request Matching                 │
-│ Org service catalogue, request creation, manual location, immediate    │
-│ & future matching, volunteer assignment, notifications.                │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ MILESTONE 4: Timers, Independent Verification & Universal Ledger       │
-│ Service timer recording, independent verifications, atomic time-credit │
-│ ledger with origin org tracking, universal donations.                  │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ MILESTONE 5: Team Services, Transfers & Safety Systems                 │
-│ Team headcount rules, sequential transfers, confidential safety alerts,│
-│ service pauses, complaints hierarchy, and appeals.                     │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ MILESTONE 6: Loyalty Coin Economy & Local Merchants                    │
-│ Loyalty coin rules, merchant proposals, publication approvals,         │
-│ QR and manual code redemption, civic recognition.                      │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ MILESTONE 7: Offline Operations & Field Synchronization                │
-│ Durable local queue, background sync, client operation IDs, offline    │
-│ timers, conflict resolution, on-device testing.                        │
-└───────────────────────────────────┬────────────────────────────────────┘
-                                    │
-                                    ▼
-┌────────────────────────────────────────────────────────────────────────┐
-│ MILESTONE 8: Administration, Reporting & Production Hardening          │
-│ Suspensions, bans, duplicate closures, sponsor impact exports,         │
-│ security audit, load testing (300 concurrent), and backup drills.      │
-└────────────────────────────────────────────────────────────────────────┘
-```
+| Step                           | Scope                                                                                                                           | Status (8 November 2026)                   |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| M1 Foundation                  | Monorepo, API, dashboard and Flutter shells, Docker, CI/CD, migrations, audit log                                               | Built                                      |
+| M2 Identity and administration | OTP and Firebase sign-in, sessions, organizations, memberships, roles, beneficiary eligibility, caregivers, restrictions        | Built; SIM-swap recovery and nominees open |
+| M3 Catalogue and matching      | Requests, automatic matching, offers, visits, rescheduling, cancellation, booking recovery, push queue                          | Built                                      |
+| M4 Time credits                | Universal wallet, ledger, verified earnings, donations, pools, freezes, disputes, corrections                                   | Built                                      |
+| Kottakkal pilot                | Deploy, real SMS and push, staff second factor, backup restore drill, pilot checklist                                           | Next                                       |
+| Second-organization readiness  | App locked to its organization (ITB-007), push per app, flavor builds per organization (ITB-003, ITB-011), dashboard subdomains | Before the second organization             |
+| M5 Teams and transfers         | Team headcount rules, separate timers, sequential transfers                                                                     | Planned                                    |
+| M6 Loyalty and merchants       | Coins, merchant offers, approvals, QR and code redemption, recognition                                                          | Planned                                    |
+| M7 Governance and reporting    | Safety alerts, complaints, appeals, account closure, reports and sponsor exports                                                | Planned                                    |
+| M8 Offline reliability         | Durable local queue, sync states, offline timers, field tests                                                                   | Planned                                    |
+| M9 Production hardening        | Load test (300 concurrent), PITR drill, monitoring, accessibility and Malayalam validation                                      | Partly done (security review)              |
 
 ---
 
@@ -644,22 +620,23 @@ explicitly.
 
 ## 11. Acceptance test scenarios (Updated for Multi-Tenancy)
 
-| ID        | Scenario                                                                 | Expected Result                                                                                                               |
-| --------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------- |
-| **AT-01** | User with Kozhikode-only membership attempts login to Kottakkal app      | Login is denied with explicit notification: "Not an approved member of Kottakkal Time Bank. Apply for membership."            |
-| **AT-02** | User approved in both Kozhikode and Kottakkal logs into Kozhikode app    | Login succeeds via mobile OTP; user sees Kozhikode branding, local catalogue, and local requests.                             |
-| **AT-03** | User earns 2 hours of verified volunteering in Kozhikode                 | Universal wallet is credited with 2 hours; ledger records `originating_org_id = KOZHIKODE`.                                   |
-| **AT-04** | Same user logs into Kottakkal app and views wallet balance               | Universal wallet displays the 2 hours earned in Kozhikode, ready for eligible use or donation.                                |
-| **AT-05** | Kottakkal coordinator searches for members                               | Search returns only members with approved or pending memberships in Kottakkal; Kozhikode-only records are excluded.           |
-| **AT-06** | User holds Volunteer role in Kozhikode and Coordinator role in Kottakkal | In Kozhikode app/dashboard, user has volunteer capabilities only; in Kottakkal dashboard, coordinator tools are unlocked.     |
-| **AT-07** | Super Admin logs into central dashboard                                  | Super Admin views all onboarded organizations, provisions new municipalities, and inspects global audit logs.                 |
-| **AT-08** | Kottakkal Municipality Admin revokes a local membership                  | User is blocked from Kottakkal app; their global verified identity and Kozhikode membership remain active.                    |
-| **AT-09** | Platform-wide permanent ban confirmed on appeal failure                  | User is locked out of both Kozhikode and Kottakkal apps; universal wallet transactions are frozen.                            |
-| **AT-10** | CI/CD triggered for Kozhikode release                                    | Build script uses `configs/kozhikode.json`, builds `in.gov.kerala.timebank.kozhikode`, and applies Kozhikode branding assets. |
-| **AT-11** | Verified beneficiary requests assistance                                 | Assistance is scheduled and delivered free without credit deduction.                                                          |
-| **AT-12** | Merchant offer redeemed via QR                                           | Merchant scans QR token; server performs atomic validation and single-redemption debit.                                       |
-| **AT-13** | Volunteer triggers safety alert offline                                  | App stores event in local queue and clearly displays "Undelivered - pending connection" until server ACK.                     |
-| **AT-14** | Production recovery drill                                                | Encrypted off-server backup and WAL replay executed successfully; ledger balances verified.                                   |
+| ID        | Scenario                                                                 | Expected Result                                                                                                           |
+| --------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| **AT-01** | User with Kozhikode-only membership attempts login to Kottakkal app      | Login is denied with explicit notification: "Not an approved member of Kottakkal Time Bank. Apply for membership."        |
+| **AT-02** | User approved in both Kozhikode and Kottakkal logs into Kozhikode app    | Login succeeds via mobile OTP; user sees Kozhikode branding, local catalogue, and local requests.                         |
+| **AT-03** | User earns 2 hours of verified volunteering in Kozhikode                 | Universal wallet is credited with 2 hours; ledger records `originating_org_id = KOZHIKODE`.                               |
+| **AT-04** | Same user logs into Kottakkal app and views wallet balance               | Universal wallet displays the 2 hours earned in Kozhikode, ready for eligible use or donation.                            |
+| **AT-05** | Kottakkal coordinator searches for members                               | Search returns only members with approved or pending memberships in Kottakkal; Kozhikode-only records are excluded.       |
+| **AT-06** | User holds Volunteer role in Kozhikode and Coordinator role in Kottakkal | In Kozhikode app/dashboard, user has volunteer capabilities only; in Kottakkal dashboard, coordinator tools are unlocked. |
+| **AT-07** | Super Admin logs into central dashboard                                  | Super Admin views all onboarded organizations, provisions new municipalities, and inspects global audit logs.             |
+| **AT-08** | Kottakkal Municipality Admin revokes a local membership                  | User is blocked from Kottakkal app; their global verified identity and Kozhikode membership remain active.                |
+| **AT-09** | Platform-wide permanent ban confirmed on appeal failure                  | User is locked out of both Kozhikode and Kottakkal apps; universal wallet transactions are frozen.                        |
+| **AT-10** | CI/CD triggered for Kozhikode release                                    | Build script uses `configs/kozhikode.json`, builds `com.indiantimebank.kozhikode`, and applies Kozhikode branding assets. |
+| **AT-11** | Verified beneficiary requests assistance                                 | Assistance is scheduled and delivered free without credit deduction.                                                      |
+| **AT-12** | Merchant offer redeemed via QR                                           | Merchant scans QR token; server performs atomic validation and single-redemption debit.                                   |
+| **AT-13** | Volunteer triggers safety alert offline                                  | App stores event in local queue and clearly displays "Undelivered - pending connection" until server ACK.                 |
+| **AT-15** | User approved in Kottakkal and Kozhikode receives a Kozhikode offer      | The notification arrives only in the Kozhikode app, not in the Kottakkal app.                                             |
+| **AT-14** | Production recovery drill                                                | Encrypted off-server backup and WAL replay executed successfully; ledger balances verified.                               |
 
 ---
 

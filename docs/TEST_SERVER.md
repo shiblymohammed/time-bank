@@ -10,7 +10,7 @@ The development `docker-compose.yml`, the QA scripts and mock OTP must never be 
 
 ### Firebase console (project owner)
 
-1. **Admin sign-in:** add a Web app to project `time-bank-34a1c`. Note its API key, auth domain and app ID.
+1. **Admin sign-in:** add a Web app to project `indian-time-bank`. Note its API key, auth domain and app ID.
 2. **Authorized domains:** under Authentication → Settings, add the admin panel's domain.
 3. **SMS:** confirm that the billing plan and daily quota allow real delivery. Until this is confirmed, sign-in by SMS
    is unverified.
@@ -26,7 +26,7 @@ The development `docker-compose.yml`, the QA scripts and mock OTP must never be 
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`                       | New values, never reused from development                                  |
 | `JWT_SECRET`                                                              | Random, at least 32 characters                                             |
 | `DASHBOARD_ORIGIN`                                                        | Public admin panel origin, such as `https://admin.example.org`             |
-| `FIREBASE_PROJECT_ID`                                                     | `time-bank-34a1c`                                                          |
+| `FIREBASE_PROJECT_ID`                                                     | `indian-time-bank`                                                          |
 | `FIREBASE_WEB_API_KEY`, `FIREBASE_WEB_AUTH_DOMAIN`, `FIREBASE_WEB_APP_ID` | From the Web app above                                                     |
 | `FIREBASE_SERVICE_ACCOUNT_JSON`                                           | Service account key on one line                                            |
 | `TRUST_PROXY_HOPS`                                                        | Proxies in front of the API: `1` for Nginx alone, `2` with a tunnel or CDN |

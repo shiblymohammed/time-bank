@@ -4,21 +4,35 @@ Android now verifies the mobile number with Firebase, then exchanges the Firebas
 
 The verified phone uses the existing Time Bank account, wallet, account restrictions, memberships and permissions. A first login creates an account and wallet, without granting administrator or member roles. Concurrent first logins serialize account provisioning. Time Bank issues its own access/refresh tokens; Firebase tokens do not authorize application endpoints directly.
 
-## Console configuration completed
+## Firebase project
 
-- Project: `time-bank-34a1c`, number `154706594127`.
-- Android package: `com.kottakkal.timebank`.
-- Firebase app: `1:154706594127:android:9771c1393c2d18981a9d3a`.
-- Phone provider enabled with the user's approval of the displayed Google Play Integrity terms.
-- SMS region policy: allow India only.
-- This workstation's debug SHA-1: `F5:7F:A8:96:87:2F:12:10:4D:97:06:B2:58:86:F3:6D:6A:A0:C7:BD`.
-- This workstation's debug SHA-256: `7B:16:A2:35:C4:02:58:63:4F:8B:36:6A:30:7C:4E:63:07:94:CB:D3:BD:CC:F2:4E:39:3A:44:BC:24:5C:C2:10`.
+Since 8 November 2026 every app uses one Firebase project owned by the Indian Time Bank team:
 
-The refreshed Android client configuration is in the separate Flutter repository. CI and production signing certificates must be registered separately: their keys differ from this workstation's debug key. Never commit private signing keys.
+- Project ID: `indian-time-bank`, number `556720690661`.
+- One Android, one iOS and one Web app are registered **per organization**, all in this project. Package and
+  bundle IDs follow `com.indiantimebank.<organization>`; the first is `com.indiantimebank.kottakkal`.
+- Staff panels use `<organization>.indiantimebank.com`; add each one under Authentication → Settings → Authorized
+  domains.
+
+Setup checklist for the project (once):
+
+- [ ] Phone provider enabled (Authentication → Sign-in method).
+- [ ] SMS region policy: allow India only.
+- [ ] Blaze plan with a budget alert, so real SMS is delivered beyond the small free allowance.
+- [ ] Service-account key generated for push and stored only in the server's `FIREBASE_SERVICE_ACCOUNT_JSON`.
+
+Per organization:
+
+- [ ] Android app with the debug, release and Play app-signing SHA-1 and SHA-256 fingerprints.
+- [ ] iOS app and its APNs key under Cloud Messaging.
+- [ ] Web app for the staff panel, and the panel's domain in Authorized domains.
+
+The earlier project `time-bank-34a1c` belonged to another account and is no longer used. Never commit private
+signing keys or the service-account key.
 
 ## Deployment
 
-Set `FIREBASE_PROJECT_ID=time-bank-34a1c` on the deployed API and deploy the new endpoint. Allow outbound HTTPS to Google's public signing-certificate endpoint. Development Compose supplies this project ID and attaches only the API to an outbound bridge; PostgreSQL remains on the internal network. No Firebase service-account private key is needed for this public-key verification flow.
+Set `FIREBASE_PROJECT_ID=indian-time-bank` on the deployed API and deploy the new endpoint. Allow outbound HTTPS to Google's public signing-certificate endpoint. Development Compose supplies this project ID and attaches only the API to an outbound bridge; PostgreSQL remains on the internal network. No Firebase service-account private key is needed for this public-key verification flow.
 
 The current test API origin is `https://phone-richard-should-group.trycloudflare.com`. Flutter and its CI default to this origin. Override using `--dart-define=API_BASE_URL=<HTTPS origin without /api>` or the GitHub repository variable `API_BASE_URL`; legacy `API_URL` remains supported. Quick Tunnel URLs may change after restart. Live checks returned 200 for `/api/health/live` and `/api/health/ready` (database up) and 401 for an invalid token sent to `/api/auth/firebase`; real signed-token exchange remains untested.
 
@@ -36,7 +50,9 @@ See [Android phone authentication](https://firebase.google.com/docs/auth/android
 
 ## iOS configuration follow-up
 
-Registered `com.kottakkal.timebank` as Firebase iOS app `1:154706594127:ios:8da72718dd37ad9e1a9d3a`. The separate Flutter repository now includes its Xcode project, GoogleService-Info.plist, encoded-app-ID callback, background modes and iOS-enabled phone gateway. It uses the same API and verified-token endpoint. Apple Team ID, signing and APNs credentials remain unset at the user's request; native simulator compilation runs through the new macOS CI workflow. See the Flutter repository's `IOS_SETUP.md` for account-free configuration and validation limits.
+The Flutter repository includes the Xcode project, background modes and iOS phone gateway. Each organization's iOS
+app needs its own `GoogleService-Info.plist` and encoded-app-ID callback from the `indian-time-bank` project. Apple
+Team ID, signing and APNs credentials are still unset. See the Flutter repository's `IOS_SETUP.md`.
 
 ## Audit hardening follow-up
 

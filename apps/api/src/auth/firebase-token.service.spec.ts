@@ -11,7 +11,7 @@ describe('Firebase phone token verification', () => {
   const verifyIdToken = jest.fn();
   const app = { name: 'test-app' };
   const service = new FirebaseTokenService(
-    new ConfigService({ FIREBASE_PROJECT_ID: 'time-bank-34a1c' }),
+    new ConfigService({ FIREBASE_PROJECT_ID: 'indian-time-bank' }),
   );
   const valid = () => ({
     phone_number: '+919876543210',
@@ -34,8 +34,8 @@ describe('Firebase phone token verification', () => {
   it('pins the Admin verifier to the configured project before accepting the signed phone', async () => {
     await expect(service.verifyPhoneToken('signed-id-token')).resolves.toBe('+919876543210');
     expect(initializeApp).toHaveBeenCalledWith(
-      { projectId: 'time-bank-34a1c' },
-      'time-bank-phone-time-bank-34a1c',
+      { projectId: 'indian-time-bank' },
+      'time-bank-phone-indian-time-bank',
     );
     expect(verifyIdToken).toHaveBeenCalledWith('signed-id-token');
   });
