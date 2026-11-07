@@ -16,6 +16,7 @@ import { AuthorizationModule } from '../authorization/authorization.module';
 import { BeneficiariesModule } from '../beneficiaries/beneficiaries.module';
 import { MatchingModule } from '../matching/matching.module';
 import { TimeLedgerModule } from '../time-ledger/time-ledger.module';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -32,6 +33,7 @@ import { TimeLedgerModule } from '../time-ledger/time-ledger.module';
     AuthorizationModule,
     BeneficiariesModule,
     TimeLedgerModule,
+    NotificationsModule,
     forwardRef(() => MatchingModule),
   ],
   controllers: [RequestsController],

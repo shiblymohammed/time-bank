@@ -7,7 +7,7 @@ import {
   ManyToOne,
   JoinColumn,
 } from 'typeorm';
-import { VolunteerAssignmentStatus } from '@ktb/shared-types';
+import { AssignmentReviewReason, VolunteerAssignmentStatus } from '@ktb/shared-types';
 import { Organization } from '../../organizations/entities/organization.entity';
 import { ServiceRequest } from '../../requests/entities/service-request.entity';
 import { OrganizationMembership } from '../../memberships/entities/organization-membership.entity';
@@ -121,6 +121,35 @@ export class VolunteerAssignment {
 
   @Column({ name: 'confirmed_minutes', type: 'int', nullable: true })
   confirmedMinutes?: number | null;
+
+  @Column({ name: 'finish_reminded_at', type: 'timestamptz', nullable: true })
+  finishRemindedAt?: Date | null;
+
+  // A coordinator decides these visits; no credits are paid until they do.
+  @Column({ name: 'review_reason', type: 'varchar', length: 40, nullable: true })
+  reviewReason?: AssignmentReviewReason | null;
+
+  @Column({ name: 'review_notes', type: 'text', nullable: true })
+  reviewNotes?: string | null;
+
+  /** The minutes the member confirmed before this was sent for review. */
+  @Column({ name: 'review_minutes', type: 'int', nullable: true })
+  reviewMinutes?: number | null;
+
+  @Column({ name: 'review_requested_at', type: 'timestamptz', nullable: true })
+  reviewRequestedAt?: Date | null;
+
+  @Column({ name: 'review_requested_by_user_id', type: 'uuid', nullable: true })
+  reviewRequestedByUserId?: string | null;
+
+  @Column({ name: 'review_resolved_at', type: 'timestamptz', nullable: true })
+  reviewResolvedAt?: Date | null;
+
+  @Column({ name: 'review_resolved_by_user_id', type: 'uuid', nullable: true })
+  reviewResolvedByUserId?: string | null;
+
+  @Column({ name: 'review_outcome', type: 'varchar', length: 20, nullable: true })
+  reviewOutcome?: string | null;
 
   @Column({ name: 'replaced_by_assignment_id', type: 'uuid', nullable: true })
   replacedByAssignmentId?: string | null;

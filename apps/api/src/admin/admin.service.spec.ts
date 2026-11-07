@@ -1,6 +1,11 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   AccountStatus,
   GlobalRestrictionStatus,
@@ -63,6 +68,21 @@ describe('AdminService', () => {
     save: jest.fn(),
   };
 
+  /** What the Super Admin queries see: does the target hold it, and who else does. */
+  const superAdmins = { holds: false, remaining: 1 };
+  const repositories = new Map<unknown, unknown>();
+  const mockManager: Record<string, jest.Mock> = {
+    getRepository: jest.fn((entity: unknown) => repositories.get(entity)),
+    query: jest.fn(async (sql: string) => {
+      if (sql.includes('pg_advisory_xact_lock')) return [];
+      if (sql.includes('AS remaining')) return [{ remaining: superAdmins.remaining }];
+      return superAdmins.holds ? [{ '?column?': 1 }] : [];
+    }),
+    transaction: jest.fn(async (work: (m: unknown) => unknown): Promise<unknown> =>
+      work(mockManager),
+    ),
+  };
+
   const mockAuditService = {
     logEvent: jest.fn().mockResolvedValue(undefined),
     queryEvents: jest.fn().mockResolvedValue({ events: [], total: 0 }),
@@ -89,6 +109,18 @@ describe('AdminService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    superAdmins.holds = false;
+    superAdmins.remaining = 1;
+    repositories.set(User, mockUserRepo);
+    repositories.set(GlobalAccountRestriction, mockRestrictionRepo);
+    repositories.set(MembershipRoleGrant, mockRoleGrantRepo);
+    repositories.set(OrganizationMembership, mockMembershipRepo);
+    Object.assign(mockUserRepo, { manager: mockManager });
+    Object.assign(mockRoleGrantRepo, { manager: mockManager });
+    Object.assign(mockOrgRepo, {
+      query: jest.fn().mockResolvedValue([{ membership_sequence: 7 }]),
+    });
+    mockRestrictionRepo.count.mockResolvedValue(0);
 
     const module: TestingModule = await Test.createTestingModule({
       providers: [
@@ -189,6 +221,7 @@ describe('AdminService', () => {
       expect(mockUserRepo.save).toHaveBeenCalledWith(user);
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'GLOBAL_RESTRICTION_IMPOSED' }),
+        mockManager,
       );
     });
   });
@@ -287,7 +320,7 @@ describe('AdminService', () => {
 
     it('should throw ConflictException if user already has an active grant', async () => {
       mockOrgRepo.findOne.mockResolvedValueOnce({ id: 'org-1' });
-      mockUserRepo.findOne.mockResolvedValueOnce({ id: 'u-1' });
+      mockUserRepo.findOne.mockResolvedValueOnce({ id: 'u-1', status: AccountStatus.ACTIVE });
       mockMembershipRepo.findOne.mockResolvedValueOnce({
         id: 'm-1',
         status: MembershipStatus.APPROVED,
@@ -307,8 +340,8 @@ describe('AdminService', () => {
     });
 
     it('should grant role and create approved membership if not yet exists', async () => {
-      mockOrgRepo.findOne.mockResolvedValueOnce({ id: 'org-1' });
-      mockUserRepo.findOne.mockResolvedValueOnce({ id: 'u-1' });
+      mockOrgRepo.findOne.mockResolvedValueOnce({ id: 'org-1', code: 'KTB' });
+      mockUserRepo.findOne.mockResolvedValueOnce({ id: 'u-1', status: AccountStatus.ACTIVE });
       mockMembershipRepo.findOne.mockResolvedValueOnce(null);
       mockMembershipRepo.create.mockImplementation((dto) => ({ id: 'm-new', ...dto }));
       mockMembershipRepo.save.mockImplementation((m) => Promise.resolve(m));
@@ -325,6 +358,9 @@ describe('AdminService', () => {
 
       expect(res.id).toBe('g-new');
       expect(res.role).toBe(UserRole.MUNICIPALITY_ADMIN);
+      expect(mockMembershipRepo.create).toHaveBeenCalledWith(
+        expect.objectContaining({ membershipNumber: `KTB-${new Date().getFullYear()}-0007` }),
+      );
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'MEMBERSHIP_ROLE_GRANTED' }),
       );
@@ -349,6 +385,7 @@ describe('AdminService', () => {
         role: UserRole.COORDINATOR,
       };
       mockRoleGrantRepo.findOne.mockResolvedValueOnce(grant);
+      mockMembershipRepo.findOne.mockResolvedValueOnce({ id: 'm-1', organizationId: 'org-1' });
       mockRoleGrantRepo.save.mockImplementation((g) => Promise.resolve(g));
 
       const res = await service.revokeOrganizationRole(
@@ -361,6 +398,192 @@ describe('AdminService', () => {
       expect(res.status).toBe(RoleGrantStatus.REVOKED);
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'MEMBERSHIP_ROLE_REVOKED' }),
+        mockManager,
+      );
+    });
+  });
+
+  describe('Super Admin and member safeguards', () => {
+    const restrict = () =>
+      service.imposeRestriction(
+        {
+          userId: 'other-admin',
+          restrictionType: GlobalRestrictionType.TEMPORARY_SUSPENSION,
+          reasonCode: 'TEST',
+        },
+        'admin-1',
+      );
+
+    it('refuses to restrict the last active Super Admin', async () => {
+      mockUserRepo.findOne.mockResolvedValueOnce({
+        id: 'other-admin',
+        status: AccountStatus.ACTIVE,
+      });
+      superAdmins.holds = true;
+      superAdmins.remaining = 0;
+
+      await expect(restrict()).rejects.toThrow(ConflictException);
+      expect(mockRestrictionRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('restricts a Super Admin while another one remains', async () => {
+      const user = { id: 'other-admin', status: AccountStatus.ACTIVE };
+      mockUserRepo.findOne.mockResolvedValueOnce(user);
+      mockRestrictionRepo.create.mockImplementation((dto) => ({ id: 'r-2', ...dto }));
+      mockRestrictionRepo.save.mockImplementation((r) => Promise.resolve(r));
+      superAdmins.holds = true;
+
+      await expect(restrict()).resolves.toMatchObject({ id: 'r-2' });
+      expect(mockManager.query).toHaveBeenCalledWith(
+        expect.stringContaining('pg_advisory_xact_lock'),
+      );
+    });
+
+    it('refuses to revoke the last Super Admin grant', async () => {
+      mockRoleGrantRepo.findOne.mockResolvedValueOnce({
+        id: 'g-sa',
+        membershipId: 'm-1',
+        status: RoleGrantStatus.ACTIVE,
+        role: UserRole.SUPER_ADMIN,
+      });
+      mockMembershipRepo.findOne.mockResolvedValueOnce({ id: 'm-1', organizationId: 'org-1' });
+      superAdmins.remaining = 0;
+
+      await expect(service.revokeOrganizationRole('org-1', 'g-sa', {}, 'admin-1')).rejects.toThrow(
+        ConflictException,
+      );
+      expect(mockRoleGrantRepo.save).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      MembershipStatus.REJECTED,
+      MembershipStatus.SUSPENDED,
+      MembershipStatus.PENDING_REVIEW,
+    ])('does not approve a %s membership by granting it a role', async (status) => {
+      mockOrgRepo.findOne.mockResolvedValueOnce({ id: 'org-1', code: 'KTB' });
+      mockUserRepo.findOne.mockResolvedValueOnce({ id: 'u-1', status: AccountStatus.ACTIVE });
+      mockMembershipRepo.findOne.mockResolvedValueOnce({ id: 'm-1', status });
+
+      await expect(
+        service.grantOrganizationRole(
+          'org-1',
+          { userId: 'u-1', role: UserRole.COORDINATOR },
+          'admin-1',
+        ),
+      ).rejects.toThrow(ConflictException);
+      expect(mockMembershipRepo.save).not.toHaveBeenCalled();
+      expect(mockRoleGrantRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('does not grant roles to a suspended or restricted account', async () => {
+      mockOrgRepo.findOne.mockResolvedValue({ id: 'org-1', code: 'KTB' });
+      mockUserRepo.findOne.mockResolvedValueOnce({ id: 'u-1', status: AccountStatus.SUSPENDED });
+      await expect(
+        service.grantOrganizationRole(
+          'org-1',
+          { userId: 'u-1', role: UserRole.COORDINATOR },
+          'admin-1',
+        ),
+      ).rejects.toThrow(ConflictException);
+
+      mockUserRepo.findOne.mockResolvedValueOnce({ id: 'u-1', status: AccountStatus.ACTIVE });
+      mockRestrictionRepo.count.mockResolvedValueOnce(1);
+      await expect(
+        service.grantOrganizationRole(
+          'org-1',
+          { userId: 'u-1', role: UserRole.COORDINATOR },
+          'admin-1',
+        ),
+      ).rejects.toThrow(ConflictException);
+      expect(mockRoleGrantRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Super Admin second approval', () => {
+    const appoint = () => {
+      mockOrgRepo.findOne.mockResolvedValueOnce({ id: 'org-1', code: 'KTB' });
+      mockUserRepo.findOne.mockResolvedValueOnce({ id: 'u-1', status: AccountStatus.ACTIVE });
+      mockMembershipRepo.findOne.mockResolvedValueOnce({
+        id: 'm-1',
+        status: MembershipStatus.APPROVED,
+      });
+      mockRoleGrantRepo.findOne.mockResolvedValueOnce(null);
+      mockRoleGrantRepo.create.mockImplementation((dto) => ({ id: 'g-new', ...dto }));
+      mockRoleGrantRepo.save.mockImplementation((g) => Promise.resolve(g));
+      return service.grantOrganizationRole(
+        'org-1',
+        { userId: 'u-1', role: UserRole.SUPER_ADMIN },
+        'admin-1',
+      );
+    };
+    const waiting = (extra = {}) => ({
+      id: 'g-wait',
+      membershipId: 'm-1',
+      role: UserRole.SUPER_ADMIN,
+      status: RoleGrantStatus.PENDING_APPROVAL,
+      grantedBy: 'admin-1',
+      ...extra,
+    });
+    const target = () =>
+      mockMembershipRepo.findOne.mockResolvedValueOnce({
+        id: 'm-1',
+        organizationId: 'org-1',
+        userId: 'u-1',
+        status: MembershipStatus.APPROVED,
+      });
+
+    it('waits for a second Super Admin when another one exists', async () => {
+      superAdmins.remaining = 1;
+      await expect(appoint()).resolves.toMatchObject({ status: RoleGrantStatus.PENDING_APPROVAL });
+      expect(mockAuditService.logEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ eventType: 'SUPER_ADMIN_APPROVAL_REQUESTED' }),
+      );
+    });
+
+    it('lets the only Super Admin appoint the next one directly', async () => {
+      superAdmins.remaining = 0;
+      await expect(appoint()).resolves.toMatchObject({ status: RoleGrantStatus.ACTIVE });
+    });
+
+    it('refuses an approval by the Super Admin who asked', async () => {
+      mockRoleGrantRepo.findOne.mockResolvedValueOnce(waiting());
+      target();
+      await expect(service.approveOrganizationRole('org-1', 'g-wait', 'admin-1')).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(mockRoleGrantRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('refuses an approval by the person being appointed', async () => {
+      mockRoleGrantRepo.findOne.mockResolvedValueOnce(waiting());
+      target();
+      await expect(service.approveOrganizationRole('org-1', 'g-wait', 'u-1')).rejects.toThrow(
+        ForbiddenException,
+      );
+    });
+
+    it('turns the role on when a second Super Admin approves', async () => {
+      mockRoleGrantRepo.findOne.mockResolvedValueOnce(waiting());
+      target();
+      mockUserRepo.findOne.mockResolvedValueOnce({ id: 'u-1', status: AccountStatus.ACTIVE });
+      mockRoleGrantRepo.save.mockImplementation((g) => Promise.resolve(g));
+
+      await expect(
+        service.approveOrganizationRole('org-1', 'g-wait', 'admin-2'),
+      ).resolves.toMatchObject({ status: RoleGrantStatus.ACTIVE });
+      expect(mockAuditService.logEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({ requestedBy: 'admin-1', approvedBy: 'admin-2' }),
+        }),
+        mockManager,
+      );
+    });
+
+    it('refuses to approve a role that is not waiting', async () => {
+      mockRoleGrantRepo.findOne.mockResolvedValueOnce(waiting({ status: RoleGrantStatus.ACTIVE }));
+      target();
+      await expect(service.approveOrganizationRole('org-1', 'g-wait', 'admin-2')).rejects.toThrow(
+        ConflictException,
       );
     });
   });

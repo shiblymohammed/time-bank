@@ -1,3 +1,4 @@
+import { headers } from 'next/headers';
 import { NextRequest, NextResponse } from 'next/server';
 
 const origin = (
@@ -32,6 +33,19 @@ export function checkOrigin(request: NextRequest) {
     throw new GatewayError('Request origin is not allowed', 403);
 }
 
+/**
+ * The chain as Nginx built it, so the API's TRUST_PROXY_HOPS reads the web server as the
+ * nearest hop and still finds the visitor. Without it every admin shares one rate limit.
+ */
+async function forwardedFor(): Promise<Record<string, string>> {
+  try {
+    const chain = (await headers()).get('x-forwarded-for');
+    return chain ? { 'x-forwarded-for': chain } : {};
+  } catch {
+    return {}; // Outside a request there is no visitor to name.
+  }
+}
+
 export async function upstream(
   path: string,
   options: { method?: string; body?: unknown; token?: string } = {},
@@ -42,6 +56,7 @@ export async function upstream(
       method: options.method ?? 'GET',
       headers: {
         'content-type': 'application/json',
+        ...(await forwardedFor()),
         ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
       },
       ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
@@ -86,11 +101,15 @@ export async function withSession(
   })) as Json;
   if (typeof session['accessToken'] !== 'string')
     throw new GatewayError('Please sign in again', 401);
-  return { body: await action(session['accessToken']), renewed: session['accessToken'] };
+  return { body: await action(session['accessToken']), renewed: session };
 }
-export function respond(body: unknown, renewed?: string) {
+export function respond(body: unknown, renewed?: Json) {
   const response = NextResponse.json(body, { headers: { 'Cache-Control': 'no-store' } });
-  if (renewed) response.cookies.set(ACCESS, renewed, { ...cookieOptions, maxAge: 900 });
+  const { accessToken, refreshToken } = renewed ?? {};
+  if (typeof accessToken === 'string')
+    response.cookies.set(ACCESS, accessToken, { ...cookieOptions, maxAge: 900 });
+  // Absent when a parallel request already replaced the token.
+  if (typeof refreshToken === 'string') response.cookies.set(REFRESH, refreshToken, cookieOptions);
   return response;
 }
 export function setSession(response: NextResponse, session: Json) {

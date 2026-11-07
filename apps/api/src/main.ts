@@ -5,6 +5,7 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
 
 import { AppModule } from './app.module';
+import { assertStrongJwtSecret } from './auth/session-policy';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -14,6 +15,7 @@ async function bootstrap(): Promise<void> {
   const configService = app.get(ConfigService);
   const port = configService.get<number>('API_PORT', 3001);
   const nodeEnv = configService.get<string>('NODE_ENV', 'development');
+  if (nodeEnv === 'production') assertStrongJwtSecret(configService.get<string>('JWT_SECRET'));
 
   // ─── Client IP ───────────────────────────────────────────────────────
   // Rate limits and audit IPs need the real caller. Set this to the number of proxies

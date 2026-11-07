@@ -33,6 +33,7 @@ import { OrganizationMembership } from '../memberships/entities/organization-mem
 import { AuditService } from '../audit/audit.service';
 import { SmsService } from './sms/sms.service';
 import { normalizeToE164, sha256 } from './utils/phone.util';
+import { REFRESH_OVERLAP_MS, refreshLifetimeMs } from './session-policy';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
@@ -345,7 +346,9 @@ export class AuthService {
     // Cryptographically secure refresh token (30-day lifetime per D#39)
     const rawRefreshToken = crypto.randomBytes(32).toString('hex');
     const refreshTokenHash = sha256(rawRefreshToken);
-    const refreshExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    const refreshExpiresAt = new Date(
+      Date.now() + refreshLifetimeMs(this.configService.get<string>('JWT_REFRESH_TOKEN_EXPIRY')),
+    );
 
     const session = this.sessionRepo.create({
       userId: user.id,
@@ -428,15 +431,15 @@ export class AuthService {
   async refreshToken(
     dto: RefreshTokenDto,
     ipAddress?: string,
-  ): Promise<{ accessToken: string; expiresIn: number }> {
+  ): Promise<{ accessToken: string; expiresIn: number; refreshToken?: string }> {
     const tokenHash = sha256(dto.refreshToken);
+    const live = { revokedAt: IsNull(), expiresAt: MoreThan(new Date()) };
 
     const session = await this.sessionRepo.findOne({
-      where: {
-        refreshTokenHash: tokenHash,
-        revokedAt: IsNull(),
-        expiresAt: MoreThan(new Date()),
-      },
+      where: [
+        { refreshTokenHash: tokenHash, ...live },
+        { previousRefreshTokenHash: tokenHash, ...live },
+      ],
       relations: ['user'],
     });
 
@@ -446,6 +449,22 @@ export class AuthService {
 
     if (session.user.status !== AccountStatus.ACTIVE) {
       throw new ForbiddenException('Account is not active');
+    }
+
+    if (
+      session.refreshTokenHash !== tokenHash &&
+      Date.now() - (session.rotatedAt?.getTime() ?? 0) > REFRESH_OVERLAP_MS
+    ) {
+      await this.sessionRepo.update(session.id, { revokedAt: new Date() });
+      await this.auditService.logEvent({
+        eventType: 'AUTH_REFRESH_REUSE_DETECTED',
+        actorId: session.user.id,
+        targetId: session.id,
+        targetType: 'AUTHENTICATION_SESSION',
+        organizationId: session.activeOrgId ?? null,
+        ipAddress,
+      });
+      throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
     // Determine roles in session's active organization
@@ -493,6 +512,22 @@ export class AuthService {
 
     const accessToken = this.jwtService.sign(payload);
 
+    // Parallel requests can share a token, so the loser of this update keeps working and
+    // simply receives no replacement.
+    let refreshToken: string | undefined;
+    if (session.refreshTokenHash === tokenHash) {
+      const replacement = crypto.randomBytes(32).toString('hex');
+      const rotated = await this.sessionRepo.update(
+        { id: session.id, refreshTokenHash: tokenHash },
+        {
+          refreshTokenHash: sha256(replacement),
+          previousRefreshTokenHash: tokenHash,
+          rotatedAt: new Date(),
+        },
+      );
+      if (rotated.affected) refreshToken = replacement;
+    }
+
     await this.auditService.logEvent({
       eventType: 'AUTH_TOKEN_REFRESHED',
       actorId: session.user.id,
@@ -505,6 +540,7 @@ export class AuthService {
     return {
       accessToken,
       expiresIn: 900,
+      ...(refreshToken ? { refreshToken } : {}),
     };
   }
 
@@ -519,7 +555,7 @@ export class AuthService {
     const tokenHash = sha256(dto.refreshToken);
 
     const session = await this.sessionRepo.findOne({
-      where: { refreshTokenHash: tokenHash },
+      where: [{ refreshTokenHash: tokenHash }, { previousRefreshTokenHash: tokenHash }],
     });
 
     if (session && !session.revokedAt) {

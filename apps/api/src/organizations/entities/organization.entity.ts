@@ -41,6 +41,10 @@ export class Organization {
   })
   status!: OrganizationStatus;
 
+  /** Last membership number handed out. Internal, so normal reads leave it out. */
+  @Column({ name: 'membership_sequence', type: 'int', default: 0, select: false })
+  membershipSequence!: number;
+
   @Column({ name: 'state_code', type: 'varchar', length: 10, default: 'KL' })
   stateCode!: string;
 

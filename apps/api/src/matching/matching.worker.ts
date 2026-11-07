@@ -30,6 +30,12 @@ export class MatchingWorker implements OnApplicationBootstrap, OnApplicationShut
     if (this.running) return;
     this.running = true;
     try {
+      // First, so a visit whose time has passed is not sent to another matching round.
+      await this.matching.recoverBookings();
+    } catch (error) {
+      this.logger.error('Could not recover bookings', error);
+    }
+    try {
       const due = await this.matching.findRequestsDueForProgression();
       for (const request of due) {
         try {

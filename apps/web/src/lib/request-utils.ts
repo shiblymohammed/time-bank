@@ -6,6 +6,7 @@ export const REQUEST_STATUSES = [
   'IN_PROGRESS',
   'COMPLETED',
   'CANCELLED',
+  'EXPIRED_UNMATCHED',
 ];
 export function indiaInput(value: string | Date): string {
   const date = new Date(value);
@@ -38,4 +39,13 @@ export function dispatchMessage(result: unknown): string {
     : status === 'ACCEPTED'
       ? 'Volunteer assignment saved.'
       : 'Saved on the server. Refresh to check the assignment status.';
+}
+const REVIEW_REASONS: Record<string, string> = {
+  BENEFICIARY_DISPUTE: 'Reported as a problem by the beneficiary',
+  MINUTES_OVER_TIMED_WORK: 'More minutes claimed than were timed',
+  MINUTES_OVER_EXPECTED: 'Well over the expected time',
+  PAIR_MONTHLY_LIMIT: 'This pair passed its monthly limit',
+};
+export function reviewReasonLabel(reason: string | null | undefined): string {
+  return (reason && REVIEW_REASONS[reason]) || 'Waiting for a decision';
 }

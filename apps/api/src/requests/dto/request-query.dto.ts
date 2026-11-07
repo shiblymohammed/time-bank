@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
+import { IsEnum, IsIn, IsInt, IsOptional, IsString, IsUUID, Max, Min } from 'class-validator';
 import { Type } from 'class-transformer';
 import { ServiceRequestStatus, UrgencyType } from '@ktb/shared-types';
 
@@ -23,6 +23,11 @@ export class RequestQueryDto {
   @IsString()
   @IsOptional()
   ward?: string;
+
+  @ApiPropertyOptional({ description: 'Staff only: visits waiting for a coordinator decision' })
+  @IsIn(['true'])
+  @IsOptional()
+  needsReview?: string;
 
   @ApiPropertyOptional({ default: 1 })
   @Type(() => Number)

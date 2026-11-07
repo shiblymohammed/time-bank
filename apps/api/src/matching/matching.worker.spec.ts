@@ -6,6 +6,7 @@ describe('MatchingWorker', () => {
   const matching = {
     findRequestsDueForProgression: jest.fn(),
     evaluateRoundProgression: jest.fn(),
+    recoverBookings: jest.fn(),
   };
   const worker = () =>
     new MatchingWorker(matching as unknown as MatchingService, new ConfigService());

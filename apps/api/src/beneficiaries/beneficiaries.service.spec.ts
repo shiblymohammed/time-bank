@@ -71,6 +71,9 @@ describe('BeneficiariesService', () => {
         {
           provide: AuthorizationService,
           useValue: {
+            assertNoSelfEscalation: jest.fn((actorId: string, targetId: string) => {
+              if (actorId === targetId) throw new ForbiddenException('Self-escalation denied');
+            }),
             evaluateOrganizationAccess: jest.fn().mockResolvedValue({
               isSuperAdmin: true,
               roles: [],
@@ -383,6 +386,111 @@ describe('BeneficiariesService', () => {
         ),
       ).rejects.toThrow(ConflictException);
     });
+
+    const approvedPair = () =>
+      mockMembershipRepo.findOne
+        .mockResolvedValueOnce({
+          id: 'ben-mem',
+          organizationId: 'org-1',
+          status: MembershipStatus.APPROVED,
+        })
+        .mockResolvedValueOnce({
+          id: 'cg-mem',
+          organizationId: 'org-1',
+          status: MembershipStatus.APPROVED,
+        });
+    const request = () =>
+      service.createCaregiverAuthorization(
+        'org-1',
+        {
+          beneficiaryMembershipId: 'ben-mem',
+          caregiverMembershipId: 'cg-mem',
+          relationshipType: CaregiverRelationshipType.FAMILY_SPOUSE,
+        },
+        'user-1',
+      );
+
+    it('reopens a refused or ended relationship for a fresh review', async () => {
+      approvedPair();
+      const ended = {
+        id: 'auth-old',
+        organizationId: 'org-1',
+        beneficiaryMembershipId: 'ben-mem',
+        caregiverMembershipId: 'cg-mem',
+        status: CaregiverAuthorizationStatus.REVOKED,
+        approvedByUserId: 'coord',
+        approvedAt: new Date(),
+        revokedByUserId: 'coord',
+        revokedAt: new Date(),
+        revocationReason: 'Moved away',
+      };
+      mockCaregiverAuthRepo.findOne.mockResolvedValue(ended);
+
+      const result = await request();
+
+      expect(mockCaregiverAuthRepo.create).not.toHaveBeenCalled();
+      expect(result).toMatchObject({
+        id: 'auth-old',
+        status: CaregiverAuthorizationStatus.PENDING_REVIEW,
+        relationshipType: CaregiverRelationshipType.FAMILY_SPOUSE,
+        approvedByUserId: null,
+        approvedAt: null,
+        revokedByUserId: null,
+        revokedAt: null,
+        revocationReason: null,
+      });
+      expect(mockAuditService.logEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          payload: expect.objectContaining({
+            previous: {
+              status: CaregiverAuthorizationStatus.REVOKED,
+              revocationReason: 'Moved away',
+            },
+          }),
+        }),
+      );
+    });
+
+    it('refuses a second request while one is waiting for review', async () => {
+      approvedPair();
+      mockCaregiverAuthRepo.findOne.mockResolvedValue({
+        id: 'auth-waiting',
+        status: CaregiverAuthorizationStatus.PENDING_REVIEW,
+      });
+
+      await expect(request()).rejects.toThrow(ConflictException);
+      expect(mockCaregiverAuthRepo.save).not.toHaveBeenCalled();
+    });
+
+    it('turns two simultaneous first requests into a conflict, not a server error', async () => {
+      approvedPair();
+      mockCaregiverAuthRepo.findOne.mockResolvedValue(null);
+      mockCaregiverAuthRepo.save.mockRejectedValueOnce(
+        Object.assign(new Error('duplicate key'), { code: '23505' }),
+      );
+
+      await expect(request()).rejects.toThrow(ConflictException);
+    });
+  });
+
+  it('stops staff granting eligibility to themselves', async () => {
+    mockMembershipRepo.findOne.mockResolvedValue({
+      id: 'membership-1',
+      userId: 'user-coord-1',
+      status: MembershipStatus.APPROVED,
+    });
+
+    await expect(
+      service.grantEligibility(
+        'org-1',
+        {
+          membershipId: 'membership-1',
+          eligibilityType: BeneficiaryEligibilityType.ONGOING,
+          reviewDueAt: '2030-01-01',
+        },
+        'user-coord-1',
+      ),
+    ).rejects.toThrow(ForbiddenException);
   });
 
   describe('reviewCaregiverAuthorization', () => {
@@ -406,6 +514,45 @@ describe('BeneficiariesService', () => {
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'CAREGIVER_AUTHORIZATION_REVIEWED' }),
       );
+    });
+
+    it.each(['user-beneficiary', 'user-caregiver'])(
+      'stops %s approving their own caregiver relationship',
+      async (reviewer) => {
+        mockCaregiverAuthRepo.findOne.mockResolvedValue({
+          id: 'auth-1',
+          organizationId: 'org-1',
+          status: CaregiverAuthorizationStatus.PENDING_REVIEW,
+          beneficiaryMembership: { userId: 'user-beneficiary' },
+          caregiverMembership: { userId: 'user-caregiver' },
+        });
+
+        await expect(
+          service.reviewCaregiverAuthorization(
+            'org-1',
+            'auth-1',
+            { status: CaregiverAuthorizationStatus.APPROVED },
+            reviewer,
+          ),
+        ).rejects.toThrow(ForbiddenException);
+      },
+    );
+
+    it('does not bring a revoked caregiver back', async () => {
+      mockCaregiverAuthRepo.findOne.mockResolvedValue({
+        id: 'auth-1',
+        organizationId: 'org-1',
+        status: CaregiverAuthorizationStatus.REVOKED,
+      });
+
+      await expect(
+        service.reviewCaregiverAuthorization(
+          'org-1',
+          'auth-1',
+          { status: CaregiverAuthorizationStatus.APPROVED },
+          'user-coord-1',
+        ),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('revokes caregiver authorization with reason', async () => {

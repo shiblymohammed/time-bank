@@ -85,6 +85,13 @@ describe('MembershipsService - Role Escalation Security (Finding #1)', () => {
           useValue: {
             findOne: jest.fn(),
             count: jest.fn(),
+            createQueryBuilder: jest.fn(() => ({
+              update: jest.fn().mockReturnThis(),
+              set: jest.fn().mockReturnThis(),
+              where: jest.fn().mockReturnThis(),
+              returning: jest.fn().mockReturnThis(),
+              execute: jest.fn().mockResolvedValue({ raw: [{ membership_sequence: 5 }] }),
+            })),
           },
         },
         {
@@ -97,6 +104,7 @@ describe('MembershipsService - Role Escalation Security (Finding #1)', () => {
           provide: getRepositoryToken(OrganizationMembership),
           useValue: {
             findOne: jest.fn(),
+            update: jest.fn().mockResolvedValue({ affected: 1 }),
             save: jest.fn(),
             create: jest.fn(),
             find: jest.fn(),

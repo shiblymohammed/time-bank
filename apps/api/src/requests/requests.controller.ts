@@ -19,6 +19,8 @@ import { CreateServiceRequestDto } from './dto/create-service-request.dto';
 import { CancelServiceRequestDto } from './dto/cancel-service-request.dto';
 import { RescheduleServiceRequestDto } from './dto/reschedule-service-request.dto';
 import { ConfirmServiceCompletionDto } from './dto/confirm-service-completion.dto';
+import { DisputeServiceCompletionDto } from './dto/dispute-service-completion.dto';
+import { ResolveServiceReviewDto } from './dto/resolve-service-review.dto';
 import { RequestQueryDto } from './dto/request-query.dto';
 
 import { AuthGuard } from '../auth/guards/auth.guard';
@@ -163,6 +165,62 @@ export class RequestsController {
     const membershipContext = (req as any).organizationMembership;
     const ip = req.ip ?? req.socket.remoteAddress;
     return this.requestsService.confirmCompletion(
+      organizationId,
+      requestId,
+      assignmentId,
+      userId,
+      membershipContext,
+      dto,
+      ip,
+    );
+  }
+
+  @Post(':requestId/assignments/:assignmentId/dispute')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @ApiOperation({
+    summary: 'Report that a finished service was not given as described',
+    description: 'No credits are paid until a coordinator decides.',
+  })
+  @ApiResponse({ status: 201, description: 'Sent to a coordinator' })
+  async disputeCompletion(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @Param('assignmentId', ParseUUIDPipe) assignmentId: string,
+    @Body() dto: DisputeServiceCompletionDto,
+    @CurrentUserId() userId: string,
+    @Req() req: Request,
+  ) {
+    const membershipContext = (req as any).organizationMembership;
+    const ip = req.ip ?? req.socket.remoteAddress;
+    return this.requestsService.disputeCompletion(
+      organizationId,
+      requestId,
+      assignmentId,
+      userId,
+      membershipContext,
+      dto,
+      ip,
+    );
+  }
+
+  @Post(':requestId/assignments/:assignmentId/resolve')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @ApiOperation({
+    summary: 'Coordinator decision on a reviewed visit, or one stuck in progress',
+    description: 'Never the volunteer, the beneficiary, or whoever asked for the review.',
+  })
+  @ApiResponse({ status: 201, description: 'Decision recorded' })
+  async resolveServiceReview(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @Param('assignmentId', ParseUUIDPipe) assignmentId: string,
+    @Body() dto: ResolveServiceReviewDto,
+    @CurrentUserId() userId: string,
+    @Req() req: Request,
+  ) {
+    const membershipContext = (req as any).organizationMembership;
+    const ip = req.ip ?? req.socket.remoteAddress;
+    return this.requestsService.resolveServiceReview(
       organizationId,
       requestId,
       assignmentId,

@@ -30,6 +30,7 @@ The development `docker-compose.yml`, the QA scripts and mock OTP must never be 
 | `FIREBASE_WEB_API_KEY`, `FIREBASE_WEB_AUTH_DOMAIN`, `FIREBASE_WEB_APP_ID` | From the Web app above                                                     |
 | `FIREBASE_SERVICE_ACCOUNT_JSON`                                           | Service account key on one line                                            |
 | `TRUST_PROXY_HOPS`                                                        | Proxies in front of the API: `1` for Nginx alone, `2` with a tunnel or CDN |
+| `CREDIT_PAIR_MONTHLY_MINUTES` | Minutes one volunteer and one beneficiary can confirm in 30 days before a coordinator must decide. Default `1200` |
 | `NGINX_PORT`                                                              | Host binding for Nginx, such as `127.0.0.1:8080` behind a tunnel           |
 
 `TRUST_PROXY_HOPS` matters. Too low and all users share one rate limit; too high and callers can forge their address.

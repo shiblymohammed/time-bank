@@ -127,6 +127,8 @@ export enum RoleGrantStatus {
   ACTIVE = 'ACTIVE',
   REVOKED = 'REVOKED',
   SUSPENDED = 'SUSPENDED',
+  /** A new Super Admin, waiting for a second Super Admin to approve. Grants no access. */
+  PENDING_APPROVAL = 'PENDING_APPROVAL',
 }
 
 /**
@@ -258,6 +260,23 @@ export enum VolunteerAssignmentStatus {
   CANCELLED = 'CANCELLED',
   WITHDRAWN = 'WITHDRAWN',
   REPLACED = 'REPLACED',
+  /** Accepted, but never started within the grace period. */
+  NO_SHOW = 'NO_SHOW',
+  /** A coordinator decided the reported help was not given. No credits are paid. */
+  NOT_DELIVERED = 'NOT_DELIVERED',
+}
+
+/** Why a finished visit needs a coordinator before any credits are paid. */
+export enum AssignmentReviewReason {
+  BENEFICIARY_DISPUTE = 'BENEFICIARY_DISPUTE',
+  MINUTES_OVER_TIMED_WORK = 'MINUTES_OVER_TIMED_WORK',
+  MINUTES_OVER_EXPECTED = 'MINUTES_OVER_EXPECTED',
+  PAIR_MONTHLY_LIMIT = 'PAIR_MONTHLY_LIMIT',
+}
+
+export enum AssignmentReviewDecision {
+  PAY = 'PAY',
+  REJECT = 'REJECT',
 }
 
 export enum CaregiverRelationshipType {

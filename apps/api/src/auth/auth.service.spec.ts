@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -42,6 +43,7 @@ describe('AuthService', () => {
     findOne: jest.fn(),
     create: jest.fn(),
     save: jest.fn(),
+    update: jest.fn().mockResolvedValue({ affected: 1 }),
   };
 
   const mockUserRepo = {
@@ -370,6 +372,7 @@ describe('AuthService', () => {
         id: 'sess-1',
         user: { id: 'user-1', phoneE164: '+919876543210', status: AccountStatus.ACTIVE },
         activeOrgId: null,
+        refreshTokenHash: createHash('sha256').update('valid-token').digest('hex'),
       };
       mockSessionRepo.findOne.mockResolvedValueOnce(session);
 
@@ -388,6 +391,79 @@ describe('AuthService', () => {
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'AUTH_TOKEN_REFRESHED' }),
       );
+    });
+
+    describe('rotation', () => {
+      const activeUser = { id: 'user-1', phoneE164: '+919876543210', status: AccountStatus.ACTIVE };
+      const hash = (token: string) => createHash('sha256').update(token).digest('hex');
+
+      beforeEach(() => {
+        mockMembershipRepo.createQueryBuilder.mockReturnValue({
+          innerJoin: jest.fn().mockReturnThis(),
+          where: jest.fn().mockReturnThis(),
+          andWhere: jest.fn().mockReturnThis(),
+          getOne: jest.fn().mockResolvedValue(null),
+        });
+      });
+
+      it('replaces the token and remembers the old one', async () => {
+        mockSessionRepo.findOne.mockResolvedValueOnce({
+          id: 'sess-1',
+          user: activeUser,
+          activeOrgId: null,
+          refreshTokenHash: hash('current'),
+        });
+
+        const res = await service.refreshToken({ refreshToken: 'current' });
+
+        expect(res.refreshToken).toEqual(expect.any(String));
+        expect(res.refreshToken).not.toBe('current');
+        expect(mockSessionRepo.update).toHaveBeenCalledWith(
+          { id: 'sess-1', refreshTokenHash: hash('current') },
+          expect.objectContaining({
+            refreshTokenHash: hash(res.refreshToken!),
+            previousRefreshTokenHash: hash('current'),
+          }),
+        );
+      });
+
+      it('keeps a parallel request working without a second replacement', async () => {
+        mockSessionRepo.findOne.mockResolvedValueOnce({
+          id: 'sess-1',
+          user: activeUser,
+          activeOrgId: null,
+          refreshTokenHash: hash('newer'),
+          previousRefreshTokenHash: hash('current'),
+          rotatedAt: new Date(),
+        });
+
+        const res = await service.refreshToken({ refreshToken: 'current' });
+
+        expect(res.accessToken).toBe('mock.jwt.token');
+        expect(res).not.toHaveProperty('refreshToken');
+        expect(mockSessionRepo.update).not.toHaveBeenCalled();
+      });
+
+      it('ends the session when an old token comes back later', async () => {
+        mockSessionRepo.findOne.mockResolvedValueOnce({
+          id: 'sess-1',
+          user: activeUser,
+          activeOrgId: null,
+          refreshTokenHash: hash('newer'),
+          previousRefreshTokenHash: hash('stolen'),
+          rotatedAt: new Date(Date.now() - 60 * 1000),
+        });
+
+        await expect(service.refreshToken({ refreshToken: 'stolen' })).rejects.toThrow(
+          UnauthorizedException,
+        );
+        expect(mockSessionRepo.update).toHaveBeenCalledWith('sess-1', {
+          revokedAt: expect.any(Date),
+        });
+        expect(mockAuditService.logEvent).toHaveBeenCalledWith(
+          expect.objectContaining({ eventType: 'AUTH_REFRESH_REUSE_DETECTED' }),
+        );
+      });
     });
   });
 

@@ -6,7 +6,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, In } from 'typeorm';
+import { EntityManager, Repository, In } from 'typeorm';
 import {
   AccountStatus,
   GlobalRestrictionStatus,
@@ -98,43 +98,108 @@ export class AdminService {
       throw new BadRequestException('Super Admin cannot impose a restriction on themselves');
     }
 
-    const user = await this.userRepo.findOne({ where: { id: dto.userId } });
-    if (!user) {
-      throw new NotFoundException('Target user not found');
-    }
+    return this.userRepo.manager.transaction(async (m) => {
+      const user = await m.getRepository(User).findOne({ where: { id: dto.userId } });
+      if (!user) {
+        throw new NotFoundException('Target user not found');
+      }
+      // Every restriction type removes access, including a Super Admin's.
+      if (await this.holdsSuperAdmin(m, dto.userId)) {
+        await this.assertSuperAdminRemains(m, { userId: dto.userId });
+      }
 
-    const restriction = this.restrictionRepo.create({
-      userId: dto.userId,
-      restrictionType: dto.restrictionType,
-      reasonCode: dto.reasonCode,
-      status: GlobalRestrictionStatus.ACTIVE,
-      authorizedBy: adminId,
+      const restrictions = m.getRepository(GlobalAccountRestriction);
+      const saved = await restrictions.save(
+        restrictions.create({
+          userId: dto.userId,
+          restrictionType: dto.restrictionType,
+          reasonCode: dto.reasonCode,
+          status: GlobalRestrictionStatus.ACTIVE,
+          authorizedBy: adminId,
+        }),
+      );
+
+      // Apply corresponding account status update
+      if (dto.restrictionType === GlobalRestrictionType.PERMANENT_BAN) {
+        user.status = AccountStatus.PERMANENTLY_BANNED;
+        await m.getRepository(User).save(user);
+      } else if (dto.restrictionType === GlobalRestrictionType.TEMPORARY_SUSPENSION) {
+        user.status = AccountStatus.SUSPENDED;
+        await m.getRepository(User).save(user);
+      }
+
+      await this.auditService.logEvent(
+        {
+          eventType: 'GLOBAL_RESTRICTION_IMPOSED',
+          actorId: adminId,
+          targetId: saved.id,
+          targetType: 'GLOBAL_ACCOUNT_RESTRICTION',
+          ipAddress,
+          payload: {
+            userId: dto.userId,
+            restrictionType: dto.restrictionType,
+            reasonCode: dto.reasonCode,
+          },
+        },
+        m,
+      );
+
+      return saved;
     });
-    const saved = await this.restrictionRepo.save(restriction);
+  }
 
-    // Apply corresponding account status update
-    if (dto.restrictionType === GlobalRestrictionType.PERMANENT_BAN) {
-      user.status = AccountStatus.PERMANENTLY_BANNED;
-      await this.userRepo.save(user);
-    } else if (dto.restrictionType === GlobalRestrictionType.TEMPORARY_SUSPENSION) {
-      user.status = AccountStatus.SUSPENDED;
-      await this.userRepo.save(user);
+  private async holdsSuperAdmin(m: EntityManager, userId: string): Promise<boolean> {
+    const rows: unknown[] = await m.query(
+      `SELECT 1 FROM membership_role_grants g
+       JOIN organization_memberships om ON om.id = g.membership_id
+       WHERE om.user_id = $1 AND g.role = $2 AND g.status = $3 LIMIT 1`,
+      [userId, UserRole.SUPER_ADMIN, RoleGrantStatus.ACTIVE],
+    );
+    return rows.length > 0;
+  }
+
+  /**
+   * Refuses a change that would leave no one able to act as Super Admin. Changes are
+   * taken one at a time, so two admins cannot remove each other at the same moment.
+   */
+  private async assertSuperAdminRemains(
+    m: EntityManager,
+    without: { userId?: string; grantId?: string },
+  ): Promise<void> {
+    await m.query(`SELECT pg_advisory_xact_lock(hashtext('ktb:super-admins'))`);
+    if (!(await this.countSuperAdmins(m, without))) {
+      throw new ConflictException(
+        'This would leave no active Super Admin. Make someone else a Super Admin first.',
+      );
     }
+  }
 
-    await this.auditService.logEvent({
-      eventType: 'GLOBAL_RESTRICTION_IMPOSED',
-      actorId: adminId,
-      targetId: saved.id,
-      targetType: 'GLOBAL_ACCOUNT_RESTRICTION',
-      ipAddress,
-      payload: {
-        userId: dto.userId,
-        restrictionType: dto.restrictionType,
-        reasonCode: dto.reasonCode,
-      },
-    });
-
-    return saved;
+  /** People who can act as Super Admin right now, leaving out a user or one grant. */
+  private async countSuperAdmins(
+    m: EntityManager,
+    without: { userId?: string; grantId?: string },
+  ): Promise<number> {
+    const rows: { remaining: number }[] = await m.query(
+      `SELECT COUNT(DISTINCT om.user_id)::int AS remaining
+       FROM membership_role_grants g
+       JOIN organization_memberships om ON om.id = g.membership_id
+       JOIN users u ON u.id = om.user_id
+       WHERE g.role = $1 AND g.status = $2 AND om.status = $3 AND u.status = $4
+         AND ($5::uuid IS NULL OR om.user_id <> $5::uuid)
+         AND ($6::uuid IS NULL OR g.id <> $6::uuid)
+         AND NOT EXISTS (SELECT 1 FROM global_account_restrictions r
+           WHERE r.user_id = u.id AND r.status = $7)`,
+      [
+        UserRole.SUPER_ADMIN,
+        RoleGrantStatus.ACTIVE,
+        MembershipStatus.APPROVED,
+        AccountStatus.ACTIVE,
+        without.userId ?? null,
+        without.grantId ?? null,
+        GlobalRestrictionStatus.ACTIVE,
+      ],
+    );
+    return rows[0]?.remaining ?? 0;
   }
 
   /**
@@ -276,6 +341,12 @@ export class AdminService {
     if (!user) {
       throw new NotFoundException('Target user not found');
     }
+    const restricted = await this.restrictionRepo.count({
+      where: { userId: dto.userId, status: GlobalRestrictionStatus.ACTIVE },
+    });
+    if (user.status !== AccountStatus.ACTIVE || restricted > 0) {
+      throw new ConflictException('This account is suspended, banned or restricted');
+    }
 
     // SECURITY: Validate role hierarchy - Super Admins can grant any role
     // but the role must be valid for organization workflows
@@ -291,19 +362,35 @@ export class AdminService {
     });
 
     if (!membership) {
+      // A new staff membership gets a member number like any approved member.
+      const [counter]: { membership_sequence: number }[] = await this.orgRepo.query(
+        `UPDATE organizations SET membership_sequence = membership_sequence + 1
+         WHERE id = $1 RETURNING membership_sequence`,
+        [orgId],
+      );
+      const sequence = String(counter?.membership_sequence ?? 0).padStart(4, '0');
       membership = this.membershipRepo.create({
         organizationId: orgId,
         userId: dto.userId,
         status: MembershipStatus.APPROVED,
         approvedAt: new Date(),
         approvedBy: adminId,
+        membershipNumber: `${org.code}-${new Date().getFullYear()}-${sequence}`,
       });
       membership = await this.membershipRepo.save(membership);
     } else if (membership.status !== MembershipStatus.APPROVED) {
-      membership.status = MembershipStatus.APPROVED;
-      membership.approvedAt = new Date();
-      membership.approvedBy = adminId;
-      membership = await this.membershipRepo.save(membership);
+      // A refused, suspended or unreviewed membership is decided in the member review,
+      // not silently approved by giving it a role.
+      const state: Record<string, string> = {
+        [MembershipStatus.APPLIED]: 'is still waiting for review',
+        [MembershipStatus.PENDING_REVIEW]: 'is still waiting for review',
+        [MembershipStatus.REJECTED]: 'was refused',
+        [MembershipStatus.SUSPENDED]: 'is suspended',
+        [MembershipStatus.REVOKED]: 'was removed',
+      };
+      throw new ConflictException(
+        `This membership ${state[membership.status] ?? 'is not approved'}. Decide it in the member review first.`,
+      );
     }
 
     // Check if role is already granted and active
@@ -311,7 +398,7 @@ export class AdminService {
       where: {
         membershipId: membership.id,
         role: dto.role,
-        status: RoleGrantStatus.ACTIVE,
+        status: In([RoleGrantStatus.ACTIVE, RoleGrantStatus.PENDING_APPROVAL]),
       },
     });
 
@@ -321,16 +408,21 @@ export class AdminService {
       );
     }
 
+    // A new Super Admin needs a second Super Admin's approval, unless the one asking is
+    // the only Super Admin there is: then nobody else could ever approve it.
+    const needsSecondApproval =
+      dto.role === UserRole.SUPER_ADMIN &&
+      (await this.countSuperAdmins(this.userRepo.manager, { userId: adminId })) > 0;
     const newGrant = this.roleGrantRepo.create({
       membershipId: membership.id,
       role: dto.role,
-      status: RoleGrantStatus.ACTIVE,
+      status: needsSecondApproval ? RoleGrantStatus.PENDING_APPROVAL : RoleGrantStatus.ACTIVE,
       grantedBy: adminId,
     });
     const saved = await this.roleGrantRepo.save(newGrant);
 
     await this.auditService.logEvent({
-      eventType: 'MEMBERSHIP_ROLE_GRANTED',
+      eventType: needsSecondApproval ? 'SUPER_ADMIN_APPROVAL_REQUESTED' : 'MEMBERSHIP_ROLE_GRANTED',
       actorId: adminId,
       targetId: saved.id,
       targetType: 'MEMBERSHIP_ROLE_GRANT',
@@ -356,40 +448,124 @@ export class AdminService {
     adminId: string,
     ipAddress?: string,
   ): Promise<MembershipRoleGrant> {
-    const grant = await this.roleGrantRepo.findOne({
-      where: { id: roleGrantId },
-      relations: ['membership'],
+    return this.roleGrantRepo.manager.transaction(async (m) => {
+      const grants = m.getRepository(MembershipRoleGrant);
+      const grant = await grants.findOne({
+        where: { id: roleGrantId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      const membership = grant
+        ? await m.getRepository(OrganizationMembership).findOne({
+            where: { id: grant.membershipId },
+          })
+        : null;
+
+      if (!grant || membership?.organizationId !== orgId) {
+        throw new NotFoundException('Role grant not found for this organization');
+      }
+
+      if (grant.status === RoleGrantStatus.REVOKED) {
+        throw new BadRequestException('Role grant is already revoked');
+      }
+      if (grant.role === UserRole.SUPER_ADMIN && grant.status === RoleGrantStatus.ACTIVE) {
+        await this.assertSuperAdminRemains(m, { grantId: grant.id });
+      }
+
+      grant.status = RoleGrantStatus.REVOKED;
+      grant.revokedAt = new Date();
+      grant.revokedBy = adminId;
+      grant.revocationReason = dto.reason ?? 'Revoked by Super Admin';
+      const saved = await grants.save(grant);
+
+      await this.auditService.logEvent(
+        {
+          eventType: 'MEMBERSHIP_ROLE_REVOKED',
+          actorId: adminId,
+          targetId: saved.id,
+          targetType: 'MEMBERSHIP_ROLE_GRANT',
+          organizationId: orgId,
+          ipAddress,
+          payload: {
+            role: grant.role,
+            membershipId: grant.membershipId,
+            reason: grant.revocationReason,
+          },
+        },
+        m,
+      );
+
+      return saved;
     });
+  }
 
-    if (!grant || grant.membership?.organizationId !== orgId) {
-      throw new NotFoundException('Role grant not found for this organization');
-    }
+  /** A second Super Admin turns a waiting Super Admin grant on. */
+  async approveOrganizationRole(
+    orgId: string,
+    roleGrantId: string,
+    adminId: string,
+    ipAddress?: string,
+  ): Promise<MembershipRoleGrant> {
+    return this.roleGrantRepo.manager.transaction(async (m) => {
+      const grants = m.getRepository(MembershipRoleGrant);
+      const grant = await grants.findOne({
+        where: { id: roleGrantId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      const membership = grant
+        ? await m.getRepository(OrganizationMembership).findOne({
+            where: { id: grant.membershipId },
+          })
+        : null;
+      if (!grant || !membership || membership.organizationId !== orgId) {
+        throw new NotFoundException('Role grant not found for this organization');
+      }
+      if (grant.status !== RoleGrantStatus.PENDING_APPROVAL) {
+        throw new ConflictException('This role is not waiting for approval');
+      }
+      if (grant.grantedBy === adminId) {
+        throw new ForbiddenException('A different Super Admin must approve this');
+      }
+      if (membership.userId === adminId) {
+        throw new ForbiddenException('You cannot approve your own Super Admin role');
+      }
+      const authority = await this.authorizationService.evaluateGlobalAccess(adminId, m);
+      if (!authority.isSuperAdmin) {
+        throw new ForbiddenException('Current Super Admin authority required');
+      }
+      const user = await m.getRepository(User).findOne({ where: { id: membership.userId } });
+      const restricted = await m.getRepository(GlobalAccountRestriction).count({
+        where: { userId: membership.userId, status: GlobalRestrictionStatus.ACTIVE },
+      });
+      if (
+        user?.status !== AccountStatus.ACTIVE ||
+        restricted > 0 ||
+        membership.status !== MembershipStatus.APPROVED
+      ) {
+        throw new ConflictException('This account is no longer active');
+      }
 
-    if (grant.status === RoleGrantStatus.REVOKED) {
-      throw new BadRequestException('Role grant is already revoked');
-    }
-
-    grant.status = RoleGrantStatus.REVOKED;
-    grant.revokedAt = new Date();
-    grant.revokedBy = adminId;
-    grant.revocationReason = dto.reason ?? 'Revoked by Super Admin';
-    const saved = await this.roleGrantRepo.save(grant);
-
-    await this.auditService.logEvent({
-      eventType: 'MEMBERSHIP_ROLE_REVOKED',
-      actorId: adminId,
-      targetId: saved.id,
-      targetType: 'MEMBERSHIP_ROLE_GRANT',
-      organizationId: orgId,
-      ipAddress,
-      payload: {
-        role: grant.role,
-        membershipId: grant.membershipId,
-        reason: grant.revocationReason,
-      },
+      grant.status = RoleGrantStatus.ACTIVE;
+      const saved = await grants.save(grant);
+      await this.auditService.logEvent(
+        {
+          eventType: 'MEMBERSHIP_ROLE_GRANTED',
+          actorId: adminId,
+          targetId: saved.id,
+          targetType: 'MEMBERSHIP_ROLE_GRANT',
+          organizationId: orgId,
+          ipAddress,
+          payload: {
+            userId: membership.userId,
+            role: grant.role,
+            membershipId: membership.id,
+            requestedBy: grant.grantedBy,
+            approvedBy: adminId,
+          },
+        },
+        m,
+      );
+      return saved;
     });
-
-    return saved;
   }
 
   /**

@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { BadRequestException, ConflictException } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
   GlobalRestrictionStatus,
@@ -202,7 +202,16 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
           provide: CANDIDATE_RANKING_STRATEGY,
           useClass: DeterministicCandidateRankingStrategy,
         },
-        { provide: NotificationsService, useValue: { enqueue: jest.fn() } },
+        {
+          provide: NotificationsService,
+          useValue: {
+            enqueue: jest.fn(),
+            notifyUsers: jest.fn(),
+            notifyMemberships: jest.fn(),
+            notifyRequestOwners: jest.fn(),
+            notifyCoordinators: jest.fn(),
+          },
+        },
         { provide: getRepositoryToken(VolunteerSkill), useValue: mockSkillRepo },
         { provide: getRepositoryToken(VolunteerAvailability), useValue: mockAvailabilityRepo },
         { provide: getRepositoryToken(VolunteerAssignment), useValue: mockAssignmentRepo },
@@ -214,7 +223,10 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
         { provide: getRepositoryToken(GlobalAccountRestriction), useValue: mockRestrictionRepo },
         { provide: DataSource, useValue: mockDataSource },
         { provide: AuditService, useValue: mockAuditService },
-        { provide: AuthorizationService, useValue: { assertMembershipAccess: jest.fn() } },
+        {
+          provide: AuthorizationService,
+          useValue: { assertMembershipAccess: jest.fn(), assertNoSelfEscalation: jest.fn() },
+        },
       ],
     }).compile();
 
@@ -506,33 +518,56 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
       expect(dispatched[0]!.volunteerMembershipId).toBe('vol-zone-matched');
     });
 
-    it('enables cross-organization volunteers when allowsCrossOrgVolunteers is true (ITB-006)', async () => {
+    it('keeps offers inside the organization even on an older cross-organization request', async () => {
       const crossOrgRequest = {
         ...mockRequest,
         allowsCrossOrgVolunteers: true,
       } as unknown as ServiceRequest;
-
       mockRoundRepo.find.mockResolvedValue([]);
-      mockMembershipQueryBuilder.getMany.mockResolvedValue([
-        {
-          id: 'vol-from-neighbor-org',
-          userId: 'user-external',
-          organizationId: 'org-other',
-          user: { restrictions: [] },
-        },
-      ]);
+      mockMembershipQueryBuilder.getMany.mockResolvedValue([]);
       mockAssignmentRepo.find.mockResolvedValue([]);
-      mockAvailabilityRepo.findOne.mockResolvedValue({
-        isAvailableImmediate: true,
-        preferredWardNumbers: ['4'],
-        maxTravelRadiusKm: 10.0,
-      });
-      mockZoneAssignRepo.find.mockResolvedValue([]);
-
       mockRequestRepo.findOne.mockResolvedValue(crossOrgRequest);
-      const dispatched = await service.findCandidatesAndDispatchOffers(crossOrgRequest);
-      expect(dispatched.length).toBe(1);
-      expect(dispatched[0]!.volunteerMembershipId).toBe('vol-from-neighbor-org');
+
+      await service.findCandidatesAndDispatchOffers(crossOrgRequest);
+
+      expect(mockMembershipQueryBuilder.andWhere).toHaveBeenCalledWith(
+        'm.organizationId = :orgId',
+        { orgId: 'org-1' },
+      );
+    });
+  });
+
+  describe('Security review rules', () => {
+    const dispatchTarget = (beneficiaryMembershipId: string) =>
+      mockTransactionalManager.createQueryBuilder.mockReturnValueOnce({
+        setLock: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        andWhere: jest.fn().mockReturnThis(),
+        getOne: jest.fn().mockResolvedValue({ id: 'req-1', beneficiaryMembershipId }),
+      } as never);
+
+    it('refuses to assign the person receiving help as their own volunteer', async () => {
+      dispatchTarget('vol-mem-1');
+      await expect(
+        service.coordinatorDispatch(
+          'org-1',
+          'req-1',
+          { volunteerMembershipId: 'vol-mem-1' },
+          'coordinator',
+        ),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('refuses to let a coordinator assign themselves', async () => {
+      dispatchTarget('ben-mem-1');
+      await expect(
+        service.coordinatorDispatch(
+          'org-1',
+          'req-1',
+          { volunteerMembershipId: 'vol-mem-1' },
+          'user-vol-1',
+        ),
+      ).rejects.toThrow(ForbiddenException);
     });
   });
 

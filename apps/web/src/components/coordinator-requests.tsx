@@ -8,6 +8,7 @@ import {
   indiaISO,
   indiaTime,
   dispatchMessage,
+  reviewReasonLabel,
 } from '@/lib/request-utils';
 
 type Person = {
@@ -51,6 +52,16 @@ type Snapshot = {
     offerExpiresAt: string;
     confirmedSchedule: string | null;
     scheduledStartTime: string | null;
+    startedAt: string | null;
+    finishedAt: string | null;
+    reportedMinutes: number | null;
+    completionNotes: string | null;
+    confirmedAt: string | null;
+    reviewReason: string | null;
+    reviewNotes: string | null;
+    reviewMinutes: number | null;
+    reviewRequestedAt: string | null;
+    reviewResolvedAt: string | null;
   }[];
   rounds: {
     id: string;
@@ -188,6 +199,7 @@ export function CoordinatorRequests({
   const [status, setStatus] = useState(''),
     [urgency, setUrgency] = useState(''),
     [ward, setWard] = useState(''),
+    [needsReview, setNeedsReview] = useState(false),
     [page, setPage] = useState(1);
   const [list, setList] = useState<{ data: RequestRow[]; total: number } | null>(null);
   const [selected, setSelected] = useState(''),
@@ -209,6 +221,7 @@ export function CoordinatorRequests({
       ...(status ? { status } : {}),
       ...(urgency ? { urgency } : {}),
       ...(ward ? { ward } : {}),
+      ...(needsReview ? { needsReview: 'true' } : {}),
     });
     backend<{ data: RequestRow[]; total: number }>(
       `${base}/requests?${query}`,
@@ -225,7 +238,7 @@ export function CoordinatorRequests({
       });
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, revision, status, urgency, ward, page]);
+  }, [base, revision, status, urgency, ward, needsReview, page]);
   useEffect(() => {
     const controller = new AbortController();
     setDetail(null);
@@ -316,7 +329,40 @@ export function CoordinatorRequests({
     });
   }
   const request = detail?.request;
-  const mutable = request && !['IN_PROGRESS', 'COMPLETED', 'CANCELLED'].includes(request.status);
+  const mutable =
+    request &&
+    !['IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'EXPIRED_UNMATCHED'].includes(request.status);
+  const decideVisit = (assignment: Snapshot['assignments'][number], pay: boolean) => {
+    const unfinished = assignment.status === 'IN_PROGRESS';
+    openAction({
+      title: pay ? 'Pay for this visit' : 'Mark as not delivered',
+      description: pay
+        ? 'Time credits go to the volunteer. This cannot be undone here.'
+        : 'No time credits are paid for this visit.',
+      submitLabel: pay ? 'Pay credits' : 'Not delivered',
+      fields: [
+        ...(pay
+          ? [
+              {
+                key: 'minutes',
+                label: 'Minutes to pay',
+                type: 'number',
+                optional: !unfinished,
+                min: '1',
+                max: String(assignment.reportedMinutes ?? 720),
+              },
+            ]
+          : []),
+        { key: 'notes', label: 'Reason for this decision', minLength: 3, maxLength: 500 },
+      ],
+      submit: (v) =>
+        backend(`${base}/requests/${selected}/assignments/${assignment.id}/resolve`, 'POST', {
+          decision: pay ? 'PAY' : 'REJECT',
+          ...(v.minutes ? { minutes: Number(v.minutes) } : {}),
+          notes: v.notes,
+        }),
+    });
+  };
   const progressing = request && ['MATCHING_ACTIVE', 'PARTIALLY_ACCEPTED'].includes(request.status);
   const postAction = (name: string, suffix: string, description: string) =>
     openAction({
@@ -363,6 +409,17 @@ export function CoordinatorRequests({
               </option>
             ))}
           </select>
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            checked={needsReview}
+            onChange={(e) => {
+              setNeedsReview(e.target.checked);
+              setPage(1);
+            }}
+          />{' '}
+          Waiting for my decision
         </label>
         <label>
           Urgency
@@ -623,7 +680,42 @@ export function CoordinatorRequests({
                   {a.status === 'OFFERED' ? ` · Expires ${indiaTime(a.offerExpiresAt)}` : ''}
                   {` · Offered schedule ${indiaTime(a.scheduledStartTime)}`}
                 </p>
+                {a.startedAt && (
+                  <p className="help-text">
+                    Started {indiaTime(a.startedAt)}
+                    {a.finishedAt
+                      ? ` · Finished ${indiaTime(a.finishedAt)} · Reported ${a.reportedMinutes} minutes`
+                      : ''}
+                    {a.completionNotes ? ` · ${a.completionNotes}` : ''}
+                  </p>
+                )}
+                {a.reviewRequestedAt && !a.reviewResolvedAt && (
+                  <p className="help-text">
+                    <strong>{reviewReasonLabel(a.reviewReason)}.</strong>
+                    {a.reviewNotes ? ` “${a.reviewNotes}”` : ''}
+                    {a.reviewMinutes ? ` Confirmed ${a.reviewMinutes} minutes.` : ''}
+                  </p>
+                )}
               </div>
+              {(a.status === 'IN_PROGRESS' ||
+                (a.status === 'COMPLETED' && a.reviewRequestedAt && !a.reviewResolvedAt)) && (
+                <div className="action-row">
+                  <button
+                    className="btn btn-secondary"
+                    disabled={pending}
+                    onClick={() => decideVisit(a, true)}
+                  >
+                    Pay for visit
+                  </button>
+                  <button
+                    className="btn btn-danger"
+                    disabled={pending}
+                    onClick={() => decideVisit(a, false)}
+                  >
+                    Not delivered
+                  </button>
+                </div>
+              )}
             </div>
           ))}
           <h3>Matching rounds</h3>

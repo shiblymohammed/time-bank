@@ -153,6 +153,22 @@ export class AdminController {
     return this.adminService.revokeOrganizationRole(orgId, roleGrantId, dto, adminId, ip);
   }
 
+  @Post('organizations/:id/roles/:roleGrantId/approve')
+  @ApiOperation({
+    summary: 'Approve a waiting Super Admin grant',
+    description: 'A second Super Admin, not the one who asked, turns the role on.',
+  })
+  @ApiResponse({ status: 201, description: 'Role approved' })
+  async approveOrgRole(
+    @Param('id', ParseUUIDPipe) orgId: string,
+    @Param('roleGrantId', ParseUUIDPipe) roleGrantId: string,
+    @CurrentUserId() adminId: string,
+    @Req() req: Request,
+  ) {
+    const ip = req.ip ?? req.socket.remoteAddress;
+    return this.adminService.approveOrganizationRole(orgId, roleGrantId, adminId, ip);
+  }
+
   @Get('audit-logs')
   @ApiOperation({
     summary: 'Query and filter global audit trail',

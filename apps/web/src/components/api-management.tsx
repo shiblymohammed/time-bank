@@ -90,8 +90,16 @@ export function ApiManagement({ target, onClose, onChanged, onError }: Props) {
     setError('');
     setNotice('');
     try {
-      await api(path, { method, body: JSON.stringify(body) });
-      setNotice('Saved successfully.');
+      const result = await api<{ status?: string; data?: { status?: string } }>(path, {
+        method,
+        body: JSON.stringify(body),
+      });
+      const waiting = (result?.data?.status ?? result?.status) === 'PENDING_APPROVAL';
+      setNotice(
+        waiting
+          ? 'Saved. A second Super Admin must approve this before it takes effect.'
+          : 'Saved successfully.',
+      );
       setRevision((value) => value + 1);
       onChanged();
     } catch (cause) {

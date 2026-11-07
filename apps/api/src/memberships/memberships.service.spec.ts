@@ -30,6 +30,13 @@ describe('MembershipsService', () => {
 
   const mockOrgRepo = {
     findOne: jest.fn(),
+    createQueryBuilder: jest.fn(() => ({
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      returning: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({ raw: [{ membership_sequence: 5 }] }),
+    })),
   };
 
   const mockUserRepo = {
@@ -59,6 +66,7 @@ describe('MembershipsService', () => {
     findOne: jest.fn(),
     create: jest.fn(),
     save: jest.fn(),
+    update: jest.fn().mockResolvedValue({ affected: 1 }),
     createQueryBuilder: jest.fn(),
     manager: mockManager,
   };
@@ -346,6 +354,36 @@ describe('MembershipsService', () => {
     });
   });
 
+  describe('approveMembership guards', () => {
+    it.each([MembershipStatus.SUSPENDED, MembershipStatus.REVOKED])(
+      'refuses to approve a %s membership',
+      async (status) => {
+        mockMembershipRepo.findOne.mockResolvedValueOnce({ id: 'm-1', userId: 'u-1', status });
+
+        await expect(service.approveMembership('org-1', 'm-1', 'admin-1', {})).rejects.toThrow(
+          BadRequestException,
+        );
+        expect(mockMembershipRepo.update).not.toHaveBeenCalled();
+      },
+    );
+
+    it('lets only one of two simultaneous approvals continue', async () => {
+      mockMembershipRepo.findOne.mockResolvedValueOnce({
+        id: 'm-1',
+        userId: 'u-1',
+        status: MembershipStatus.PENDING_REVIEW,
+        requestedRole: UserRole.VOLUNTEER,
+      });
+      mockOrgRepo.findOne.mockResolvedValueOnce({ id: 'org-1', code: 'KOTTAKKAL' });
+      mockMembershipRepo.update.mockResolvedValueOnce({ affected: 0 });
+
+      await expect(service.approveMembership('org-1', 'm-1', 'admin-1', {})).rejects.toThrow(
+        ConflictException,
+      );
+      expect(mockRoleGrantRepo.save).not.toHaveBeenCalled();
+    });
+  });
+
   describe('approveMembership with application answers', () => {
     const approvable = (extra: object) => {
       const membership = {
@@ -497,6 +535,24 @@ describe('MembershipsService', () => {
         expect.objectContaining({ eventType: 'MEMBERSHIP_DOCUMENT_REVIEWED' }),
       );
     });
+  });
+
+  it('stops a reviewer approving their own document', async () => {
+    mockAuthorizationService.assertNoSelfEscalation.mockImplementation(() => {
+      throw new ForbiddenException('Self-escalation denied');
+    });
+    mockDocumentRepo.findOne.mockResolvedValueOnce({
+      id: 'doc-1',
+      reviewStatus: 'PENDING',
+      membership: { organizationId: 'org-1', userId: 'reviewer-1' },
+    });
+
+    await expect(
+      service.reviewDocument('org-1', 'doc-1', 'reviewer-1', {
+        status: DocumentReviewStatus.APPROVED,
+      }),
+    ).rejects.toThrow(ForbiddenException);
+    expect(mockDocumentRepo.save).not.toHaveBeenCalled();
   });
 
   describe('grantRole and revokeRole', () => {

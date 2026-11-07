@@ -33,6 +33,14 @@ import {
   EvaluatedMembershipContext,
 } from '../authorization/authorization.service';
 import { TimeLedgerService } from '../time-ledger/time-ledger.service';
+import { NotificationsService } from '../notifications/notifications.service';
+
+const mockNotifications = {
+  notifyUsers: jest.fn(),
+  notifyMemberships: jest.fn(),
+  notifyRequestOwners: jest.fn(),
+  notifyCoordinators: jest.fn(),
+};
 
 describe('RequestsService', () => {
   let service: RequestsService;
@@ -133,6 +141,7 @@ describe('RequestsService', () => {
         { provide: MatchingService, useValue: mockMatchingService },
         { provide: AuditService, useValue: mockAuditService },
         { provide: TimeLedgerService, useValue: {} },
+        { provide: NotificationsService, useValue: mockNotifications },
         {
           provide: AuthorizationService,
           useValue: {
@@ -214,6 +223,35 @@ describe('RequestsService', () => {
       expect(result).toBe(existingReq);
       expect(mockRequestRepo.save).not.toHaveBeenCalled();
       expect(mockMatchingService.findCandidatesAndDispatchOffers).not.toHaveBeenCalled();
+    });
+
+    it('refuses a retry from a caregiver who has since been removed', async () => {
+      mockOrgRepo.findOne.mockResolvedValue({ id: 'org-1', code: 'KZK' });
+      mockRequestRepo.findOne.mockResolvedValueOnce({
+        id: 'existing-req',
+        createdByUserId: 'user-1',
+        beneficiaryMembershipId: 'someone-else',
+      });
+      (service as any).authorizationService.evaluateOrganizationAccess.mockResolvedValueOnce({
+        isSuperAdmin: false,
+        roles: [UserRole.CAREGIVER],
+        membershipId: 'caregiver-1',
+      });
+      mockBeneficiariesService.verifyCaregiverProxyAccess.mockRejectedValueOnce(
+        new ForbiddenException('Authorization revoked'),
+      );
+
+      await expect(
+        service.createRequest('org-1', 'user-1', {
+          idempotencyKey: 'idem-1',
+          serviceCatalogId: 'cat-item-1',
+          urgency: UrgencyType.IMMEDIATE,
+          scheduledStartTime: new Date().toISOString(),
+          locationAddressText: 'Some Address',
+          locationWardNumber: '1',
+          locationPostalCode: '676503',
+        }),
+      ).rejects.toThrow('You can no longer book for this beneficiary');
     });
 
     it('throws ConflictException on identical active request duplicate without idempotencyKey', async () => {
@@ -655,7 +693,7 @@ describe('RequestsService', () => {
       };
 
       const result = await service.getRequestById('org-1', 'req-1', 'user-1', coordCtx);
-      expect(result).toBe(req);
+      expect(result).toMatchObject(req);
     });
 
     it('returns request for authorized beneficiary owner', async () => {
@@ -672,7 +710,91 @@ describe('RequestsService', () => {
       };
 
       const result = await service.getRequestById('org-1', 'req-1', 'user-1', benCtx);
-      expect(result).toBe(req);
+      expect(result).toMatchObject(req);
+    });
+
+    describe('what a reader receives', () => {
+      const memberCtx = (roles: UserRole[]): EvaluatedMembershipContext => ({
+        userId: 'user-1',
+        membershipId: 'ben-mem-1',
+        organizationId: 'org-1',
+        membershipStatus: MembershipStatus.APPROVED,
+        isSuperAdmin: false,
+        roles,
+      });
+      const request = () => ({
+        id: 'req-1',
+        organizationId: 'org-1',
+        beneficiaryMembershipId: 'ben-mem-1',
+        beneficiaryMembership: {
+          id: 'ben-mem-1',
+          membershipNumber: 'KTB-2026-0001',
+          applicationNotes: 'private',
+          user: { phoneE164: '+919000000001' },
+        },
+        assignments: [
+          {
+            id: 'helper',
+            status: VolunteerAssignmentStatus.COMPLETED,
+            volunteerMembershipId: 'vol-1',
+            volunteerMembership: {
+              applicationDetails: { private: true },
+              user: { phoneE164: '+919000000002' },
+            },
+          },
+          {
+            id: 'declined',
+            status: VolunteerAssignmentStatus.DECLINED,
+            volunteerMembershipId: 'vol-2',
+            declineReason: 'private',
+          },
+        ],
+      });
+
+      it('gives a beneficiary no phone numbers, answers or declined offers', async () => {
+        mockRequestRepo.findOne.mockResolvedValue(request());
+
+        const result = await service.getRequestById(
+          'org-1',
+          'req-1',
+          'user-1',
+          memberCtx([UserRole.BENEFICIARY]),
+        );
+
+        expect(JSON.stringify(result)).not.toMatch(/phoneE164|application|private/);
+        expect(result.assignments?.map((a) => a.id)).toEqual(['helper']);
+        expect(result.beneficiaryMembership).toEqual({
+          id: 'ben-mem-1',
+          membershipNumber: 'KTB-2026-0001',
+        });
+      });
+
+      it('shows staff every offer without member records', async () => {
+        mockRequestRepo.findOne.mockResolvedValue(request());
+
+        const result = await service.getRequestById(
+          'org-1',
+          'req-1',
+          'user-1',
+          memberCtx([UserRole.COORDINATOR]),
+        );
+
+        expect(result.assignments?.map((a) => a.id)).toEqual(['helper', 'declined']);
+        expect(JSON.stringify(result)).not.toContain('phoneE164');
+      });
+
+      it('ends access for a caregiver who created the request once removed', async () => {
+        mockRequestRepo.findOne.mockResolvedValue({
+          ...request(),
+          beneficiaryMembershipId: 'someone-else',
+          createdByUserId: 'user-1',
+        });
+        mockBeneficiariesService.verifyCaregiverProxyAccess.mockRejectedValue(new Error());
+
+        await expect(
+          service.getRequestById('org-1', 'req-1', 'user-1', memberCtx([UserRole.CAREGIVER])),
+        ).rejects.toThrow(ForbiddenException);
+      });
     });
 
     it('throws ForbiddenException for unauthorized member viewing another beneficiary request', async () => {

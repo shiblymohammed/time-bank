@@ -1,4 +1,5 @@
 import {
+  Logger,
   Injectable,
   Inject,
   NotFoundException,
@@ -19,6 +20,7 @@ import {
   VolunteerAssignmentStatus,
   UrgencyType,
   MatchingRoundStatus,
+  OrganizationStatus,
 } from '@ktb/shared-types';
 
 import { VolunteerSkill } from './entities/volunteer-skill.entity';
@@ -37,6 +39,12 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { MatchingConfigService } from './matching-config.service';
 import { assignmentSchedule } from './assignment-schedule';
+import {
+  FINISH_REMINDER_GRACE_MINUTES,
+  NO_SHOW_GRACE_MINUTES,
+  UNFILLED_GRACE_MINUTES,
+  openHelpCount,
+} from './booking-recovery';
 import {
   CANDIDATE_RANKING_STRATEGY,
   CandidateRankingStrategy,
@@ -64,8 +72,25 @@ export const MAX_SERVICE_MINUTES = 720;
 /** Unfilled requests handled per worker run; the next run picks up any remainder. */
 const PROGRESSION_BATCH_SIZE = 50;
 
+/**
+ * SQL over an assignment aliased `a`: its volunteer would no longer pass lockVolunteer.
+ * Keep the two in step.
+ */
+const INELIGIBLE_VOLUNTEER = `NOT EXISTS (
+  SELECT 1 FROM organization_memberships vm
+  JOIN users vu ON vu.id = vm.user_id
+  WHERE vm.id = a.volunteer_membership_id
+    AND vm.status = 'APPROVED'
+    AND vu.status = 'ACTIVE'
+    AND EXISTS (SELECT 1 FROM membership_role_grants vg
+      WHERE vg.membership_id = vm.id AND vg.role = 'VOLUNTEER' AND vg.status = 'ACTIVE')
+    AND NOT EXISTS (SELECT 1 FROM global_account_restrictions vr
+      WHERE vr.user_id = vu.id AND vr.status = 'ACTIVE'))`;
+
 @Injectable()
 export class MatchingService {
+  private readonly logger = new Logger(MatchingService.name);
+
   constructor(
     @InjectRepository(VolunteerSkill)
     private readonly skillRepo: Repository<VolunteerSkill>,
@@ -360,6 +385,7 @@ export class MatchingService {
     if (!membership || membership.status !== MembershipStatus.APPROVED) {
       throw new NotFoundException('Volunteer membership not found or not approved');
     }
+    this.authorizationService.assertNoSelfEscalation(coordinatorId, membership.userId);
 
     let skill = await this.skillRepo.findOne({
       where: { membershipId: dto.membershipId, skillCode: dto.skillCode },
@@ -428,6 +454,11 @@ export class MatchingService {
       order: { offeredAt: 'DESC' },
       take: 100,
     });
+    // The address goes only to the volunteer who has taken the booking, and only while
+    // the visit is ahead of them. An offer is sent to several people.
+    const needsAddress = (status: VolunteerAssignmentStatus) =>
+      status === VolunteerAssignmentStatus.ACCEPTED ||
+      status === VolunteerAssignmentStatus.IN_PROGRESS;
     return assignments.map((assignment) => ({
       id: assignment.id,
       organizationId: assignment.organizationId,
@@ -457,7 +488,9 @@ export class MatchingService {
             status: assignment.serviceRequest.status,
             scheduledStartTime: assignment.serviceRequest.scheduledStartTime,
             expectedDurationMinutes: assignment.serviceRequest.expectedDurationMinutes,
-            locationAddressText: assignment.serviceRequest.locationAddressText,
+            locationAddressText: needsAddress(assignment.status)
+              ? assignment.serviceRequest.locationAddressText
+              : null,
             locationWardNumber: assignment.serviceRequest.locationWardNumber,
           }
         : null,
@@ -569,6 +602,13 @@ export class MatchingService {
         }),
       );
     }
+    await this.notifications.notifyMemberships(manager, [...targets.keys()], {
+      organizationId: request.organizationId,
+      requestId: request.id,
+      type: 'BOOKING_TIME_CHANGED',
+      title: 'Visit time changed',
+      body: 'Open the app and confirm whether you can still help at the new time.',
+    });
     await this.findCandidatesAndDispatchOffers(request, 1, manager);
   }
 
@@ -663,9 +703,8 @@ export class MatchingService {
       .andWhere('rg.role = :role', { role: UserRole.VOLUNTEER })
       .andWhere('rg.status = :rgStatus', { rgStatus: RoleGrantStatus.ACTIVE });
 
-    if (!request.allowsCrossOrgVolunteers) {
-      query.andWhere('m.organizationId = :orgId', { orgId });
-    }
+    // Accepting and every later step need a membership here, so nobody else gets an offer.
+    query.andWhere('m.organizationId = :orgId', { orgId });
 
     // Do not match beneficiary themselves as volunteer
     query.andWhere('m.id != :benMemId', { benMemId: request.beneficiaryMembershipId });
@@ -1119,6 +1158,13 @@ export class MatchingService {
         request.status = ServiceRequestStatus.PARTIALLY_ACCEPTED;
       }
       await manager.save(ServiceRequest, request);
+      await this.notifications.notifyRequestOwners(manager, request, {
+        organizationId: orgId,
+        requestId: request.id,
+        type: 'VOLUNTEER_ACCEPTED',
+        title: 'A volunteer is coming',
+        body: 'A volunteer accepted your request. Open the app for details.',
+      });
 
       // Audit log
       await this.auditService.logEvent(
@@ -1154,39 +1200,41 @@ export class MatchingService {
     dto: DeclineVolunteerOfferDto,
     ipAddress?: string,
   ): Promise<VolunteerAssignment> {
-    const assignment = await this.assignmentRepo.findOne({
-      where: {
-        id: assignmentId,
-        organizationId: orgId,
+    // The same request-then-assignment locks as acceptance, so a decline can never
+    // overwrite an acceptance that committed a moment earlier.
+    return this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const { assignment } = await this.lockOwnAssignment(
+        manager,
+        orgId,
+        assignmentId,
         volunteerMembershipId,
-      },
+      );
+      if (assignment.status !== VolunteerAssignmentStatus.OFFERED) {
+        throw new BadRequestException(`Cannot decline assignment in status '${assignment.status}'`);
+      }
+
+      assignment.status = VolunteerAssignmentStatus.DECLINED;
+      assignment.declinedAt = new Date();
+      assignment.declineReason = dto.declineReason ?? 'Declined by volunteer';
+      const saved = await manager.save(VolunteerAssignment, assignment);
+
+      const volunteer = await manager.findOne(OrganizationMembership, {
+        where: { id: volunteerMembershipId, organizationId: orgId },
+      });
+      await this.auditService.logEvent(
+        {
+          eventType: 'VOLUNTEER_OFFER_DECLINED',
+          actorId: volunteer?.userId ?? null,
+          targetId: saved.id,
+          targetType: 'volunteer_assignments',
+          organizationId: orgId,
+          payload: { reason: saved.declineReason },
+          ipAddress: ipAddress ?? null,
+        },
+        manager,
+      );
+      return saved;
     });
-
-    if (!assignment) {
-      throw new NotFoundException(`Assignment offer '${assignmentId}' not found`);
-    }
-
-    if (assignment.status !== VolunteerAssignmentStatus.OFFERED) {
-      throw new BadRequestException(`Cannot decline assignment in status '${assignment.status}'`);
-    }
-
-    assignment.status = VolunteerAssignmentStatus.DECLINED;
-    assignment.declinedAt = new Date();
-    assignment.declineReason = dto.declineReason ?? 'Declined by volunteer';
-
-    const saved = await this.assignmentRepo.save(assignment);
-
-    await this.auditService.logEvent({
-      eventType: 'VOLUNTEER_OFFER_DECLINED',
-      actorId: null,
-      targetId: saved.id,
-      targetType: 'volunteer_assignments',
-      organizationId: orgId,
-      payload: { reason: saved.declineReason },
-      ipAddress: ipAddress ?? null,
-    });
-
-    return saved;
   }
 
   // ─── Volunteer Withdrawal (D#31, D#32, BR-06) ──────────────────────────────
@@ -1234,20 +1282,18 @@ export class MatchingService {
       const savedAssignment = await manager.save(VolunteerAssignment, assignment);
 
       if (request) {
-        const remainingAccepted = await manager.count(VolunteerAssignment, {
-          where: {
-            serviceRequestId: request.id,
-            status: VolunteerAssignmentStatus.ACCEPTED,
-          },
+        await this.settleAfterDeparture(manager, request);
+        await this.notifications.notifyRequestOwners(manager, request, {
+          organizationId: orgId,
+          requestId: request.id,
+          type: 'VOLUNTEER_WITHDREW',
+          title: 'Your volunteer cannot come',
+          body:
+            request.status === ServiceRequestStatus.MATCHING_ACTIVE ||
+            request.status === ServiceRequestStatus.PARTIALLY_ACCEPTED
+              ? 'We are looking for someone else. Open the app for details.'
+              : 'Open the app for details.',
         });
-
-        if (remainingAccepted < request.minVolunteers) {
-          request.status =
-            remainingAccepted > 0
-              ? ServiceRequestStatus.PARTIALLY_ACCEPTED
-              : ServiceRequestStatus.MATCHING_ACTIVE;
-          await manager.save(ServiceRequest, request);
-        }
       }
 
       await this.auditService.logEvent(
@@ -1273,6 +1319,40 @@ export class MatchingService {
   // ─── Service Start and Finish ───────────────────────────────────────────────
   // Locks the request, then the volunteer's own assignment, in the same order
   // as withdrawal and acceptance so concurrent changes cannot interleave.
+  /**
+   * Recalculates a request after a volunteer leaves it. Once anyone has started, the visit
+   * stays under way: reopening it would send new offers and allow a cancellation around
+   * the person still helping.
+   */
+  private async settleAfterDeparture(
+    manager: EntityManager,
+    request: ServiceRequest,
+  ): Promise<void> {
+    const count = (statuses: VolunteerAssignmentStatus[]) =>
+      manager.count(VolunteerAssignment, {
+        where: { serviceRequestId: request.id, status: In(statuses) },
+      });
+    const started = await count([
+      VolunteerAssignmentStatus.IN_PROGRESS,
+      VolunteerAssignmentStatus.COMPLETED,
+    ]);
+    if (started > 0) {
+      if ((await openHelpCount(manager, request.id)) === 0) {
+        request.status = ServiceRequestStatus.COMPLETED;
+        await manager.save(ServiceRequest, request);
+      }
+      return;
+    }
+    const accepted = await count([VolunteerAssignmentStatus.ACCEPTED]);
+    if (accepted < request.minVolunteers) {
+      request.status =
+        accepted > 0
+          ? ServiceRequestStatus.PARTIALLY_ACCEPTED
+          : ServiceRequestStatus.MATCHING_ACTIVE;
+      await manager.save(ServiceRequest, request);
+    }
+  }
+
   private async lockOwnAssignment(
     manager: EntityManager,
     orgId: string,
@@ -1308,6 +1388,8 @@ export class MatchingService {
     now = new Date(),
   ): Promise<VolunteerAssignment> {
     return this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      // A banned or removed volunteer may not begin a visit at someone's home.
+      await this.lockVolunteer(manager, orgId, volunteerMembershipId);
       const { assignment, request } = await this.lockOwnAssignment(
         manager,
         orgId,
@@ -1399,6 +1481,13 @@ export class MatchingService {
       assignment.reportedMinutes = minutes;
       assignment.completionNotes = dto.notes?.trim() || null;
       const saved = await manager.save(VolunteerAssignment, assignment);
+      await this.notifications.notifyRequestOwners(manager, request, {
+        organizationId: orgId,
+        requestId: request.id,
+        type: 'SERVICE_FINISHED',
+        title: 'Please confirm the help',
+        body: 'A volunteer finished. Open the app to confirm or report a problem.',
+      });
       await this.auditService.logEvent(
         {
           eventType: 'SERVICE_FINISHED',
@@ -1491,6 +1580,17 @@ export class MatchingService {
           offeredAt: assignment.offeredAt,
           offerExpiresAt: assignment.offerExpiresAt,
           acceptedAt: assignment.acceptedAt ?? null,
+          startedAt: assignment.startedAt ?? null,
+          finishedAt: assignment.finishedAt ?? null,
+          reportedMinutes: assignment.reportedMinutes ?? null,
+          completionNotes: assignment.completionNotes ?? null,
+          confirmedAt: assignment.confirmedAt ?? null,
+          reviewReason: assignment.reviewReason ?? null,
+          reviewNotes: assignment.reviewNotes ?? null,
+          reviewMinutes: assignment.reviewMinutes ?? null,
+          reviewRequestedAt: assignment.reviewRequestedAt ?? null,
+          reviewResolvedAt: assignment.reviewResolvedAt ?? null,
+          reviewOutcome: assignment.reviewOutcome ?? null,
           scheduledStartTime: assignmentSchedule(
             { ...assignment, serviceRequest: request },
             reschedules,
@@ -1645,6 +1745,12 @@ export class MatchingService {
 
       if (!request) {
         throw new NotFoundException(`Service request '${requestId}' not found`);
+      }
+      if (dto.volunteerMembershipId === request.beneficiaryMembershipId) {
+        throw new BadRequestException('The person receiving help cannot be their own volunteer');
+      }
+      if (volunteer.userId === coordinatorId) {
+        throw new ForbiddenException('A coordinator cannot assign themselves as the volunteer');
       }
 
       const existing = await manager.findOne(VolunteerAssignment, {
@@ -1802,6 +1908,9 @@ export class MatchingService {
       .createQueryBuilder('request')
       .select('request.id', 'id')
       .addSelect('request.organizationId', 'organizationId')
+      .innerJoin('request.organization', 'organization', 'organization.status = :activeOrg', {
+        activeOrg: OrganizationStatus.ACTIVE,
+      })
       .where('request.status IN (:...statuses)', {
         statuses: [ServiceRequestStatus.MATCHING_ACTIVE, ServiceRequestStatus.PARTIALLY_ACCEPTED],
       })
@@ -1825,6 +1934,373 @@ export class MatchingService {
       .orderBy('request.createdAt', 'ASC')
       .limit(PROGRESSION_BATCH_SIZE)
       .getRawMany();
+  }
+
+  private async noticeEscalation(manager: EntityManager, request: ServiceRequest): Promise<void> {
+    const notice = { organizationId: request.organizationId, requestId: request.id };
+    await this.notifications.notifyCoordinators(manager, {
+      ...notice,
+      type: 'REQUEST_ESCALATED',
+      title: 'A request needs a volunteer',
+      body: 'Automatic matching could not fill this request. Open the admin panel.',
+    });
+    await this.notifications.notifyRequestOwners(manager, request, {
+      ...notice,
+      type: 'REQUEST_ESCALATED',
+      title: 'Your coordinator is helping',
+      body: 'We could not find a volunteer yet, so your coordinator will arrange this.',
+    });
+  }
+
+  /** Each booking is handled alone, so one bad row cannot hold up the rest. */
+  async recoverBookings(now = new Date()): Promise<void> {
+    const activeOrganization = `JOIN organizations o ON o.id = r.organization_id AND o.status = 'ACTIVE'`;
+    const assignments = (condition: string): Promise<{ id: string }[]> =>
+      this.dataSource.query(
+        `SELECT a.id FROM volunteer_assignments a
+         JOIN service_requests r ON r.id = a.service_request_id ${activeOrganization}
+         WHERE ${condition} ORDER BY a.created_at LIMIT ${PROGRESSION_BATCH_SIZE}`,
+        [now],
+      );
+    const attempt = async (
+      rows: { id: string }[],
+      label: string,
+      handler: (id: string, at: Date) => Promise<void>,
+    ) => {
+      for (const { id } of rows) {
+        await handler(id, now).catch((error) =>
+          this.logger.error(`Could not ${label} (${id})`, error),
+        );
+      }
+    };
+
+    // First, so the freed places go back into matching on this same tick.
+    await attempt(
+      await assignments(
+        `a.status IN ('OFFERED', 'ACCEPTED') AND $1::timestamptz IS NOT NULL
+         AND ${INELIGIBLE_VOLUNTEER}`,
+      ),
+      'release an ineligible volunteer',
+      (id, at) => this.releaseIneligibleVolunteer(id, at),
+    );
+    await attempt(
+      await assignments(
+        `a.status = 'ACCEPTED'
+         AND r.status IN ('PARTIALLY_ACCEPTED', 'FULLY_MATCHED', 'IN_PROGRESS')
+         AND GREATEST(r.scheduled_start_time, a.accepted_at)
+           + interval '${NO_SHOW_GRACE_MINUTES} minutes' < $1`,
+      ),
+      'mark a no-show',
+      (id, at) => this.markNoShow(id, at),
+    );
+    await attempt(
+      await assignments(
+        `a.status = 'IN_PROGRESS'
+         AND a.started_at + interval '${MAX_SERVICE_MINUTES} minutes' < $1`,
+      ),
+      'close an unfinished visit',
+      (id, at) => this.closeUnfinishedVisit(id, at),
+    );
+    await attempt(
+      await assignments(
+        `a.status = 'IN_PROGRESS' AND a.finish_reminded_at IS NULL
+         AND a.started_at + (r.expected_duration_minutes + ${FINISH_REMINDER_GRACE_MINUTES})
+           * interval '1 minute' < $1`,
+      ),
+      'send a finish reminder',
+      (id, at) => this.remindToFinish(id, at),
+    );
+    await attempt(
+      await this.dataSource.query(
+        `SELECT r.id FROM service_requests r ${activeOrganization}
+         WHERE r.status IN ('MATCHING_ACTIVE', 'PARTIALLY_ACCEPTED', 'ESCALATED_TO_COORDINATOR')
+           AND r.scheduled_start_time + interval '${UNFILLED_GRACE_MINUTES} minutes' < $1
+           AND NOT EXISTS (SELECT 1 FROM volunteer_assignments a
+             WHERE a.service_request_id = r.id
+               AND a.status IN ('ACCEPTED', 'IN_PROGRESS', 'COMPLETED'))
+         ORDER BY r.scheduled_start_time LIMIT ${PROGRESSION_BATCH_SIZE}`,
+        [now],
+      ),
+      'expire an unfilled request',
+      (id, at) => this.expireUnfilledRequest(id, at),
+    );
+  }
+
+  private async lockForRecovery(
+    manager: EntityManager,
+    assignmentId: string,
+    expected: VolunteerAssignmentStatus | VolunteerAssignmentStatus[],
+  ): Promise<{ assignment: VolunteerAssignment; request: ServiceRequest } | null> {
+    const allowed = Array.isArray(expected) ? expected : [expected];
+    const found = await manager.findOne(VolunteerAssignment, { where: { id: assignmentId } });
+    if (!found) return null;
+    const request = await manager
+      .createQueryBuilder(ServiceRequest, 'req')
+      .setLock('pessimistic_write')
+      .where('req.id = :id', { id: found.serviceRequestId })
+      .getOne();
+    const assignment = await manager.findOne(VolunteerAssignment, {
+      where: { id: assignmentId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    return request && assignment && allowed.includes(assignment.status)
+      ? { assignment, request }
+      : null;
+  }
+
+  /**
+   * A volunteer who was banned, suspended, restricted, removed or lost the volunteer
+   * role gives up their offers and upcoming visits, and the request is matched again.
+   * Visits already under way are left to the coordinator.
+   */
+  async releaseIneligibleVolunteer(assignmentId: string, now = new Date()): Promise<void> {
+    await this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const locked = await this.lockForRecovery(manager, assignmentId, [
+        VolunteerAssignmentStatus.OFFERED,
+        VolunteerAssignmentStatus.ACCEPTED,
+      ]);
+      if (!locked) return;
+      const { assignment, request } = locked;
+      const stillIneligible: unknown[] = await manager.query(
+        `SELECT 1 FROM volunteer_assignments a WHERE a.id = $1 AND ${INELIGIBLE_VOLUNTEER}`,
+        [assignment.id],
+      );
+      if (stillIneligible.length === 0) return;
+
+      const wasAccepted = assignment.status === VolunteerAssignmentStatus.ACCEPTED;
+      assignment.status = wasAccepted
+        ? VolunteerAssignmentStatus.WITHDRAWN
+        : VolunteerAssignmentStatus.CANCELLED;
+      assignment.withdrawnAt = now;
+      assignment.withdrawalReason = 'Volunteer is no longer available';
+      await manager.save(VolunteerAssignment, assignment);
+
+      if (wasAccepted) {
+        await this.settleAfterDeparture(manager, request);
+        const notice = { organizationId: request.organizationId, requestId: request.id };
+        const searching = [
+          ServiceRequestStatus.MATCHING_ACTIVE,
+          ServiceRequestStatus.PARTIALLY_ACCEPTED,
+        ].includes(request.status);
+        await this.notifications.notifyRequestOwners(manager, request, {
+          ...notice,
+          type: 'VOLUNTEER_WITHDREW',
+          title: 'Your volunteer cannot come',
+          body: searching
+            ? 'We are looking for someone else. Open the app for details.'
+            : 'Open the app for details.',
+        });
+        await this.notifications.notifyCoordinators(manager, {
+          ...notice,
+          type: 'VOLUNTEER_RELEASED',
+          title: 'A volunteer was taken off a visit',
+          body: 'Their account or volunteer role is no longer active. Open the admin panel.',
+        });
+      }
+      await this.auditService.logEvent(
+        {
+          eventType: 'VOLUNTEER_RELEASED_INELIGIBLE',
+          actorId: null,
+          targetId: assignment.id,
+          targetType: 'volunteer_assignments',
+          organizationId: request.organizationId,
+          payload: {
+            serviceRequestId: request.id,
+            previousStatus: wasAccepted
+              ? VolunteerAssignmentStatus.ACCEPTED
+              : VolunteerAssignmentStatus.OFFERED,
+            requestStatus: request.status,
+          },
+        },
+        manager,
+      );
+    });
+  }
+
+  /** The time has passed, so a coordinator takes over rather than another matching round. */
+  async markNoShow(assignmentId: string, now = new Date()): Promise<void> {
+    await this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const locked = await this.lockForRecovery(
+        manager,
+        assignmentId,
+        VolunteerAssignmentStatus.ACCEPTED,
+      );
+      if (!locked) return;
+      const { assignment, request } = locked;
+      assignment.status = VolunteerAssignmentStatus.NO_SHOW;
+      assignment.withdrawnAt = now;
+      assignment.withdrawalReason = 'Did not start the visit';
+      await manager.save(VolunteerAssignment, assignment);
+      await this.settleAfterDeparture(manager, request);
+
+      const notice = { organizationId: request.organizationId, requestId: request.id };
+      await this.notifications.notifyMemberships(manager, [assignment.volunteerMembershipId], {
+        ...notice,
+        type: 'VISIT_MISSED',
+        title: 'Visit marked as missed',
+        body: 'You did not start this visit. Contact your coordinator if this is wrong.',
+      });
+      const uncovered = [
+        ServiceRequestStatus.MATCHING_ACTIVE,
+        ServiceRequestStatus.PARTIALLY_ACCEPTED,
+      ].includes(request.status);
+      const accepted = await manager.count(VolunteerAssignment, {
+        where: { serviceRequestId: request.id, status: VolunteerAssignmentStatus.ACCEPTED },
+      });
+      if (uncovered && accepted === 0) {
+        request.status = ServiceRequestStatus.ESCALATED_TO_COORDINATOR;
+        request.escalatedAt = now;
+        await manager.save(ServiceRequest, request);
+        await manager.update(
+          VolunteerAssignment,
+          { serviceRequestId: request.id, status: VolunteerAssignmentStatus.OFFERED },
+          { status: VolunteerAssignmentStatus.CANCELLED },
+        );
+        await this.noticeEscalation(manager, request);
+      } else {
+        await this.notifications.notifyCoordinators(manager, {
+          ...notice,
+          type: 'VISIT_MISSED',
+          title: 'A volunteer missed a visit',
+          body: 'One volunteer did not start. Open the admin panel to check this request.',
+        });
+      }
+      await this.auditService.logEvent(
+        {
+          eventType: 'VOLUNTEER_NO_SHOW',
+          actorId: null,
+          targetId: assignment.id,
+          targetType: 'volunteer_assignments',
+          organizationId: request.organizationId,
+          payload: { serviceRequestId: request.id, requestStatus: request.status },
+        },
+        manager,
+      );
+    });
+  }
+
+  async remindToFinish(assignmentId: string, now = new Date()): Promise<void> {
+    await this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const locked = await this.lockForRecovery(
+        manager,
+        assignmentId,
+        VolunteerAssignmentStatus.IN_PROGRESS,
+      );
+      if (!locked) return;
+      const { assignment, request } = locked;
+      assignment.finishRemindedAt = now;
+      await manager.save(VolunteerAssignment, assignment);
+      await this.notifications.notifyMemberships(manager, [assignment.volunteerMembershipId], {
+        organizationId: request.organizationId,
+        requestId: request.id,
+        type: 'FINISH_REMINDER',
+        title: 'Have you finished?',
+        body: 'Your visit is still running. Open the app and press Finish when you are done.',
+      });
+    });
+  }
+
+  /** Records the expected time, not the 12 hours on the clock. The member still confirms it. */
+  async closeUnfinishedVisit(assignmentId: string, now = new Date()): Promise<void> {
+    await this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const locked = await this.lockForRecovery(
+        manager,
+        assignmentId,
+        VolunteerAssignmentStatus.IN_PROGRESS,
+      );
+      if (!locked) return;
+      const { assignment, request } = locked;
+      assignment.status = VolunteerAssignmentStatus.COMPLETED;
+      assignment.finishedAt = now;
+      assignment.reportedMinutes = Math.min(request.expectedDurationMinutes, MAX_SERVICE_MINUTES);
+      assignment.completionNotes = 'Closed automatically because Finish was not pressed.';
+      await manager.save(VolunteerAssignment, assignment);
+      const notice = { organizationId: request.organizationId, requestId: request.id };
+      await this.notifications.notifyMemberships(manager, [assignment.volunteerMembershipId], {
+        ...notice,
+        type: 'VISIT_CLOSED',
+        title: 'Your visit was closed',
+        body: 'Finish was not pressed, so the expected time was recorded.',
+      });
+      await this.notifications.notifyRequestOwners(manager, request, {
+        ...notice,
+        type: 'SERVICE_FINISHED',
+        title: 'Please confirm the help',
+        body: 'A visit was closed. Open the app to confirm or report a problem.',
+      });
+      await this.auditService.logEvent(
+        {
+          eventType: 'SERVICE_CLOSED_AUTOMATICALLY',
+          actorId: null,
+          targetId: assignment.id,
+          targetType: 'volunteer_assignments',
+          organizationId: request.organizationId,
+          payload: { serviceRequestId: request.id, minutes: assignment.reportedMinutes },
+        },
+        manager,
+      );
+    });
+  }
+
+  async expireUnfilledRequest(requestId: string, now = new Date()): Promise<void> {
+    await this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const request = await manager.getRepository(ServiceRequest).findOne({
+        where: { id: requestId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (
+        !request ||
+        ![
+          ServiceRequestStatus.MATCHING_ACTIVE,
+          ServiceRequestStatus.PARTIALLY_ACCEPTED,
+          ServiceRequestStatus.ESCALATED_TO_COORDINATOR,
+        ].includes(request.status)
+      )
+        return;
+      const cutoff = new Date(request.scheduledStartTime).getTime();
+      if (now.getTime() <= cutoff + UNFILLED_GRACE_MINUTES * 60_000) return;
+      const helping = await manager.count(VolunteerAssignment, {
+        where: {
+          serviceRequestId: request.id,
+          status: In([
+            VolunteerAssignmentStatus.ACCEPTED,
+            VolunteerAssignmentStatus.IN_PROGRESS,
+            VolunteerAssignmentStatus.COMPLETED,
+          ]),
+        },
+      });
+      if (helping > 0) return;
+      request.status = ServiceRequestStatus.EXPIRED_UNMATCHED;
+      await manager.save(ServiceRequest, request);
+      await manager.update(
+        VolunteerAssignment,
+        { serviceRequestId: request.id, status: VolunteerAssignmentStatus.OFFERED },
+        { status: VolunteerAssignmentStatus.CANCELLED },
+      );
+      await manager.update(
+        MatchingRound,
+        { serviceRequestId: request.id, status: MatchingRoundStatus.ACTIVE },
+        { status: MatchingRoundStatus.EXPIRED },
+      );
+      await this.notifications.notifyRequestOwners(manager, request, {
+        organizationId: request.organizationId,
+        requestId: request.id,
+        type: 'REQUEST_EXPIRED',
+        title: 'No volunteer was found',
+        body: 'We could not find anyone for this request. You can ask again in the app.',
+      });
+      await this.auditService.logEvent(
+        {
+          eventType: 'SERVICE_REQUEST_EXPIRED',
+          actorId: null,
+          targetId: request.id,
+          targetType: 'service_requests',
+          organizationId: request.organizationId,
+          payload: { scheduledStartTime: request.scheduledStartTime },
+        },
+        manager,
+      );
+    });
   }
 
   async evaluateRoundProgression(orgId: string, requestId: string): Promise<ServiceRequest> {
@@ -1894,6 +2370,7 @@ export class MatchingService {
           request.status = ServiceRequestStatus.ESCALATED_TO_COORDINATOR;
           request.escalatedAt = new Date();
           await manager.getRepository(ServiceRequest).save(request);
+          await this.noticeEscalation(manager, request);
 
           await this.auditService.logEvent(
             {
@@ -1949,6 +2426,9 @@ export class MatchingService {
 
       const saved = await manager.getRepository(ServiceRequest).save(request);
 
+      if (saved.status === ServiceRequestStatus.ESCALATED_TO_COORDINATOR) {
+        await this.noticeEscalation(manager, saved);
+      }
       if (saved.status !== ServiceRequestStatus.ESCALATED_TO_COORDINATOR) {
         // Dispatch new offers to wider pool
         await this.findCandidatesAndDispatchOffers(saved, saved.matchingTier, manager);

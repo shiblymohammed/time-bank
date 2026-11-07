@@ -63,6 +63,7 @@ export class BeneficiariesService {
     if (membership.status !== MembershipStatus.APPROVED) {
       throw new BadRequestException('Cannot grant eligibility to unapproved membership');
     }
+    this.authorizationService.assertNoSelfEscalation(approverId, membership.userId);
 
     let eligibility = await this.eligibilityRepo.findOne({
       where: { organizationId: orgId, membershipId: dto.membershipId },
@@ -178,7 +179,9 @@ export class BeneficiariesService {
       .where('req.organizationId = :orgId', { orgId })
       .andWhere('req.beneficiaryMembershipId = :membershipId', { membershipId })
       .andWhere('req.createdAt >= :startOfMonth', { startOfMonth })
-      .andWhere('req.status != :cancelled', { cancelled: 'CANCELLED' })
+      .andWhere('req.status NOT IN (:...unserved)', {
+        unserved: ['CANCELLED', 'EXPIRED_UNMATCHED'],
+      })
       .getCount();
 
     if (monthCount >= eligibility.monthlyRequestQuota) {
@@ -253,22 +256,49 @@ export class BeneficiariesService {
       },
     });
 
-    if (existing && existing.status === CaregiverAuthorizationStatus.APPROVED) {
+    if (existing?.status === CaregiverAuthorizationStatus.APPROVED) {
       throw new ConflictException('Caregiver authorization already active');
     }
+    if (existing?.status === CaregiverAuthorizationStatus.PENDING_REVIEW) {
+      throw new ConflictException('This caregiver request is already waiting for review');
+    }
 
-    const auth = this.caregiverAuthRepo.create({
-      organizationId: orgId,
-      beneficiaryMembershipId: dto.beneficiaryMembershipId,
-      caregiverMembershipId: dto.caregiverMembershipId,
+    // One record per pair: a refused or ended relationship is reopened for a fresh review.
+    // The earlier decision stays in the audit log.
+    const fresh = {
       relationshipType: dto.relationshipType,
       status: CaregiverAuthorizationStatus.PENDING_REVIEW,
       authorizationDocumentId: dto.authorizationDocumentId ?? null,
       canInitiateRequests: dto.canInitiateRequests ?? true,
       canVerifyCompletions: dto.canVerifyCompletions ?? true,
-    });
+      approvedByUserId: null,
+      approvedAt: null,
+      revokedByUserId: null,
+      revokedAt: null,
+      revocationReason: null,
+    };
+    const previous = existing
+      ? { status: existing.status, revocationReason: existing.revocationReason ?? null }
+      : null;
+    const auth = existing
+      ? Object.assign(existing, fresh)
+      : this.caregiverAuthRepo.create({
+          organizationId: orgId,
+          beneficiaryMembershipId: dto.beneficiaryMembershipId,
+          caregiverMembershipId: dto.caregiverMembershipId,
+          ...fresh,
+        });
 
-    const saved = await this.caregiverAuthRepo.save(auth);
+    let saved: CaregiverAuthorization;
+    try {
+      saved = await this.caregiverAuthRepo.save(auth);
+    } catch (error) {
+      // Two requests for the same pair at once: the other one won.
+      if ((error as { code?: string }).code === '23505') {
+        throw new ConflictException('This caregiver request is already waiting for review');
+      }
+      throw error;
+    }
 
     await this.auditService.logEvent({
       eventType: 'CAREGIVER_AUTHORIZATION_REQUESTED',
@@ -280,6 +310,7 @@ export class BeneficiariesService {
         beneficiaryMembershipId: saved.beneficiaryMembershipId,
         caregiverMembershipId: saved.caregiverMembershipId,
         relationshipType: saved.relationshipType,
+        previous,
       },
       ipAddress: ipAddress ?? null,
     });
@@ -296,9 +327,27 @@ export class BeneficiariesService {
   ): Promise<CaregiverAuthorization> {
     const auth = await this.caregiverAuthRepo.findOne({
       where: { id: authorizationId, organizationId: orgId },
+      relations: ['beneficiaryMembership', 'caregiverMembership'],
     });
     if (!auth) {
       throw new NotFoundException(`Caregiver authorization '${authorizationId}' not found`);
+    }
+    const allowed =
+      auth.status === CaregiverAuthorizationStatus.PENDING_REVIEW
+        ? [CaregiverAuthorizationStatus.APPROVED, CaregiverAuthorizationStatus.REVOKED]
+        : auth.status === CaregiverAuthorizationStatus.APPROVED
+          ? [CaregiverAuthorizationStatus.REVOKED]
+          : [];
+    if (!allowed.includes(dto.status)) {
+      throw new BadRequestException(
+        `Cannot change a caregiver authorization from ${auth.status} to ${dto.status}`,
+      );
+    }
+    // Either side may end the relationship, but neither may approve it.
+    if (dto.status === CaregiverAuthorizationStatus.APPROVED) {
+      for (const member of [auth.beneficiaryMembership, auth.caregiverMembership]) {
+        if (member) this.authorizationService.assertNoSelfEscalation(reviewerId, member.userId);
+      }
     }
 
     auth.status = dto.status;

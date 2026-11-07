@@ -1391,6 +1391,60 @@ export default function AdminDashboard(): React.JSX.Element {
                                   )}
                               </div>
                             ))}
+                          {detail.membership.roleGrants
+                            .filter((grant) => grant.status === 'PENDING_APPROVAL')
+                            .map((grant) => (
+                              <div className="document-row" key={grant.id}>
+                                <span>
+                                  {label(grant.role)}{' '}
+                                  <span className="help-text">
+                                    · waiting for a second Super Admin
+                                  </span>
+                                </span>
+                                {isGlobal && (
+                                  <span>
+                                    <button
+                                      className="btn btn-sm btn-success"
+                                      onClick={() =>
+                                        openAction({
+                                          title: 'Approve Super Admin',
+                                          submitLabel: 'Approve',
+                                          description:
+                                            'This person gets full platform access. Only a Super Admin other than the one who asked can approve.',
+                                          fields: [],
+                                          submit: () =>
+                                            backend(
+                                              `/admin/organizations/${detail.membership.organizationId}/roles/${grant.id}/approve`,
+                                              'POST',
+                                              {},
+                                            ),
+                                        })
+                                      }
+                                    >
+                                      Approve
+                                    </button>{' '}
+                                    <button
+                                      className="btn btn-sm btn-danger"
+                                      onClick={() =>
+                                        openAction({
+                                          title: 'Cancel Super Admin request',
+                                          submitLabel: 'Cancel request',
+                                          fields: [{ key: 'reason', label: 'Reason' }],
+                                          submit: (values) =>
+                                            backend(
+                                              `/admin/organizations/${detail.membership.organizationId}/roles/${grant.id}`,
+                                              'DELETE',
+                                              values,
+                                            ),
+                                        })
+                                      }
+                                    >
+                                      Cancel
+                                    </button>
+                                  </span>
+                                )}
+                              </div>
+                            ))}
                         </section>
                       </div>
                       {['APPLIED', 'PENDING_REVIEW'].includes(detail.membership.status) && (

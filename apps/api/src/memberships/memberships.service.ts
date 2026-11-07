@@ -223,6 +223,18 @@ export class MembershipsService {
         .execute();
   }
 
+  /** Each call takes the next number atomically, so simultaneous approvals never share one. */
+  private async nextMembershipSequence(organizationId: string): Promise<number> {
+    const result = await this.orgRepo
+      .createQueryBuilder()
+      .update(Organization)
+      .set({ membershipSequence: () => 'membership_sequence + 1' })
+      .where('id = :organizationId', { organizationId })
+      .returning('membership_sequence')
+      .execute();
+    return Number((result.raw as { membership_sequence: number }[])[0]!.membership_sequence);
+  }
+
   /**
    * Approve a membership application and grant initial operational role (M2-14, D#2).
    */
@@ -245,6 +257,16 @@ export class MembershipsService {
     if (membership.status === MembershipStatus.APPROVED) {
       throw new BadRequestException('Membership is already approved');
     }
+    const previousStatus = membership.status;
+    if (
+      ![
+        MembershipStatus.APPLIED,
+        MembershipStatus.PENDING_REVIEW,
+        MembershipStatus.REJECTED,
+      ].includes(previousStatus)
+    ) {
+      throw new BadRequestException(`A ${previousStatus} membership cannot be approved`);
+    }
 
     const initialRole = dto.initialRole ?? membership.requestedRole ?? UserRole.VOLUNTEER;
     this.authorizationService.assertNoSelfEscalation(approverId, membership.userId, initialRole);
@@ -256,18 +278,24 @@ export class MembershipsService {
     }
 
     // Generate formatted sequential membership number: {ORG_CODE}-{YEAR}-{INDEX}
-    const approvedCount = await this.membershipRepo.count({
-      where: { organizationId, status: MembershipStatus.APPROVED },
-    });
     const year = new Date().getFullYear();
-    const membershipNumber = `${org.code}-${year}-${String(approvedCount + 1).padStart(4, '0')}`;
+    const sequence = await this.nextMembershipSequence(organizationId);
+    const membershipNumber = `${org.code}-${year}-${String(sequence).padStart(4, '0')}`;
 
-    membership.status = MembershipStatus.APPROVED;
-    membership.approvedAt = new Date();
-    membership.approvedBy = approverId;
-    membership.membershipNumber = membershipNumber;
-    membership.rejectionReason = null;
-    const saved = await this.membershipRepo.save(membership);
+    const approvedFields = {
+      status: MembershipStatus.APPROVED,
+      approvedAt: new Date(),
+      approvedBy: approverId,
+      membershipNumber,
+      rejectionReason: null,
+    };
+    // Only one of two simultaneous approvals may go on to grant the role.
+    const claimed = await this.membershipRepo.update(
+      { id: membershipId, organizationId, status: previousStatus },
+      approvedFields,
+    );
+    if (!claimed.affected) throw new ConflictException('Membership was already reviewed');
+    const saved = Object.assign(membership, approvedFields);
 
     // Grant initial role (default: VOLUNTEER)
     const existingGrant = await this.roleGrantRepo.findOne({
@@ -429,6 +457,7 @@ export class MembershipsService {
     if (!doc || doc.membership?.organizationId !== organizationId) {
       throw new NotFoundException('Document not found in this organization');
     }
+    this.authorizationService.assertNoSelfEscalation(reviewerId, doc.membership!.userId);
 
     doc.reviewStatus = dto.status;
     const saved = await this.documentRepo.save(doc);

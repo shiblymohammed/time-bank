@@ -56,6 +56,18 @@ function repository(rows: any[] = []) {
       if (!rows.includes(row)) rows.push(row);
       return row;
     }),
+    update: jest.fn(async (where: any, changes: any) => {
+      const found = rows.filter((row) => matches(row, where));
+      found.forEach((row) => Object.assign(row, changes));
+      return { affected: found.length };
+    }),
+    createQueryBuilder: jest.fn(() => ({
+      update: jest.fn().mockReturnThis(),
+      set: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      returning: jest.fn().mockReturnThis(),
+      execute: jest.fn().mockResolvedValue({ raw: [{ membership_sequence: 5 }] }),
+    })),
   };
 }
 
@@ -249,6 +261,7 @@ function fixture() {
     audit,
     authz,
     {} as any,
+    { notifyRequestOwners: jest.fn(), notifyMemberships: jest.fn() } as any,
   );
   const admin = new AdminService(
     users as any,
@@ -579,6 +592,28 @@ describe('Permission boundaries with real guards and services', () => {
     expect(result[0]!.serviceRequest).toMatchObject({ requestNumber: 'REQ-1' });
     expect(result[0]!.serviceRequest).not.toHaveProperty('beneficiaryNotes');
     expect(result[0]!.serviceRequest).not.toHaveProperty('beneficiaryMembership');
+  });
+
+  it.each([
+    ['OFFERED', null],
+    ['DECLINED', null],
+    ['TIMED_OUT', null],
+    ['ACCEPTED', '12 Private Road'],
+    ['IN_PROGRESS', '12 Private Road'],
+    ['COMPLETED', null],
+  ])('gives a volunteer with a %s assignment the address %s', async (status, expected) => {
+    const f = fixture();
+    f.assignmentRepo.rows.push({
+      id: 'own-assignment',
+      organizationId: f.orgId,
+      volunteerMembershipId: 'volunteer-membership',
+      status,
+      serviceRequest: { requestNumber: 'REQ-1', locationAddressText: '12 Private Road' },
+    });
+
+    const [row] = await f.matching.listMyAssignments(f.orgId, 'volunteer');
+
+    expect(row!.serviceRequest!.locationAddressText).toBe(expected);
   });
 
   it('rejects offer discovery without a current volunteer role', async () => {

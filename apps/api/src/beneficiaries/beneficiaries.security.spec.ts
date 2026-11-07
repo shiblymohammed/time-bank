@@ -133,6 +133,7 @@ describe('Milestone 3 Phase B Security & Boundary Invariants', () => {
           }),
         } as unknown as AuthorizationService,
         {} as any,
+        { notifyRequestOwners: jest.fn(), notifyMemberships: jest.fn() } as any,
       );
     });
 
