@@ -76,6 +76,11 @@ const PROGRESSION_BATCH_SIZE = 50;
  * SQL over an assignment aliased `a`: its volunteer would no longer pass lockVolunteer.
  * Keep the two in step.
  */
+/** A caregiver confirms visits for their beneficiary, so they never serve that beneficiary. */
+const NOT_THEIR_CAREGIVER = `NOT EXISTS (SELECT 1 FROM caregiver_authorizations ca
+  WHERE ca.caregiver_membership_id = m.id AND ca.beneficiary_membership_id = :careFor
+    AND ca.status = 'APPROVED')`;
+
 const INELIGIBLE_VOLUNTEER = `NOT EXISTS (
   SELECT 1 FROM organization_memberships vm
   JOIN users vu ON vu.id = vm.user_id
@@ -708,6 +713,7 @@ export class MatchingService {
 
     // Do not match beneficiary themselves as volunteer
     query.andWhere('m.id != :benMemId', { benMemId: request.beneficiaryMembershipId });
+    query.andWhere(NOT_THEIR_CAREGIVER, { careFor: request.beneficiaryMembershipId });
 
     const eligibleMemberships = await query.getMany();
 
@@ -1299,7 +1305,7 @@ export class MatchingService {
       await this.auditService.logEvent(
         {
           eventType: 'VOLUNTEER_ASSIGNMENT_WITHDRAWN',
-          actorId: null,
+          actorId: await this.volunteerUserId(manager, orgId, volunteerMembershipId),
           targetId: savedAssignment.id,
           targetType: 'volunteer_assignments',
           organizationId: orgId,
@@ -1351,6 +1357,18 @@ export class MatchingService {
           : ServiceRequestStatus.MATCHING_ACTIVE;
       await manager.save(ServiceRequest, request);
     }
+  }
+
+  /** The person behind a volunteer membership, for the audit log. */
+  private async volunteerUserId(
+    manager: EntityManager,
+    orgId: string,
+    volunteerMembershipId: string,
+  ): Promise<string | null> {
+    const volunteer = await manager.findOne(OrganizationMembership, {
+      where: { id: volunteerMembershipId, organizationId: orgId },
+    });
+    return volunteer?.userId ?? null;
   }
 
   private async lockOwnAssignment(
@@ -1427,7 +1445,7 @@ export class MatchingService {
       await this.auditService.logEvent(
         {
           eventType: 'SERVICE_STARTED',
-          actorId: null,
+          actorId: await this.volunteerUserId(manager, orgId, volunteerMembershipId),
           targetId: saved.id,
           targetType: 'volunteer_assignments',
           organizationId: orgId,
@@ -1491,7 +1509,7 @@ export class MatchingService {
       await this.auditService.logEvent(
         {
           eventType: 'SERVICE_FINISHED',
-          actorId: null,
+          actorId: await this.volunteerUserId(manager, orgId, volunteerMembershipId),
           targetId: saved.id,
           targetType: 'volunteer_assignments',
           organizationId: orgId,
@@ -1687,6 +1705,7 @@ export class MatchingService {
           { orgId, approved: MembershipStatus.APPROVED, activeUser: AccountStatus.ACTIVE },
         )
         .andWhere('m.id != :beneficiary', { beneficiary: request.beneficiaryMembershipId })
+        .andWhere(NOT_THEIR_CAREGIVER, { careFor: request.beneficiaryMembershipId })
         .andWhere(
           `NOT EXISTS (SELECT 1 FROM volunteer_assignments a JOIN organization_memberships booked ON booked.id = a.volunteer_membership_id JOIN service_requests r ON r.id = a.service_request_id WHERE booked.user_id = u.id AND a.status IN (:...busy) AND r.status NOT IN (:...terminal) AND r.scheduled_start_time < :end AND r.scheduled_start_time + r.expected_duration_minutes * INTERVAL '1 minute' > :start)`,
           {

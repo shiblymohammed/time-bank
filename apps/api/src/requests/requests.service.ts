@@ -54,8 +54,11 @@ import { ResolveServiceReviewDto } from './dto/resolve-service-review.dto';
 const TIMED_WORK_TOLERANCE_MINUTES = 10;
 const EXPECTED_DURATION_TOLERANCE_MINUTES = 60;
 const PAIR_LIMIT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
-const pairMonthlyLimitMinutes = () =>
-  Number(process.env['CREDIT_PAIR_MONTHLY_MINUTES'] ?? 1200);
+const pairMonthlyLimitMinutes = () => Number(process.env['CREDIT_PAIR_MONTHLY_MINUTES'] ?? 1200);
+
+/** Requests can be booked or moved at most this far ahead. */
+export const MAX_BOOKING_AHEAD_DAYS = 90;
+const MAX_BOOKING_AHEAD_MS = MAX_BOOKING_AHEAD_DAYS * 24 * 60 * 60 * 1000;
 
 @Injectable()
 export class RequestsService {
@@ -171,6 +174,11 @@ export class RequestsService {
     const earliest = Date.now() - (dto.urgency === UrgencyType.IMMEDIATE ? 60_000 : 0);
     if (!Number.isFinite(start) || start <= earliest) {
       throw new BadRequestException('Choose a valid start time that is not in the past');
+    }
+    if (start > Date.now() + MAX_BOOKING_AHEAD_MS) {
+      throw new BadRequestException(
+        `Choose a start time within the next ${MAX_BOOKING_AHEAD_DAYS} days`,
+      );
     }
 
     // 1. Verify catalogue item enablement
@@ -420,6 +428,7 @@ export class RequestsService {
     requestId: string,
     callingUserId?: string,
     membershipContext?: EvaluatedMembershipContext,
+    ipAddress?: string,
   ): Promise<ServiceRequestView> {
     const request = await this.requestRepo.findOne({
       where: { id: requestId, organizationId: orgId },
@@ -465,6 +474,20 @@ export class RequestsService {
       }
     }
 
+    if (
+      isCoordOrAdmin &&
+      callingUserId &&
+      request.beneficiaryMembershipId !== membershipContext?.membershipId
+    ) {
+      await this.auditService.logEvent({
+        eventType: 'SERVICE_REQUEST_VIEWED',
+        actorId: callingUserId,
+        targetId: request.id,
+        targetType: 'service_requests',
+        organizationId: orgId,
+        ipAddress: ipAddress ?? null,
+      });
+    }
     return toRequestView(request, isCoordOrAdmin);
   }
 
@@ -678,7 +701,26 @@ export class RequestsService {
       if (!Number.isFinite(newStartTime.getTime()) || newStartTime.getTime() <= Date.now()) {
         throw new BadRequestException('The new start time must be in the future');
       }
+      if (newStartTime.getTime() > Date.now() + MAX_BOOKING_AHEAD_MS) {
+        throw new BadRequestException(
+          `Choose a start time within the next ${MAX_BOOKING_AHEAD_DAYS} days`,
+        );
+      }
       if (newStartTime.getTime() === new Date(request.scheduledStartTime).getTime()) return request;
+      if (request.status === ServiceRequestStatus.EXPIRED_UNMATCHED) {
+        // An expired request no longer counts toward the monthly limit, so reopening it is
+        // a new booking and must fit the limit and the current eligibility.
+        const catalogItem = await manager.withRepository(this.catalogRepo).findOne({
+          where: { id: request.serviceCatalogId, organizationId: orgId },
+          relations: ['globalService'],
+        });
+        await this.beneficiariesService.checkEligibilityAndQuota(
+          orgId,
+          request.beneficiaryMembershipId,
+          catalogItem?.globalService?.categoryId,
+          manager,
+        );
+      }
       const previousStartTime = request.scheduledStartTime;
       const record = await history.save(
         history.create({

@@ -146,9 +146,23 @@ export class NotificationsService {
   }
 
   private async deliver(manager: EntityManager, notification: NotificationOutbox) {
-    const devices = await manager.getRepository(PushDevice).find({
-      where: { userId: notification.userId },
-    });
+    // A banned, suspended or restricted account, or one signed out everywhere, gets nothing:
+    // its phone may already belong to someone else.
+    const reachable = await manager.query(
+      `SELECT 1 FROM users u
+       WHERE u.id = $1 AND u.status = 'ACTIVE'
+         AND NOT EXISTS (SELECT 1 FROM global_account_restrictions r
+           WHERE r.user_id = u.id AND r.status = 'ACTIVE')
+         AND EXISTS (SELECT 1 FROM authentication_sessions s
+           WHERE s.user_id = u.id AND s.revoked_at IS NULL AND s.expires_at > now())`,
+      [notification.userId],
+    );
+    const devices =
+      reachable.length === 0
+        ? []
+        : await manager.getRepository(PushDevice).find({
+            where: { userId: notification.userId },
+          });
     if (devices.length === 0) {
       notification.status = NotificationStatus.NO_DEVICE;
       await manager.save(notification);

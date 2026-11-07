@@ -95,6 +95,7 @@ export class RequestsController {
       requestId,
       userId,
       membershipContext,
+      req.ip ?? req.socket.remoteAddress,
     );
   }
 

@@ -512,12 +512,17 @@ export class AuthService {
 
     const accessToken = this.jwtService.sign(payload);
 
-    // Parallel requests can share a token, so the loser of this update keeps working and
-    // simply receives no replacement.
+    // The replacement is worked out from the token presented, so a retry or a parallel request
+    // with the same token gets the same replacement back. A phone whose reply was lost therefore
+    // stays signed in instead of holding a token that no longer works.
+    const replacement = crypto
+      .createHmac('sha256', this.configService.getOrThrow<string>('JWT_SECRET'))
+      .update(`refresh:${session.id}:${dto.refreshToken}`)
+      .digest('hex');
     let refreshToken: string | undefined;
     if (session.refreshTokenHash === tokenHash) {
-      const replacement = crypto.randomBytes(32).toString('hex');
-      const rotated = await this.sessionRepo.update(
+      // A parallel request with the same token may win this update; it writes the same value.
+      await this.sessionRepo.update(
         { id: session.id, refreshTokenHash: tokenHash },
         {
           refreshTokenHash: sha256(replacement),
@@ -525,7 +530,9 @@ export class AuthService {
           rotatedAt: new Date(),
         },
       );
-      if (rotated.affected) refreshToken = replacement;
+      refreshToken = replacement;
+    } else if (session.refreshTokenHash === sha256(replacement)) {
+      refreshToken = replacement;
     }
 
     await this.auditService.logEvent({

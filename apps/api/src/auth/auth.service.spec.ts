@@ -1,4 +1,4 @@
-import { createHash } from 'crypto';
+import { createHash, createHmac } from 'crypto';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
@@ -396,6 +396,10 @@ describe('AuthService', () => {
     describe('rotation', () => {
       const activeUser = { id: 'user-1', phoneE164: '+919876543210', status: AccountStatus.ACTIVE };
       const hash = (token: string) => createHash('sha256').update(token).digest('hex');
+      const replacementFor = (token: string) =>
+        createHmac('sha256', 'test_secret_key_1234567890123456')
+          .update(`refresh:sess-1:${token}`)
+          .digest('hex');
 
       beforeEach(() => {
         mockMembershipRepo.createQueryBuilder.mockReturnValue({
@@ -427,21 +431,37 @@ describe('AuthService', () => {
         );
       });
 
-      it('keeps a parallel request working without a second replacement', async () => {
+      it('gives a retry the same replacement, so a lost reply does not sign the phone out', async () => {
         mockSessionRepo.findOne.mockResolvedValueOnce({
           id: 'sess-1',
           user: activeUser,
           activeOrgId: null,
-          refreshTokenHash: hash('newer'),
+          refreshTokenHash: hash(replacementFor('current')),
           previousRefreshTokenHash: hash('current'),
-          rotatedAt: new Date(),
+          rotatedAt: new Date(Date.now() - 2 * 60 * 1000),
         });
 
         const res = await service.refreshToken({ refreshToken: 'current' });
 
         expect(res.accessToken).toBe('mock.jwt.token');
-        expect(res).not.toHaveProperty('refreshToken');
+        expect(res.refreshToken).toBe(replacementFor('current'));
         expect(mockSessionRepo.update).not.toHaveBeenCalled();
+      });
+
+      it('gives two requests with the same token the same replacement', async () => {
+        const session = {
+          id: 'sess-1',
+          user: activeUser,
+          activeOrgId: null,
+          refreshTokenHash: hash('current'),
+        };
+        mockSessionRepo.findOne.mockResolvedValueOnce({ ...session });
+        mockSessionRepo.findOne.mockResolvedValueOnce({ ...session });
+
+        const first = await service.refreshToken({ refreshToken: 'current' });
+        const second = await service.refreshToken({ refreshToken: 'current' });
+
+        expect(first.refreshToken).toBe(second.refreshToken);
       });
 
       it('ends the session when an old token comes back later', async () => {
@@ -451,7 +471,7 @@ describe('AuthService', () => {
           activeOrgId: null,
           refreshTokenHash: hash('newer'),
           previousRefreshTokenHash: hash('stolen'),
-          rotatedAt: new Date(Date.now() - 60 * 1000),
+          rotatedAt: new Date(Date.now() - 10 * 60 * 1000),
         });
 
         await expect(service.refreshToken({ refreshToken: 'stolen' })).rejects.toThrow(

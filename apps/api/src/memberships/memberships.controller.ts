@@ -86,8 +86,15 @@ export class MembershipsController {
   async getMembership(
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('membershipId', ParseUUIDPipe) membershipId: string,
+    @CurrentUserId() viewerId: string,
+    @Req() req: Request,
   ) {
-    return this.membershipsService.getMembershipById(organizationId, membershipId);
+    return this.membershipsService.getMembershipById(
+      organizationId,
+      membershipId,
+      viewerId,
+      req.ip ?? req.socket.remoteAddress,
+    );
   }
 
   @Post(':membershipId/approve')
@@ -151,8 +158,15 @@ export class MembershipsController {
   async listDocuments(
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('membershipId', ParseUUIDPipe) membershipId: string,
+    @CurrentUserId() viewerId: string,
+    @Req() req: Request,
   ) {
-    return this.membershipsService.listMembershipDocuments(organizationId, membershipId);
+    return this.membershipsService.listMembershipDocuments(
+      organizationId,
+      membershipId,
+      viewerId,
+      req.ip ?? req.socket.remoteAddress,
+    );
   }
 
   @Post(':membershipId/documents')

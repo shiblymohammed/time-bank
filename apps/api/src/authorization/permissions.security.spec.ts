@@ -813,7 +813,7 @@ describe('Permission boundaries with real guards and services', () => {
     beneficiaryMembershipId: 'beneficiary-membership',
     creationChannel: CreationChannel.COORDINATOR_ON_BEHALF,
     urgency: UrgencyType.SCHEDULED,
-    scheduledStartTime: '2030-01-01T10:00:00.000Z',
+    scheduledStartTime: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(),
     locationAddressText: 'Community centre',
     locationWardNumber: '1',
     locationPostalCode: '676503',
@@ -873,9 +873,12 @@ describe('Permission boundaries with real guards and services', () => {
     );
     await f.authorize(MembershipsController, 'listDocuments', 'coordinator');
     const controller = new MembershipsController(f.membershipService);
-    await expect(controller.listDocuments(f.orgId, 'volunteer-membership')).resolves.toEqual([]);
-    await expect(controller.listDocuments(f.otherOrgId, 'volunteer-membership')).rejects.toThrow(
-      NotFoundException,
-    );
+    const staffReq = { ip: '127.0.0.1', socket: {} } as any;
+    await expect(
+      controller.listDocuments(f.orgId, 'volunteer-membership', 'staff-user', staffReq),
+    ).resolves.toEqual([]);
+    await expect(
+      controller.listDocuments(f.otherOrgId, 'volunteer-membership', 'staff-user', staffReq),
+    ).rejects.toThrow(NotFoundException);
   });
 });

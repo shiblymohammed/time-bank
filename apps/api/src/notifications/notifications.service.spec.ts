@@ -11,6 +11,7 @@ describe('NotificationsService delivery', () => {
     getRepository: (entity: unknown) => (entity === PushDevice ? devices : outbox),
     save: jest.fn(),
     delete: jest.fn(),
+    query: jest.fn(),
   };
   const dataSource = {
     transaction: (work: (value: typeof manager) => unknown) => work(manager),
@@ -35,6 +36,19 @@ describe('NotificationsService delivery', () => {
     jest.clearAllMocks();
     sender.configured = true;
     devices.find.mockResolvedValue([{ token: 'token-1' }]);
+    manager.query.mockResolvedValue([{ '?column?': 1 }]);
+  });
+
+  it('sends nothing to a banned, restricted or signed-out account', async () => {
+    const notification = message();
+    outbox.find.mockResolvedValue([notification]);
+    manager.query.mockResolvedValue([]);
+
+    await service.deliverDue();
+
+    expect(notification.status).toBe(NotificationStatus.NO_DEVICE);
+    expect(sender.send).not.toHaveBeenCalled();
+    expect(devices.find).not.toHaveBeenCalled();
   });
 
   it('marks a delivered message as sent', async () => {

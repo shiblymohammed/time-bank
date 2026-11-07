@@ -127,6 +127,8 @@ export class AdminService {
         user.status = AccountStatus.SUSPENDED;
         await m.getRepository(User).save(user);
       }
+      // Stop push to the person's phones; they register again after signing back in.
+      await m.query('DELETE FROM push_devices WHERE user_id = $1', [user.id]);
 
       await this.auditService.logEvent(
         {

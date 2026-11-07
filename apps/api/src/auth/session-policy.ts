@@ -1,8 +1,11 @@
 const DEFAULT_REFRESH_LIFETIME = '30d'; // D#39
 const UNIT_MS = { h: 60 * 60 * 1000, d: 24 * 60 * 60 * 1000 };
 
-/** How long a replaced refresh token still works, for requests already on their way. */
-export const REFRESH_OVERLAP_MS = 30 * 1000;
+/**
+ * How long a replaced refresh token still works: requests already on their way, and a phone
+ * that lost its signal before the reply arrived and asks again.
+ */
+export const REFRESH_OVERLAP_MS = 5 * 60 * 1000;
 
 export function refreshLifetimeMs(setting = DEFAULT_REFRESH_LIFETIME): number {
   const match = /^(\d+)([hd])$/.exec(setting.trim());

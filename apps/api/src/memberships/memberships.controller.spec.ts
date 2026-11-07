@@ -68,8 +68,13 @@ describe('MembershipsController', () => {
   });
 
   it('should call getMembership', async () => {
-    const res = await controller.getMembership('org-1', 'm-1');
-    expect(mockService.getMembershipById).toHaveBeenCalledWith('org-1', 'm-1');
+    const res = await controller.getMembership('org-1', 'm-1', 'admin-1', mockReq);
+    expect(mockService.getMembershipById).toHaveBeenCalledWith(
+      'org-1',
+      'm-1',
+      'admin-1',
+      mockReq.ip ?? mockReq.socket.remoteAddress,
+    );
     expect(res).toEqual({ id: 'm-1' });
   });
 

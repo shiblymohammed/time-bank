@@ -630,6 +630,8 @@ export class MembershipsService {
   async getMembershipById(
     organizationId: string,
     membershipId: string,
+    viewerId?: string,
+    ipAddress?: string,
   ): Promise<OrganizationMembership> {
     const membership = await this.membershipRepo.findOne({
       where: { id: membershipId, organizationId },
@@ -640,18 +642,53 @@ export class MembershipsService {
       throw new NotFoundException('Membership not found in this organization');
     }
 
+    await this.logStaffView(
+      'MEMBER_RECORD_VIEWED',
+      organizationId,
+      membership,
+      viewerId,
+      ipAddress,
+    );
     return membership;
   }
 
   async listMembershipDocuments(
     organizationId: string,
     membershipId: string,
+    viewerId?: string,
+    ipAddress?: string,
   ): Promise<MembershipDocument[]> {
     const membership = await this.membershipRepo.findOne({
       where: { id: membershipId, organizationId },
     });
     if (!membership) throw new NotFoundException('Membership not found in this organization');
+    await this.logStaffView(
+      'MEMBER_DOCUMENTS_VIEWED',
+      organizationId,
+      membership,
+      viewerId,
+      ipAddress,
+    );
     return this.documentRepo.find({ where: { membershipId }, order: { createdAt: 'DESC' } });
+  }
+
+  /** Staff reading someone else's phone number, address or papers leaves a trace. */
+  private async logStaffView(
+    eventType: string,
+    organizationId: string,
+    membership: OrganizationMembership,
+    viewerId: string | undefined,
+    ipAddress: string | undefined,
+  ): Promise<void> {
+    if (!viewerId || viewerId === membership.userId) return;
+    await this.auditService.logEvent({
+      eventType,
+      actorId: viewerId,
+      targetId: membership.id,
+      targetType: 'organization_memberships',
+      organizationId,
+      ipAddress: ipAddress ?? null,
+    });
   }
 
   private async assertCanManageRole(
