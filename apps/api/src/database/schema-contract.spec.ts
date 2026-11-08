@@ -14,6 +14,7 @@ import { CreditControls1729118400010 } from './migrations/1729118400010-CreditCo
 import { PushNotifications1729118400011 } from './migrations/1729118400011-PushNotifications';
 import { SecurityReviewFixes1729118400012 } from './migrations/1729118400012-SecurityReviewFixes';
 import { BookingRecovery1729118400013 } from './migrations/1729118400013-BookingRecovery';
+import { StaffEmailCode1729118400014 } from './migrations/1729118400014-StaffEmailCode';
 describe('entity and migration schema contract', () => {
   it('defines every mapped entity column in the migration SQL', async () => {
     const queries: string[] = [];
@@ -37,6 +38,7 @@ describe('entity and migration schema contract', () => {
       new PushNotifications1729118400011(),
       new SecurityReviewFixes1729118400012(),
       new BookingRecovery1729118400013(),
+      new StaffEmailCode1729118400014(),
     ]) {
       await migration.up(runner);
     }

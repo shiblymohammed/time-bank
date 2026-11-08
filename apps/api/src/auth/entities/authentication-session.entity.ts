@@ -51,6 +51,22 @@ export class AuthenticationSession {
   @Column({ name: 'revoked_at', type: 'timestamptz', nullable: true })
   revokedAt?: Date | null;
 
+  /** When this sign-in passed the emailed staff code. Staff powers need it. */
+  @Column({ name: 'staff_verified_at', type: 'timestamptz', nullable: true })
+  staffVerifiedAt?: Date | null;
+
+  @Column({ name: 'staff_code_hash', type: 'varchar', length: 128, nullable: true })
+  staffCodeHash?: string | null;
+
+  @Column({ name: 'staff_code_expires_at', type: 'timestamptz', nullable: true })
+  staffCodeExpiresAt?: Date | null;
+
+  @Column({ name: 'staff_code_sent_at', type: 'timestamptz', nullable: true })
+  staffCodeSentAt?: Date | null;
+
+  @Column({ name: 'staff_code_attempts', type: 'int', default: 0 })
+  staffCodeAttempts!: number;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 }

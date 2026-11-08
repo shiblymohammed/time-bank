@@ -6,6 +6,7 @@ import { ConfigService } from '@nestjs/config';
 
 import { AppModule } from './app.module';
 import { assertStrongJwtSecret } from './auth/session-policy';
+import { requestContext } from './auth/staff-context';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule, {
@@ -21,6 +22,11 @@ async function bootstrap(): Promise<void> {
   // Rate limits and audit IPs need the real caller. Set this to the number of proxies
   // in front of the API; left at 0, X-Forwarded-For is ignored so it cannot be spoofed.
   app.set('trust proxy', Number(configService.get('TRUST_PROXY_HOPS') ?? 0));
+
+  // Each request carries whether its sign-in passed the staff email code (AuthGuard sets it).
+  app.use((_request: unknown, _response: unknown, next: () => void) =>
+    requestContext.run({}, next),
+  );
 
   // ─── Versioning (URI strategy: /api/v1/...) ──────────────────────────
   // NFR-01: Versioned APIs allow safe incremental rollout across milestones

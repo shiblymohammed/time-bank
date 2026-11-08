@@ -53,7 +53,11 @@ type Profile = {
   phoneE164: string;
   status: string;
   memberships: { organizationId: string; status: string; roles: string[] }[];
+  /** Whether this sign-in still needs the emailed staff code. */
+  staffCheck?: { required: boolean; verified: boolean; hasEmail: boolean; maskedEmail: string | null };
 };
+const needsStaffCode = (profile: Profile) =>
+  Boolean(profile.staffCheck?.required && !profile.staffCheck.verified);
 type Organization = {
   id: string;
   code: string;
@@ -331,6 +335,117 @@ function SignIn({ onSignedIn }: { onSignedIn: (profile: Profile) => void }) {
     </main>
   );
 }
+function StaffCodeStep({
+  profile,
+  onVerified,
+  onSignOut,
+}: {
+  profile: Profile;
+  onVerified: (profile: Profile) => void;
+  onSignOut: () => void;
+}) {
+  const check = profile.staffCheck!;
+  const [code, setCode] = useState(''),
+    [error, setError] = useState(''),
+    [notice, setNotice] = useState('');
+  const [sent, setSent] = useState(false),
+    [busy, setBusy] = useState(false);
+  async function send() {
+    setBusy(true);
+    setError('');
+    setNotice('');
+    try {
+      const result = await api<{ sent: boolean; verified?: boolean; maskedEmail?: string }>(
+        '/api/session',
+        'POST',
+        { action: 'staff-code-request' },
+      );
+      if (result.verified) onVerified(await api<Profile>('/api/session'));
+      else {
+        setSent(true);
+        setNotice(`We sent a 6-digit code to ${result.maskedEmail ?? check.maskedEmail}.`);
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Unable to send the code');
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <main className="login-shell">
+      <section className="glass-panel login-panel">
+        <div className="brand-icon">
+          <BrandMark />
+        </div>
+        <h1>Check your email</h1>
+        {check.hasEmail ? (
+          <p>
+            Staff sign-in needs a second step. We email a code to {check.maskedEmail} each time you
+            sign in to this panel.
+          </p>
+        ) : (
+          <p>
+            Staff sign-in needs a code sent to your email, and no email address is on file for your
+            account. Ask a Super Admin to add one, then sign in again.
+          </p>
+        )}
+        <form
+          className="stack"
+          onSubmit={async (event) => {
+            event.preventDefault();
+            if (!sent) return send();
+            setBusy(true);
+            setError('');
+            try {
+              onVerified(
+                await api<Profile>('/api/session', 'POST', { action: 'staff-code-verify', code }),
+              );
+            } catch (cause) {
+              setError(cause instanceof Error ? cause.message : 'Unable to check the code');
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {sent && (
+            <label>
+              Email code
+              <input
+                className="form-input"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                required
+                pattern="[0-9]{6}"
+                value={code}
+                disabled={busy}
+                onChange={(event) => setCode(event.target.value.trim())}
+              />
+            </label>
+          )}
+          {notice && <p className="help-text">{notice}</p>}
+          {error && (
+            <p className="error-message" role="alert">
+              {error}
+            </p>
+          )}
+          {check.hasEmail && (
+            <button className="btn btn-primary" disabled={busy}>
+              {busy ? 'Please wait…' : sent ? 'Verify and continue' : 'Email me a code'}
+            </button>
+          )}
+          {sent && (
+            <button type="button" className="btn btn-secondary" disabled={busy} onClick={send}>
+              Send another code
+            </button>
+          )}
+          <button type="button" className="btn btn-secondary" disabled={busy} onClick={onSignOut}>
+            Sign out
+          </button>
+        </form>
+      </section>
+    </main>
+  );
+}
 function ActionDialog({
   action,
   onClose,
@@ -555,7 +670,7 @@ export default function AdminDashboard(): React.JSX.Element {
     return () => controller.abort();
   }, []);
   useEffect(() => {
-    if (!profile) return;
+    if (!profile || needsStaffCode(profile)) return;
     const controller = new AbortController();
     setLoading(true);
     setError('');
@@ -685,6 +800,17 @@ export default function AdminDashboard(): React.JSX.Element {
           </p>
         )}
       </>
+    );
+  if (needsStaffCode(profile))
+    return (
+      <StaffCodeStep
+        profile={profile}
+        onVerified={signedIn}
+        onSignOut={() => {
+          api('/api/session', 'DELETE').catch(() => undefined);
+          expired();
+        }}
+      />
     );
   return (
     <div className="app-container">
@@ -1302,6 +1428,43 @@ export default function AdminDashboard(): React.JSX.Element {
                             <dd className="mono">{detail.membership.userId}</dd>
                           </dl>
                         </section>
+                        {isGlobal && (
+                          <section className="drawer-section">
+                            <div className="section-heading">
+                              <h3>Staff sign-in email</h3>
+                              <button
+                                className="btn btn-sm btn-secondary"
+                                onClick={() =>
+                                  openAction({
+                                    title: 'Set staff sign-in email',
+                                    fields: [
+                                      {
+                                        key: 'email',
+                                        label: 'Email (leave empty to remove)',
+                                        type: 'email',
+                                        optional: true,
+                                        maxLength: 254,
+                                      },
+                                    ],
+                                    submit: (values) =>
+                                      backend(
+                                        `/admin/users/${detail.membership.userId}/email`,
+                                        'PUT',
+                                        { email: values['email'] || null },
+                                      ),
+                                  })
+                                }
+                              >
+                                Set email
+                              </button>
+                            </div>
+                            <p className="help-text">
+                              Coordinators and admins get a code at this address each time they sign
+                              in to this panel. Changing it signs their panel sessions out of staff
+                              powers until they enter a new code.
+                            </p>
+                          </section>
+                        )}
                         <section className="drawer-section">
                           <h3>Supporting documents</h3>
                           {detail.documents.length === 0 && (

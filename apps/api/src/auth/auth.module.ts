@@ -17,6 +17,9 @@ import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { AuthGuard } from './guards/auth.guard';
 import { SmsService } from './sms/sms.service';
+import { EmailService } from './email/email.service';
+import { StaffCodeService } from './staff-code.service';
+import { StaffCodeController } from './staff-code.controller';
 
 @Global()
 @Module({
@@ -42,8 +45,8 @@ import { SmsService } from './sms/sms.service';
       }),
     }),
   ],
-  controllers: [AuthController],
-  providers: [AuthService, AuthGuard, SmsService, FirebaseTokenService],
+  controllers: [AuthController, StaffCodeController],
+  providers: [AuthService, AuthGuard, SmsService, FirebaseTokenService, EmailService, StaffCodeService],
   exports: [JwtModule, AuthGuard, AuthService, SmsService],
 })
 export class AuthModule {}

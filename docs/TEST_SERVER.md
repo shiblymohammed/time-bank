@@ -54,6 +54,20 @@ docker compose -f docker-compose.server.yml run --rm api node apps/api/dist/data
 docker compose -f docker-compose.server.yml up -d
 ```
 
+### Staff email code (second sign-in step)
+
+Coordinators and admins must enter a code emailed to them each time they sign in to the panel.
+Set `EMAIL_PROVIDER=resend`, `RESEND_API_KEY` and `MAIL_FROM` in `.env`. Then give the first
+Super Admin an email address once (sign in with that phone first, so the account exists):
+
+```bash
+docker compose -f docker-compose.server.yml run --rm api node apps/api/dist/database/set-staff-email.js +91XXXXXXXXXX you@example.org
+```
+
+Everyone else gets their address from the panel: open the member, then **Staff sign-in email**.
+Until email is set up, staff sign-ins only have member powers. `STAFF_SECOND_FACTOR=off` turns the
+step off and is for private QA only.
+
 The **Deploy to Production** GitHub workflow does the same after CI passes and takes a database backup first. It needs
 the `VPS_*` repository secrets and a configured `production` environment. Take a backup by hand before a manual
 migration: the credit-controls migration refuses to roll back once credit activity depends on it.

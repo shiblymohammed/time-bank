@@ -14,6 +14,7 @@ import { GlobalAccountRestriction } from '../identity/entities/global-account-re
 import { Organization } from '../organizations/entities/organization.entity';
 import { OrganizationMembership } from '../memberships/entities/organization-membership.entity';
 import { MembershipRoleGrant } from '../memberships/entities/membership-role-grant.entity';
+import { staffPowersAllowed, withoutUnverifiedStaffRoles } from '../auth/staff-context';
 
 export interface EvaluatedMembershipContext {
   userId: string;
@@ -79,9 +80,12 @@ export class AuthorizationService {
       );
     }
 
-    const activeRoles = (membership?.roleGrants ?? [])
-      .filter((grant) => grant.status === RoleGrantStatus.ACTIVE)
-      .map((grant) => grant.role);
+    // Staff roles wait until this sign-in passes the emailed staff code.
+    const activeRoles = withoutUnverifiedStaffRoles(
+      (membership?.roleGrants ?? [])
+        .filter((grant) => grant.status === RoleGrantStatus.ACTIVE)
+        .map((grant) => grant.role),
+    );
     if (isSuperAdmin && !activeRoles.includes(UserRole.SUPER_ADMIN)) {
       activeRoles.push(UserRole.SUPER_ADMIN);
     }
@@ -144,7 +148,7 @@ export class AuthorizationService {
       .andWhere('m.status = :mStatus', { mStatus: MembershipStatus.APPROVED })
       .getOne();
 
-    const isSuperAdmin = Boolean(superAdminGrant);
+    const isSuperAdmin = Boolean(superAdminGrant) && staffPowersAllowed();
     return { isSuperAdmin, roles: isSuperAdmin ? [UserRole.SUPER_ADMIN] : [] };
   }
 

@@ -341,7 +341,6 @@ export class AuthService {
       roles,
       isSuperAdmin,
     };
-    const accessToken = this.jwtService.sign(jwtPayload);
 
     // Cryptographically secure refresh token (30-day lifetime per D#39)
     const rawRefreshToken = crypto.randomBytes(32).toString('hex');
@@ -358,6 +357,8 @@ export class AuthService {
       expiresAt: refreshExpiresAt,
     });
     await this.sessionRepo.save(session);
+    // The token names its sign-in, so staff powers can wait for that sign-in's email code.
+    const accessToken = this.jwtService.sign({ ...jwtPayload, sid: session.id });
 
     // 7. Audit log events
     if (isNewUser) {
@@ -508,6 +509,7 @@ export class AuthService {
       orgId: session.activeOrgId ?? null,
       roles,
       isSuperAdmin,
+      sid: session.id,
     };
 
     const accessToken = this.jwtService.sign(payload);

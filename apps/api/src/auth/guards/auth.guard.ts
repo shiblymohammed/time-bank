@@ -1,12 +1,27 @@
-import { Injectable, CanActivate, ExecutionContext, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  Optional,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
+import { DataSource } from 'typeorm';
+import { requestContext } from '../staff-context';
 
 export interface AuthenticatedUserPayload {
   id: string;
   phoneE164?: string;
   roles?: string[];
   isSuperAdmin?: boolean;
+  /** The sign-in this token belongs to. */
+  sessionId?: string;
+}
+
+/** STAFF_SECOND_FACTOR=off turns the emailed staff code off, for private QA only. */
+export function staffCodeRequired(config: ConfigService): boolean {
+  return config.get<string>('STAFF_SECOND_FACTOR', 'email') !== 'off';
 }
 
 @Injectable()
@@ -14,7 +29,27 @@ export class AuthGuard implements CanActivate {
   constructor(
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    @Optional() private readonly dataSource?: DataSource,
   ) {}
+
+  /** Records on the request whether its sign-in passed the staff email code. */
+  private async markStaffVerification(userId: string, sessionId?: string): Promise<void> {
+    const store = requestContext.getStore();
+    if (!store) return;
+    if (!staffCodeRequired(this.configService) || !this.dataSource) {
+      store.staffVerified = true;
+      return;
+    }
+    const rows: unknown[] = sessionId
+      ? await this.dataSource.query(
+          `SELECT 1 FROM authentication_sessions
+           WHERE id = $1 AND user_id = $2 AND staff_verified_at IS NOT NULL
+             AND revoked_at IS NULL AND expires_at > now()`,
+          [sessionId, userId],
+        )
+      : [];
+    store.staffVerified = rows.length > 0;
+  }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
@@ -33,6 +68,8 @@ export class AuthGuard implements CanActivate {
         isSuperAdmin: false,
       };
       request.userId = devUserId;
+      const store = requestContext.getStore();
+      if (store) store.staffVerified = true;
       return true;
     }
 
@@ -47,22 +84,24 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('Invalid authorization format; Bearer token required');
     }
 
+    let payload: Record<string, any>;
     try {
       const secret = this.configService.getOrThrow<string>('JWT_SECRET');
-      const payload = await this.jwtService.verifyAsync(token, { secret });
-
-      request.user = {
-        id: payload.sub ?? payload.id,
-        phoneE164: payload.phone,
-        activeOrgId: payload.orgId,
-        roles: payload.roles ?? [],
-        isSuperAdmin: payload.isSuperAdmin ?? false,
-      };
-      request.userId = request.user.id;
-
-      return true;
+      payload = await this.jwtService.verifyAsync(token, { secret });
     } catch {
       throw new UnauthorizedException('Token is invalid or expired');
     }
+
+    request.user = {
+      id: payload.sub ?? payload.id,
+      phoneE164: payload.phone,
+      activeOrgId: payload.orgId,
+      roles: payload.roles ?? [],
+      isSuperAdmin: payload.isSuperAdmin ?? false,
+      sessionId: typeof payload.sid === 'string' ? payload.sid : undefined,
+    };
+    request.userId = request.user.id;
+    await this.markStaffVerification(request.user.id, request.user.sessionId);
+    return true;
   }
 }

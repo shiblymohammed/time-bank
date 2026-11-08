@@ -35,6 +35,10 @@ export class User {
   @Column({ name: 'primary_org_id', type: 'uuid', nullable: true })
   primaryOrgId?: string | null;
 
+  /** Where staff sign-in codes go. Set by a Super Admin; members need none. */
+  @Column({ type: 'varchar', length: 254, nullable: true })
+  email?: string | null;
+
   @OneToOne(() => VerifiedIdentity, (vi) => vi.user, { cascade: false })
   verifiedIdentity?: VerifiedIdentity;
 

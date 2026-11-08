@@ -8,6 +8,7 @@ import {
 import { DataSource, EntityManager } from 'typeorm';
 import { UserRole } from '@ktb/shared-types';
 import { AuditService } from '../audit/audit.service';
+import { staffPowersAllowed } from '../auth/staff-context';
 import {
   ChangeWalletStatusDto,
   CreditAmountDto,
@@ -87,13 +88,18 @@ export class CreditControlsService {
     if (user?.status !== 'ACTIVE' || organization?.status !== 'ACTIVE' || restrictions.length) {
       throw new ForbiddenException('An active account and organization are required');
     }
-    const grants: { role: string; organization_id: string }[] = await m.query(
+    const lockedGrants: { role: string; organization_id: string }[] = await m.query(
       `SELECT g.role, m.organization_id FROM organization_memberships m
        JOIN membership_role_grants g ON g.membership_id=m.id
        WHERE m.user_id=$1 AND m.status='APPROVED' AND g.status='ACTIVE'
        AND (m.organization_id=$2 OR g.role='SUPER_ADMIN') FOR SHARE OF m,g`,
       [actor, org],
     );
+    // Staff roles wait until this sign-in passes the emailed staff code.
+    const staffRoles: string[] = [UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN, UserRole.SUPER_ADMIN];
+    const grants = staffPowersAllowed()
+      ? lockedGrants
+      : lockedGrants.filter((g) => !staffRoles.includes(g.role));
     if (grants.some((g) => g.role === 'SUPER_ADMIN')) return;
     const members = await m.query(
       "SELECT id FROM organization_memberships WHERE user_id=$1 AND organization_id=$2 AND status='APPROVED' FOR SHARE",
