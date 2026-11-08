@@ -2,6 +2,7 @@ import {
   Injectable,
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Optional,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -17,6 +18,25 @@ export interface AuthenticatedUserPayload {
   isSuperAdmin?: boolean;
   /** The sign-in this token belongs to. */
   sessionId?: string;
+}
+
+/**
+ * Every community a request names: in its path (/organizations/<id>), its orgId query, or the
+ * x-organization-id header. A gift's recipient community travels in the body and is not one.
+ */
+export function organizationsNamedBy(request: {
+  originalUrl?: string;
+  url?: string;
+  query?: Record<string, unknown>;
+  headers?: Record<string, unknown>;
+}): string[] {
+  const path = (request.originalUrl ?? request.url ?? '').split('?')[0] ?? '';
+  const named = [...path.matchAll(/\/organizations\/([^/]+)/gi)].map((match) => match[1]!);
+  for (const value of [request.query?.['orgId'], request.headers?.['x-organization-id']]) {
+    if (typeof value === 'string') named.push(value);
+  }
+  // Fixed words after /organizations/ (manage, the list itself) are not communities.
+  return named.filter((value) => /^[0-9a-f-]{36}$/i.test(value)).map((v) => v.toLowerCase());
 }
 
 /** STAFF_SECOND_FACTOR=off turns the emailed staff code off, for private QA only. */
@@ -101,6 +121,13 @@ export class AuthGuard implements CanActivate {
       sessionId: typeof payload.sid === 'string' ? payload.sid : undefined,
     };
     request.userId = request.user.id;
+    // A sign-in from a community's own app stays inside that community.
+    if (typeof payload.appOrg === 'string') {
+      const appOrg = payload.appOrg.toLowerCase();
+      if (organizationsNamedBy(request).some((orgId) => orgId !== appOrg)) {
+        throw new ForbiddenException("This app only works for its own community");
+      }
+    }
     await this.markStaffVerification(request.user.id, request.user.sessionId);
     return true;
   }

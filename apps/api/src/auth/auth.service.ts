@@ -21,6 +21,7 @@ import {
   UserRole,
   RoleGrantStatus,
   MembershipStatus,
+  OrganizationStatus,
 } from '@ktb/shared-types';
 
 import { OtpChallenge } from './entities/otp-challenge.entity';
@@ -223,6 +224,17 @@ export class AuthService {
     ipAddress?: string,
   ): Promise<AuthSessionResponse> {
     const phoneE164 = normalizeToE164(phone);
+    // An app built for one community names it at sign-in. Refuse an unknown or closed one
+    // before creating anything, instead of quietly signing in without a community.
+    let appOrg: Organization | null = null;
+    if (dto.organizationCode) {
+      appOrg = await this.orgRepo.findOne({
+        where: { code: dto.organizationCode.trim().toUpperCase() },
+      });
+      if (!appOrg || appOrg.status !== OrganizationStatus.ACTIVE) {
+        throw new BadRequestException("This app's community is not available right now");
+      }
+    }
     // 3. User lookup or onboarding in atomic transaction
     let user: User;
     let isNewUser = false;
@@ -312,12 +324,9 @@ export class AuthService {
       roles.push(UserRole.SUPER_ADMIN);
     }
 
-    if (dto.organizationCode) {
-      activeOrg = await this.orgRepo.findOne({
-        where: { code: dto.organizationCode.toUpperCase() },
-      });
-
-      if (activeOrg) {
+    if (appOrg) {
+      activeOrg = appOrg;
+      {
         const membership = await this.membershipRepo.findOne({
           where: { organizationId: activeOrg.id, userId: user.id },
           relations: ['roleGrants'],
@@ -340,6 +349,8 @@ export class AuthService {
       orgId: activeOrg?.id ?? null,
       roles,
       isSuperAdmin,
+      // The sign-in is locked to this app's community (see AuthGuard).
+      ...(activeOrg ? { appOrg: activeOrg.id } : {}),
     };
 
     // Cryptographically secure refresh token (30-day lifetime per D#39)
@@ -510,6 +521,7 @@ export class AuthService {
       roles,
       isSuperAdmin,
       sid: session.id,
+      ...(session.activeOrgId ? { appOrg: session.activeOrgId } : {}),
     };
 
     const accessToken = this.jwtService.sign(payload);
