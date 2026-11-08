@@ -35,6 +35,10 @@ export class User {
   @Column({ name: 'primary_org_id', type: 'uuid', nullable: true })
   primaryOrgId?: string | null;
 
+  /** The person's name, given when they join. Shared with the other side of an accepted visit. */
+  @Column({ name: 'full_name', type: 'varchar', length: 100, nullable: true })
+  fullName?: string | null;
+
   /** Where staff sign-in codes go. Set by a Super Admin; members need none. */
   @Column({ type: 'varchar', length: 254, nullable: true })
   email?: string | null;

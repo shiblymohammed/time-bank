@@ -15,7 +15,8 @@ municipality. It is a decision for the project owner and the municipality, and n
 ### Technical
 
 - [ ] [Every check in the test server guide](TEST_SERVER.md#checks-after-deploying) has passed on the deployed server.
-- [ ] A database backup has been restored successfully at least once, onto a separate database.
+- [ ] A database backup has been restored successfully at least once, onto a separate database
+  (`scripts/backup-restore-drill.sh` printed `RESULT: PASS`), and nightly backups run and are copied off the server.
 - [ ] All CI jobs pass on the deployed commit, including Matching Concurrency.
 - [ ] Android release build works on a real phone with Firebase sign-in, not test sign-in.
 - [ ] Real SMS delivery and quota are confirmed for the expected number of users.
@@ -25,7 +26,8 @@ municipality. It is a decision for the project owner and the municipality, and n
 
 - [ ] The municipality, wards and operational zones are set up.
 - [ ] The enabled service list is reviewed by the coordinator.
-- [ ] No test or demo accounts remain on the pilot database.
+- [ ] No test or demo accounts remain on the pilot database. If everything on it is test data, recreate the
+      database. If real people are on it too, use `scripts/retire-test-accounts.sh`.
 
 ## A safe first scope
 

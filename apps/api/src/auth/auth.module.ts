@@ -20,6 +20,8 @@ import { SmsService } from './sms/sms.service';
 import { EmailService } from './email/email.service';
 import { StaffCodeService } from './staff-code.service';
 import { StaffCodeController } from './staff-code.controller';
+import { PeopleService } from '../identity/people.service';
+import { PeopleController } from '../identity/people.controller';
 
 @Global()
 @Module({
@@ -45,8 +47,8 @@ import { StaffCodeController } from './staff-code.controller';
       }),
     }),
   ],
-  controllers: [AuthController, StaffCodeController],
-  providers: [AuthService, AuthGuard, SmsService, FirebaseTokenService, EmailService, StaffCodeService],
+  controllers: [AuthController, StaffCodeController, PeopleController],
+  providers: [AuthService, AuthGuard, SmsService, FirebaseTokenService, EmailService, StaffCodeService, PeopleService],
   exports: [JwtModule, AuthGuard, AuthService, SmsService],
 })
 export class AuthModule {}

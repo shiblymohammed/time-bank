@@ -115,8 +115,13 @@ export class NotificationsService {
   }
 
   /** A token follows whoever signed in last on that phone. */
-  async registerDevice(userId: string, token: string, platform: string): Promise<void> {
-    await this.deviceRepo.upsert({ userId, token, platform }, ['token']);
+  async registerDevice(
+    userId: string,
+    token: string,
+    platform: string,
+    organizationId: string | null = null,
+  ): Promise<void> {
+    await this.deviceRepo.upsert({ userId, token, platform, organizationId }, ['token']);
   }
 
   async removeDevice(userId: string, token: string): Promise<void> {
@@ -157,12 +162,20 @@ export class NotificationsService {
            WHERE s.user_id = u.id AND s.revoked_at IS NULL AND s.expires_at > now())`,
       [notification.userId],
     );
+    // A community's message goes only to that community's app (AT-15). Someone in two communities
+    // has one app for each, and a phone with only the other app is told nothing.
+    const community = notification.data?.['organizationId'];
     const devices =
       reachable.length === 0
         ? []
-        : await manager.getRepository(PushDevice).find({
-            where: { userId: notification.userId },
-          });
+        : (
+            await manager.getRepository(PushDevice).find({
+              where: { userId: notification.userId },
+            })
+          ).filter(
+            (device) =>
+              !community || !device.organizationId || device.organizationId === community,
+          );
     if (devices.length === 0) {
       notification.status = NotificationStatus.NO_DEVICE;
       await manager.save(notification);

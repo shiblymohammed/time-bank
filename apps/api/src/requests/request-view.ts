@@ -2,6 +2,12 @@ import { ServiceRequestStatus, VolunteerAssignmentStatus } from '@ktb/shared-typ
 import type { VolunteerAssignment } from '../matching/entities/volunteer-assignment.entity';
 import type { ServiceRequest } from './entities/service-request.entity';
 
+/** While a visit is booked or under way, both sides may call each other. */
+export const VISIT_CONTACT_STATUSES = [
+  VolunteerAssignmentStatus.ACCEPTED,
+  VolunteerAssignmentStatus.IN_PROGRESS,
+];
+
 const HELP_DELIVERY_STATUSES = [
   VolunteerAssignmentStatus.ACCEPTED,
   VolunteerAssignmentStatus.IN_PROGRESS,
@@ -48,6 +54,7 @@ export function toRequestView(
       ? {
           id: beneficiaryMembership.id,
           membershipNumber: beneficiaryMembership.membershipNumber ?? null,
+          fullName: beneficiaryMembership.user?.fullName ?? null,
         }
       : undefined,
     assignments: assignments
@@ -55,6 +62,18 @@ export function toRequestView(
       .map((assignment) => ({
         id: assignment.id,
         volunteerMembershipId: assignment.volunteerMembershipId,
+        // Who is coming: a name and membership number, and a phone number only while the visit
+        // is booked or under way (staff always).
+        volunteer: assignment.volunteerMembership
+          ? {
+              fullName: assignment.volunteerMembership.user?.fullName ?? null,
+              membershipNumber: assignment.volunteerMembership.membershipNumber ?? null,
+              phoneE164:
+                isStaff || VISIT_CONTACT_STATUSES.includes(assignment.status)
+                  ? (assignment.volunteerMembership.user?.phoneE164 ?? null)
+                  : null,
+            }
+          : null,
         status: assignment.status,
         slotNumber: assignment.slotNumber,
         acceptedAt: assignment.acceptedAt ?? null,

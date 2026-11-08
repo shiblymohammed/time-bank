@@ -122,6 +122,8 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
     }),
   };
   const mockTransactionalManager = {
+    // Raw updates (closing offers nobody took) report no rows changed.
+    query: jest.fn().mockResolvedValue([[], 0]),
     findOne: jest.fn(async (entity, options) => {
       if (entity === OrganizationMembership)
         return {
@@ -604,6 +606,11 @@ describe('MatchingService (Milestone 3 Phase C)', () => {
       });
 
       expect(result.status).toBe(VolunteerAssignmentStatus.ACCEPTED);
+      // Filling the request closes the offers other volunteers did not take.
+      expect(mockTransactionalManager.query).toHaveBeenCalledWith(
+        expect.stringContaining("SET status = 'CANCELLED'"),
+        ['req-1'],
+      );
       expect(result.idempotencyKey).toBe('client-op-123');
       expect(mockTransactionalManager.increment).toHaveBeenCalledWith(
         MatchingRound,

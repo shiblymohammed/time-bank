@@ -119,6 +119,7 @@ export class AuthGuard implements CanActivate {
       roles: payload.roles ?? [],
       isSuperAdmin: payload.isSuperAdmin ?? false,
       sessionId: typeof payload.sid === 'string' ? payload.sid : undefined,
+      appOrganizationId: typeof payload.appOrg === 'string' ? payload.appOrg : undefined,
     };
     request.userId = request.user.id;
     // A sign-in from a community's own app stays inside that community.

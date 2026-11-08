@@ -15,6 +15,8 @@ import { PushNotifications1729118400011 } from './migrations/1729118400011-PushN
 import { SecurityReviewFixes1729118400012 } from './migrations/1729118400012-SecurityReviewFixes';
 import { BookingRecovery1729118400013 } from './migrations/1729118400013-BookingRecovery';
 import { StaffEmailCode1729118400014 } from './migrations/1729118400014-StaffEmailCode';
+import { NamesAndIdentity1729118400015 } from './migrations/1729118400015-NamesAndIdentity';
+import { PushDeviceOrganization1729118400016 } from './migrations/1729118400016-PushDeviceOrganization';
 describe('entity and migration schema contract', () => {
   it('defines every mapped entity column in the migration SQL', async () => {
     const queries: string[] = [];
@@ -39,6 +41,8 @@ describe('entity and migration schema contract', () => {
       new SecurityReviewFixes1729118400012(),
       new BookingRecovery1729118400013(),
       new StaffEmailCode1729118400014(),
+      new NamesAndIdentity1729118400015(),
+      new PushDeviceOrganization1729118400016(),
     ]) {
       await migration.up(runner);
     }

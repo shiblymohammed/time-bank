@@ -63,6 +63,7 @@ describe('AdminService', () => {
   };
 
   const mockRoleGrantRepo = {
+    findAndCount: jest.fn().mockResolvedValue([[], 0]),
     findOne: jest.fn(),
     create: jest.fn(),
     save: jest.fn(),
@@ -158,6 +159,19 @@ describe('AdminService', () => {
       };
       mockWalletRepo.createQueryBuilder.mockReturnValue(qb);
       mockMembershipRepo.count.mockResolvedValue(12);
+      mockRoleGrantRepo.findAndCount.mockResolvedValueOnce([
+        [
+          {
+            membershipId: 'm-1',
+            membership: {
+              organizationId: 'org-1',
+              organization: { name: 'Kottakkal' },
+              user: { fullName: 'Asha Menon', phoneE164: '+919876543210' },
+            },
+          },
+        ],
+        1,
+      ]);
 
       const res = await service.getOverviewMetrics();
 
@@ -167,6 +181,16 @@ describe('AdminService', () => {
       expect(res.totalUniversalWallets).toBe(150);
       expect(res.totalBalanceCredits).toBe(2540.5);
       expect(res.pendingMemberships).toBe(12);
+      expect(res.pendingSuperAdminCount).toBe(1);
+      expect(res.pendingSuperAdmins).toEqual([
+        {
+          membershipId: 'm-1',
+          organizationId: 'org-1',
+          organizationName: 'Kottakkal',
+          fullName: 'Asha Menon',
+          phoneE164: '+919876543210',
+        },
+      ]);
     });
   });
 

@@ -28,6 +28,10 @@ export class PushDevice {
   @Column({ type: 'varchar', length: 10 })
   platform!: string;
 
+  /** The community whose app registered this phone; empty when the build is not locked to one. */
+  @Column({ name: 'organization_id', type: 'uuid', nullable: true })
+  organizationId?: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

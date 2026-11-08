@@ -76,6 +76,14 @@ export class AdminService {
       },
     });
 
+    // Super Admin roles asked for but not yet approved by a second Super Admin.
+    const [waiting, pendingSuperAdminCount] = await this.roleGrantRepo.findAndCount({
+      where: { role: UserRole.SUPER_ADMIN, status: RoleGrantStatus.PENDING_APPROVAL },
+      relations: ['membership', 'membership.user', 'membership.organization'],
+      order: { grantedAt: 'ASC' },
+      take: 10,
+    });
+
     return {
       totalUsers,
       totalOrganizations,
@@ -83,6 +91,14 @@ export class AdminService {
       totalUniversalWallets,
       totalBalanceCredits,
       pendingMemberships,
+      pendingSuperAdminCount,
+      pendingSuperAdmins: waiting.map((grant) => ({
+        membershipId: grant.membershipId,
+        organizationId: grant.membership?.organizationId ?? null,
+        organizationName: grant.membership?.organization?.name ?? null,
+        fullName: grant.membership?.user?.fullName ?? null,
+        phoneE164: grant.membership?.user?.phoneE164 ?? null,
+      })),
     };
   }
 

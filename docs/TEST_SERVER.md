@@ -25,6 +25,7 @@ The development `docker-compose.yml`, the QA scripts and mock OTP must never be 
 | `IMAGE_REPOSITORY`                                                        | GitHub repository in lowercase, such as `owner/time-bank`                  |
 | `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`                       | New values, never reused from development                                  |
 | `JWT_SECRET`                                                              | Random, at least 32 characters                                             |
+| `IDENTITY_FINGERPRINT_SECRET`                                             | Random, at least 32 characters; never change it once members are verified  |
 | `DASHBOARD_ORIGIN`                                                        | Public admin panel origin, such as `https://admin.example.org`             |
 | `FIREBASE_PROJECT_ID`                                                     | `indian-time-bank`                                                          |
 | `FIREBASE_WEB_API_KEY`, `FIREBASE_WEB_AUTH_DOMAIN`, `FIREBASE_WEB_APP_ID` | From the Web app above                                                     |
@@ -54,7 +55,11 @@ docker compose -f docker-compose.server.yml run --rm api node apps/api/dist/data
 docker compose -f docker-compose.server.yml up -d
 ```
 
-### Staff email code (second sign-in step)
+The **Deploy to Production** GitHub workflow does the same after CI passes and takes a database backup first. It needs
+the `VPS_*` repository secrets and a configured `production` environment. Take a backup by hand before a manual
+migration: the credit-controls migration refuses to roll back once credit activity depends on it.
+
+## Staff email code (second sign-in step)
 
 Coordinators and admins must enter a code emailed to them each time they sign in to the panel.
 Set `EMAIL_PROVIDER=resend`, `RESEND_API_KEY` and `MAIL_FROM` in `.env`. Then give the first
@@ -68,9 +73,36 @@ Everyone else gets their address from the panel: open the member, then **Staff s
 Until email is set up, staff sign-ins only have member powers. `STAFF_SECOND_FACTOR=off` turns the
 step off and is for private QA only.
 
-The **Deploy to Production** GitHub workflow does the same after CI passes and takes a database backup first. It needs
-the `VPS_*` repository secrets and a configured `production` environment. Take a backup by hand before a manual
-migration: the credit-controls migration refuses to roll back once credit activity depends on it.
+## Backups
+
+Take a backup by hand with the nightly script below. It writes `nightly-<date>.sql.gz` to `/backups`
+and keeps 14 days. Run it from root's crontab, every night at 02:30 India time:
+
+```bash
+30 21 * * * cd /opt/time-bank && scripts/backup-database.sh >> /backups/backup.log 2>&1
+```
+
+Use your deploy folder in place of `/opt/time-bank`. Also copy `/backups` off the server, for
+example to object storage: a backup on the same disk is lost with that disk.
+
+### Restore drill
+
+Prove the backups restore, before the pilot and then monthly. The drill restores onto a separate
+scratch database, checks it against live and removes it. It only reads the live database.
+
+```bash
+scripts/backup-restore-drill.sh
+```
+
+With no argument it takes a fresh backup and restores that. To test a backup you already have:
+
+```bash
+scripts/backup-restore-drill.sh /backups/nightly-20261108-213000.sql.gz
+```
+
+`RESULT: PASS` means the restore ran without one SQL error, every table and migration is there, and
+(for a fresh backup) every table has the expected rows. Anything else is `RESULT: FAIL` with the
+reason, and the exit code is non-zero. Note the date and result in the pilot checklist.
 
 ## Checks after deploying
 

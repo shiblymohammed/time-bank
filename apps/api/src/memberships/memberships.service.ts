@@ -1,3 +1,4 @@
+import { cleanPersonName } from '../identity/person-name';
 import {
   Injectable,
   NotFoundException,
@@ -79,6 +80,16 @@ export class MembershipsService {
       throw new BadRequestException('Organization is not accepting new membership applications');
     }
 
+    // A name is needed once; joining another community later can reuse it.
+    const applicant = await this.userRepo.findOne({ where: { id: userId } });
+    if (!applicant) throw new NotFoundException('User not found');
+    if (dto.fullName !== undefined) {
+      applicant.fullName = cleanPersonName(dto.fullName);
+      await this.userRepo.save(applicant);
+    } else if (!applicant.fullName) {
+      throw new BadRequestException('Enter your full name to join');
+    }
+
     const existing = await this.membershipRepo.findOne({
       where: { organizationId, userId },
       relations: ['roleGrants'],
@@ -136,10 +147,9 @@ export class MembershipsService {
     const saved = await this.membershipRepo.save(membership);
 
     // If user has no primary organization set, designate this one
-    const user = await this.userRepo.findOne({ where: { id: userId } });
-    if (user && !user.primaryOrgId) {
-      user.primaryOrgId = organizationId;
-      await this.userRepo.save(user);
+    if (!applicant.primaryOrgId) {
+      applicant.primaryOrgId = organizationId;
+      await this.userRepo.save(applicant);
     }
 
     // Audit record
@@ -599,6 +609,7 @@ export class MembershipsService {
     const qb = this.membershipRepo
       .createQueryBuilder('m')
       .innerJoinAndSelect('m.user', 'user')
+      .leftJoinAndSelect('user.verifiedIdentity', 'verifiedIdentity')
       .leftJoinAndSelect('m.roleGrants', 'roleGrants')
       .where('m.organizationId = :organizationId', { organizationId });
 
@@ -612,7 +623,7 @@ export class MembershipsService {
         { selectedRole: query.role, activeRole: RoleGrantStatus.ACTIVE },
       );
     if (query.search?.trim())
-      qb.andWhere('(m.membershipNumber ILIKE :search OR user.phoneE164 ILIKE :search)', {
+      qb.andWhere('(m.membershipNumber ILIKE :search OR user.phoneE164 ILIKE :search OR user.fullName ILIKE :search)', {
         search: `%${query.search.trim()}%`,
       });
 
@@ -635,7 +646,7 @@ export class MembershipsService {
   ): Promise<OrganizationMembership> {
     const membership = await this.membershipRepo.findOne({
       where: { id: membershipId, organizationId },
-      relations: ['user', 'roleGrants', 'approvals', 'documents'],
+      relations: ['user', 'user.verifiedIdentity', 'roleGrants', 'approvals', 'documents'],
     });
 
     if (!membership) {

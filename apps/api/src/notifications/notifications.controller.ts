@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, HttpCode, HttpStatus, Put, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, HttpCode, HttpStatus, Put, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { CurrentUserId } from '../authorization/decorators/current-user.decorator';
@@ -15,8 +15,17 @@ export class NotificationsController {
   @Put()
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Register this phone for push messages' })
-  async register(@Body() dto: RegisterPushDeviceDto, @CurrentUserId() userId: string) {
-    await this.notifications.registerDevice(userId, dto.token, dto.platform);
+  async register(
+    @Body() dto: RegisterPushDeviceDto,
+    @CurrentUserId() userId: string,
+    @Req() request: { user?: { appOrganizationId?: string } },
+  ) {
+    await this.notifications.registerDevice(
+      userId,
+      dto.token,
+      dto.platform,
+      request.user?.appOrganizationId ?? null,
+    );
   }
 
   @Delete()

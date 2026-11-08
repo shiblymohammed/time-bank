@@ -46,6 +46,21 @@ export class VerifiedIdentity {
   @Column({ name: 'rejection_reason', type: 'text', nullable: true })
   rejectionReason?: string | null;
 
+  /** The kind of document a coordinator checked (IdentityDocumentType). */
+  @Column({ name: 'document_type', type: 'varchar', length: 30, nullable: true })
+  documentType?: string | null;
+
+  /** Last 4 characters of the document number, for staff to recognise it. */
+  @Column({ name: 'document_last4', type: 'varchar', length: 4, nullable: true })
+  documentLast4?: string | null;
+
+  /** Keyed one-way fingerprint of the full number; never shown, only compared. */
+  @Column({ name: 'document_fingerprint', type: 'varchar', length: 64, nullable: true, select: false })
+  documentFingerprint?: string | null;
+
+  @Column({ name: 'verification_notes', type: 'varchar', length: 500, nullable: true })
+  verificationNotes?: string | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 

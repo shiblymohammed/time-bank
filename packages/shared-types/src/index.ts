@@ -44,6 +44,8 @@ export enum AccountStatus {
   DECEASED_CLOSED = 'DECEASED_CLOSED',
   /** Duplicate account — coordinator-reviewed and Municipality Admin approved (D#87, D#88) */
   DUPLICATE_CLOSED = 'DUPLICATE_CLOSED',
+  /** A test or demo account closed before a pilot (scripts/retire-test-accounts.sh). */
+  TEST_ACCOUNT_RETIRED = 'TEST_ACCOUNT_RETIRED',
 }
 
 /**

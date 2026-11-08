@@ -645,6 +645,7 @@ export class AuthService {
     return {
       id: user.id,
       phoneE164: user.phoneE164,
+      fullName: user.fullName ?? null,
       status: user.status,
       primaryOrgId: user.primaryOrgId,
       createdAt: user.createdAt,
@@ -654,6 +655,8 @@ export class AuthService {
             verificationStatus: user.verifiedIdentity.verificationStatus,
             verificationLevel: user.verifiedIdentity.verificationLevel,
             verifiedAt: user.verifiedIdentity.verifiedAt,
+            documentType: user.verifiedIdentity.documentType ?? null,
+            documentLast4: user.verifiedIdentity.documentLast4 ?? null,
           }
         : null,
       universalWallet: user.universalWallet

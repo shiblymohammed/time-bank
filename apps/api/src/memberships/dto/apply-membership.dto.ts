@@ -67,6 +67,15 @@ export class VolunteerApplicationDto {
 
 export class ApplyMembershipDto {
   @ApiPropertyOptional({
+    example: 'Fathima Beevi',
+    description: 'Full name, as on their ID. Required the first time someone joins anywhere.',
+  })
+  @IsOptional()
+  @IsString()
+  @Length(1, 120)
+  fullName?: string;
+
+  @ApiPropertyOptional({
     example: 'Resident of Kottakkal Ward 4 since 2018',
     description: 'Optional introductory note or address details from applicant',
   })

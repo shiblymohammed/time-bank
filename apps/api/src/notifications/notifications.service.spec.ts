@@ -51,6 +51,43 @@ describe('NotificationsService delivery', () => {
     expect(devices.find).not.toHaveBeenCalled();
   });
 
+  describe('with two community apps on one account (AT-15)', () => {
+    const kottakkal = { token: 'kottakkal-app', organizationId: 'org-kottakkal' };
+    const kozhikode = { token: 'kozhikode-app', organizationId: 'org-kozhikode' };
+    const sentTokens = async (data: Record<string, string>) => {
+      const notification = { ...message(), data } as NotificationOutbox;
+      outbox.find.mockResolvedValue([notification]);
+      sender.send.mockResolvedValue({ delivered: 1, staleTokens: [] });
+      await service.deliverDue();
+      return { notification, tokens: sender.send.mock.calls[0]?.[0] };
+    };
+
+    it("sends a community's offer only to that community's app", async () => {
+      devices.find.mockResolvedValue([kottakkal, kozhikode]);
+      const { tokens } = await sentTokens({ organizationId: 'org-kozhikode' });
+      expect(tokens).toEqual(['kozhikode-app']);
+    });
+
+    it('sends nothing to a phone that only has the other app', async () => {
+      devices.find.mockResolvedValue([kottakkal]);
+      const { notification } = await sentTokens({ organizationId: 'org-kozhikode' });
+      expect(sender.send).not.toHaveBeenCalled();
+      expect(notification.status).toBe(NotificationStatus.NO_DEVICE);
+    });
+
+    it('still reaches a phone registered before apps were recorded', async () => {
+      devices.find.mockResolvedValue([{ token: 'older', organizationId: null }]);
+      const { tokens } = await sentTokens({ organizationId: 'org-kozhikode' });
+      expect(tokens).toEqual(['older']);
+    });
+
+    it('sends a message about no community to every app', async () => {
+      devices.find.mockResolvedValue([kottakkal, kozhikode]);
+      const { tokens } = await sentTokens({});
+      expect(tokens).toEqual(['kottakkal-app', 'kozhikode-app']);
+    });
+  });
+
   it('marks a delivered message as sent', async () => {
     const notification = message();
     outbox.find.mockResolvedValue([notification]);

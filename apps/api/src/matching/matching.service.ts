@@ -455,7 +455,13 @@ export class MatchingService {
     }
     const assignments = await this.assignmentRepo.find({
       where: { organizationId: orgId, volunteerMembershipId: context.membershipId },
-      relations: ['serviceRequest', 'serviceRequest.reschedules', 'reschedule'],
+      relations: [
+        'serviceRequest',
+        'serviceRequest.reschedules',
+        'serviceRequest.beneficiaryMembership',
+        'serviceRequest.beneficiaryMembership.user',
+        'reschedule',
+      ],
       order: { offeredAt: 'DESC' },
       take: 100,
     });
@@ -495,6 +501,13 @@ export class MatchingService {
             expectedDurationMinutes: assignment.serviceRequest.expectedDurationMinutes,
             locationAddressText: needsAddress(assignment.status)
               ? assignment.serviceRequest.locationAddressText
+              : null,
+            // Who they are helping, and how to call them, once the visit is theirs.
+            beneficiary: needsAddress(assignment.status)
+              ? {
+                  fullName: assignment.serviceRequest.beneficiaryMembership?.user?.fullName ?? null,
+                  phoneE164: assignment.serviceRequest.beneficiaryMembership?.user?.phoneE164 ?? null,
+                }
               : null,
             locationWardNumber: assignment.serviceRequest.locationWardNumber,
           }
@@ -1164,6 +1177,7 @@ export class MatchingService {
         request.status = ServiceRequestStatus.PARTIALLY_ACCEPTED;
       }
       await manager.save(ServiceRequest, request);
+      await this.closeStaleOffers(manager, request.id);
       await this.notifications.notifyRequestOwners(manager, request, {
         organizationId: orgId,
         requestId: request.id,
@@ -1873,6 +1887,7 @@ export class MatchingService {
         request.status = ServiceRequestStatus.PARTIALLY_ACCEPTED;
       }
       await manager.save(ServiceRequest, request);
+      await this.closeStaleOffers(manager, request.id);
 
       await this.notifications.enqueue(manager, {
         userId: volunteer.userId,
@@ -1905,6 +1920,36 @@ export class MatchingService {
   }
 
   // ─── Offer Expiry & Progression Processing (D#7, D#12, D#13) ────────────────
+  /**
+   * Offers go to several volunteers at once. Once a request no longer needs volunteers (filled,
+   * started, finished, cancelled or given up), the offers nobody took are closed, so they leave
+   * volunteers' lists. Expired offers on such requests are timed out as well; open requests
+   * time out their own offers during progression. Offers asking an accepted volunteer to confirm
+   * a new time belong to a reschedule and are left to it.
+   */
+  async closeStaleOffers(manager?: EntityManager, requestId?: string): Promise<number> {
+    const run = manager ?? this.dataSource.manager;
+    const one = requestId ? 'AND a.service_request_id = $1' : '';
+    const params = requestId ? [requestId] : [];
+    const [, cancelled] = await run.query(
+      `UPDATE volunteer_assignments a SET status = 'CANCELLED', updated_at = now()
+       FROM service_requests r
+       WHERE r.id = a.service_request_id AND a.status = 'OFFERED' AND a.reschedule_id IS NULL
+         AND r.status IN ('FULLY_MATCHED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'EXPIRED_UNMATCHED')
+         ${one}`,
+      params,
+    );
+    const [, timedOut] = await run.query(
+      `UPDATE volunteer_assignments a SET status = 'TIMED_OUT', updated_at = now()
+       FROM service_requests r
+       WHERE r.id = a.service_request_id AND a.status = 'OFFERED' AND a.offer_expires_at < now()
+         AND r.status NOT IN ('MATCHING_ACTIVE', 'PARTIALLY_ACCEPTED')
+         ${one}`,
+      params,
+    );
+    return Number(cancelled ?? 0) + Number(timedOut ?? 0);
+  }
+
   async processExpiredOffers(requestId?: string, manager?: EntityManager): Promise<number> {
     const repo = manager ? manager.getRepository(VolunteerAssignment) : this.assignmentRepo;
     const result = await repo.update(

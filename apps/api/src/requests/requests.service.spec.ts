@@ -751,7 +751,7 @@ describe('RequestsService', () => {
         ],
       });
 
-      it('gives a beneficiary no phone numbers, answers or declined offers', async () => {
+      it('gives a beneficiary no answers, declined offers or phone once the visit is over', async () => {
         mockRequestRepo.findOne.mockResolvedValue(request());
 
         const result = await service.getRequestById(
@@ -761,15 +761,32 @@ describe('RequestsService', () => {
           memberCtx([UserRole.BENEFICIARY]),
         );
 
-        expect(JSON.stringify(result)).not.toMatch(/phoneE164|application|private/);
+        expect(JSON.stringify(result)).not.toMatch(/\+9190000000|application|private/);
         expect(result.assignments?.map((a) => a.id)).toEqual(['helper']);
         expect(result.beneficiaryMembership).toEqual({
           id: 'ben-mem-1',
           membershipNumber: 'KTB-2026-0001',
+          fullName: null,
         });
       });
 
-      it('shows staff every offer without member records', async () => {
+      it("gives a beneficiary the volunteer's phone while the visit is booked", async () => {
+        const booked = request();
+        booked.assignments[0]!.status = VolunteerAssignmentStatus.ACCEPTED;
+        mockRequestRepo.findOne.mockResolvedValue(booked);
+
+        const result = await service.getRequestById(
+          'org-1',
+          'req-1',
+          'user-1',
+          memberCtx([UserRole.BENEFICIARY]),
+        );
+
+        expect(JSON.stringify(result)).toContain('+919000000002');
+        expect(JSON.stringify(result)).not.toMatch(/application|private/);
+      });
+
+      it('shows staff every offer and who is coming, without member records', async () => {
         mockRequestRepo.findOne.mockResolvedValue(request());
 
         const result = await service.getRequestById(
@@ -780,7 +797,7 @@ describe('RequestsService', () => {
         );
 
         expect(result.assignments?.map((a) => a.id)).toEqual(['helper', 'declined']);
-        expect(JSON.stringify(result)).not.toContain('phoneE164');
+        expect(JSON.stringify(result)).not.toMatch(/application|\+919000000001/);
       });
 
       it('ends access for a caregiver who created the request once removed', async () => {

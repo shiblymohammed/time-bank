@@ -8,23 +8,23 @@ tests and documented limitations.
 
 ## Status on 8 November 2026
 
-| Step                           | Status                                                                                                            |
-| ------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| M1 Foundation                  | Built                                                                                                             |
-| M2 Identity and administration | Built; SIM-swap recovery and nominees open                                                                        |
-| M3 Catalogue and matching      | Built, including automatic matching, booking recovery and the push queue                                          |
-| M4 Time credits                | Built                                                                                                             |
-| Kottakkal pilot                | Next: deploy, real SMS and push, staff second factor, backup restore drill, [pilot checklist](PILOT_CHECKLIST.md) |
-| Second-organization readiness  | See below; needed before a second organization goes live                                                          |
-| M5 to M8                       | Planned                                                                                                           |
-| M9 Production hardening        | Security review done; the rest planned                                                                            |
+| Step                           | Status                                                                                                              |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
+| M1 Foundation                  | Built                                                                                                               |
+| M2 Identity and administration | Built; SIM-swap recovery and nominees open                                                                          |
+| M3 Catalogue and matching      | Built, including automatic matching, booking recovery and the push queue                                            |
+| M4 Time credits                | Built                                                                                                               |
+| Kottakkal pilot                | Staff second factor and restore drill built. Next: deploy, real SMS and push, [pilot checklist](PILOT_CHECKLIST.md) |
+| Second-organization readiness  | See below; needed before a second organization goes live                                                            |
+| M5 to M8                       | Planned                                                                                                             |
+| M9 Production hardening        | Security review done; the rest planned                                                                              |
 
 ## Second-organization readiness
 
 Needed before any organization after Kottakkal goes live (PRD §6.2, ITB-013 to ITB-016):
 
-- [ ] Each app is locked to its organization; a non-member is told to apply there (ITB-007, AT-01).
-- [ ] Each registered device records its organization's app; push goes only to matching devices (AT-15).
+- [x] Each app is locked to its organization; a non-member is told to apply there (ITB-007, AT-01).
+- [x] Each registered device records its organization's app; push goes only to matching devices (AT-15).
 - [ ] Flutter flavors per organization: name, logo, colours, `com.indiantimebank.<organization>`, Firebase file.
 - [ ] Staff dashboard on `<organization>.indiantimebank.com`, allowed by the API and by Firebase.
 

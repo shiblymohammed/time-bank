@@ -28,7 +28,18 @@ type Membership = {
   organizationId: string;
   status: string;
   membershipNumber?: string | null;
-  user?: { phoneE164: string };
+  user?: {
+    phoneE164: string;
+    fullName?: string | null;
+    verifiedIdentity?: {
+      verificationStatus: string;
+      verifiedAt?: string | null;
+      rejectionReason?: string | null;
+      documentType?: string | null;
+      documentLast4?: string | null;
+      verificationNotes?: string | null;
+    } | null;
+  };
   roleGrants: Grant[];
   rejectionReason?: string | null;
   requestedRole?: string | null;
@@ -46,6 +57,15 @@ type Membership = {
 /** "+919876543210" reads as "+91 98765 43210"; other numbers are left as stored. */
 const phone = (value?: string) =>
   value && /^\+91\d{10}$/.test(value) ? `+91 ${value.slice(3, 8)} ${value.slice(8)}` : value;
+const IDENTITY_DOCUMENTS = [
+  'AADHAAR_CARD',
+  'VOTER_ID',
+  'PASSPORT',
+  'DRIVING_LICENSE',
+  'PAN_CARD',
+  'RATION_CARD',
+  'OTHER',
+];
 const listed = (values: string[] = []) =>
   values.length ? values.map((value) => label(value)).join(', ') : 'Not given';
 type Profile = {
@@ -54,7 +74,12 @@ type Profile = {
   status: string;
   memberships: { organizationId: string; status: string; roles: string[] }[];
   /** Whether this sign-in still needs the emailed staff code. */
-  staffCheck?: { required: boolean; verified: boolean; hasEmail: boolean; maskedEmail: string | null };
+  staffCheck?: {
+    required: boolean;
+    verified: boolean;
+    hasEmail: boolean;
+    maskedEmail: string | null;
+  };
 };
 const needsStaffCode = (profile: Profile) =>
   Boolean(profile.staffCheck?.required && !profile.staffCheck.verified);
@@ -91,6 +116,14 @@ type Metrics = {
   totalUniversalWallets: number;
   totalBalanceCredits: number;
   pendingMemberships: number;
+  pendingSuperAdminCount: number;
+  pendingSuperAdmins: {
+    membershipId: string;
+    organizationId: string;
+    organizationName: string | null;
+    fullName: string | null;
+    phoneE164: string | null;
+  }[];
 };
 type View = {
   memberships: Membership[];
@@ -189,13 +222,21 @@ const globalAdmin = (profile: Profile) =>
   approved(profile).some((member) => member.roles.includes('SUPER_ADMIN'));
 const staffMemberships = (profile: Profile) =>
   approved(profile).filter((member) => member.roles.some((role) => STAFF.includes(role)));
+/** Words whose capitals a plain "Sentence case" would lose. */
+const LABELS: Record<string, string> = {
+  ID_VERIFIED: 'ID verified',
+  VOTER_ID: 'Voter ID',
+  PAN_CARD: 'PAN card',
+  DRIVING_LICENSE: 'Driving licence',
+};
 const label = (value: string) =>
+  LABELS[value] ??
   value
     .replaceAll('_', ' ')
     .toLowerCase()
     .replace(/^./, (char) => char.toUpperCase());
 function Badge({ value }: { value: string }) {
-  const tone = ['ACTIVE', 'APPROVED', 'RESOLVED'].includes(value)
+  const tone = ['ACTIVE', 'APPROVED', 'RESOLVED', 'VERIFIED', 'ID_VERIFIED'].includes(value)
     ? 'active'
     : ['SUSPENDED', 'REJECTED', 'ARCHIVED'].includes(value)
       ? 'suspended'
@@ -974,12 +1015,41 @@ export default function AdminDashboard(): React.JSX.Element {
                       className="metric-link"
                       onClick={() => {
                         changeTab('memberships');
-                        setStatus('PENDING_REVIEW');
+                        setStatus('APPLIED');
                       }}
                     >
                       Review applications →
                     </button>
                   )}
+                </div>
+                <div className="metric-icon">
+                  <Icon name="inbox" />
+                </div>
+              </section>
+              <section
+                className={`glass-panel metric-card ${view.metrics.pendingSuperAdminCount ? 'attention' : ''}`}
+              >
+                <div>
+                  <div className="metric-label">Super Admins awaiting approval</div>
+                  <div className="metric-value">{view.metrics.pendingSuperAdminCount}</div>
+                  {view.metrics.pendingSuperAdmins.map((person) => (
+                    <button
+                      className="metric-link"
+                      key={person.membershipId}
+                      disabled={pending}
+                      onClick={() => {
+                        setTenant(person.organizationId);
+                        changeTab('memberships');
+                        void review({
+                          id: person.membershipId,
+                          organizationId: person.organizationId,
+                        } as Membership);
+                      }}
+                    >
+                      {person.fullName ?? phone(person.phoneE164 ?? undefined) ?? 'Unnamed'}
+                      {person.organizationName && `, ${person.organizationName}`} →
+                    </button>
+                  ))}
                 </div>
                 <div className="metric-icon">
                   <Icon name="inbox" />
@@ -1297,8 +1367,18 @@ export default function AdminDashboard(): React.JSX.Element {
                         {view.memberships.map((member) => (
                           <tr key={member.id}>
                             <td>
-                              {phone(member.user?.phoneE164) ?? 'Unknown number'}
-                              <div className="mono">{member.userId.slice(0, 8)}</div>
+                              {member.user?.fullName ?? (
+                                <span className="help-text">No name yet</span>
+                              )}
+                              {member.user?.verifiedIdentity?.verificationStatus === 'VERIFIED' && (
+                                <>
+                                  {' '}
+                                  <Badge value="ID_VERIFIED" />
+                                </>
+                              )}
+                              <div className="mono">
+                                {phone(member.user?.phoneE164) ?? 'Unknown number'}
+                              </div>
                             </td>
                             <td>
                               <Badge value={member.status} />
@@ -1353,11 +1433,15 @@ export default function AdminDashboard(): React.JSX.Element {
                       <div className="drawer-header">
                         <div>
                           <h2 id="membership-title">
-                            {phone(detail.membership.user?.phoneE164) ?? 'Membership'}
+                            {detail.membership.user?.fullName ??
+                              phone(detail.membership.user?.phoneE164) ??
+                              'Membership'}
                           </h2>
                           <p>
                             <Badge value={detail.membership.status} />{' '}
                             {detail.membership.membershipNumber}
+                            {detail.membership.user?.fullName &&
+                              ` · ${phone(detail.membership.user.phoneE164)}`}
                           </p>
                         </div>
                         <button
@@ -1465,6 +1549,146 @@ export default function AdminDashboard(): React.JSX.Element {
                             </p>
                           </section>
                         )}
+                        <section className="drawer-section">
+                          <div className="section-heading">
+                            <h3>Name and identity</h3>
+                            <button
+                              className="btn btn-sm btn-secondary"
+                              onClick={() =>
+                                openAction({
+                                  title: 'Edit name',
+                                  description: 'Their full name as it appears on their ID.',
+                                  fields: [
+                                    {
+                                      key: 'fullName',
+                                      label: 'Full name',
+                                      value: detail.membership.user?.fullName ?? '',
+                                      minLength: 2,
+                                      maxLength: 100,
+                                    },
+                                  ],
+                                  submit: (values) =>
+                                    backend(`${membershipBase}/name`, 'PATCH', values),
+                                  successMessage: () => 'Name saved.',
+                                })
+                              }
+                            >
+                              Edit name
+                            </button>
+                          </div>
+                          {(() => {
+                            const identity = detail.membership.user?.verifiedIdentity;
+                            const status = identity?.verificationStatus ?? 'UNVERIFIED';
+                            return (
+                              <>
+                                <dl className="facts">
+                                  <dt>Identity</dt>
+                                  <dd>
+                                    <Badge value={status} />
+                                  </dd>
+                                  {status === 'VERIFIED' && identity?.documentType && (
+                                    <>
+                                      <dt>Checked</dt>
+                                      <dd>
+                                        {label(identity.documentType)} ending{' '}
+                                        {identity.documentLast4}
+                                        {identity.verifiedAt &&
+                                          `, ${new Date(identity.verifiedAt).toLocaleDateString('en-IN')}`}
+                                      </dd>
+                                    </>
+                                  )}
+                                  {identity?.verificationNotes && (
+                                    <>
+                                      <dt>Notes</dt>
+                                      <dd>{identity.verificationNotes}</dd>
+                                    </>
+                                  )}
+                                  {status === 'REJECTED' && identity?.rejectionReason && (
+                                    <>
+                                      <dt>Not verified because</dt>
+                                      <dd>{identity.rejectionReason}</dd>
+                                    </>
+                                  )}
+                                </dl>
+                                <p className="help-text">
+                                  Verify only after seeing the original document with the person.
+                                  Only the last 4 digits are kept. Verified members can receive
+                                  gifted credits.
+                                </p>
+                                <div className="section-heading">
+                                  <button
+                                    className="btn btn-sm btn-primary"
+                                    onClick={() =>
+                                      openAction({
+                                        title:
+                                          status === 'VERIFIED'
+                                            ? 'Verify identity again'
+                                            : 'Verify identity',
+                                        description:
+                                          'Check the original document with the person present. The full number is used only to catch one document on two accounts and is not stored.',
+                                        fields: [
+                                          {
+                                            key: 'documentType',
+                                            label: 'Document checked',
+                                            options: IDENTITY_DOCUMENTS,
+                                          },
+                                          {
+                                            key: 'documentNumber',
+                                            label: 'Document number',
+                                            minLength: 4,
+                                            maxLength: 40,
+                                          },
+                                          {
+                                            key: 'notes',
+                                            label: 'Notes',
+                                            type: 'textarea',
+                                            optional: true,
+                                            maxLength: 500,
+                                          },
+                                        ],
+                                        submit: (values) =>
+                                          backend(`${membershipBase}/identity`, 'POST', {
+                                            decision: 'VERIFY',
+                                            documentType: values['documentType'],
+                                            documentNumber: values['documentNumber'],
+                                            ...(values['notes'] ? { notes: values['notes'] } : {}),
+                                          }),
+                                        successMessage: (result) =>
+                                          `Identity verified (document ending ${(result as { documentLast4?: string } | undefined)?.documentLast4 ?? ''}).`,
+                                      })
+                                    }
+                                  >
+                                    {status === 'VERIFIED' ? 'Verify again' : 'Verify identity'}
+                                  </button>
+                                  <button
+                                    className="btn btn-sm btn-secondary"
+                                    onClick={() =>
+                                      openAction({
+                                        title: 'Not verified',
+                                        fields: [
+                                          {
+                                            key: 'reason',
+                                            label: 'Reason',
+                                            type: 'textarea',
+                                            maxLength: 500,
+                                          },
+                                        ],
+                                        submit: (values) =>
+                                          backend(`${membershipBase}/identity`, 'POST', {
+                                            decision: 'REJECT',
+                                            reason: values['reason'],
+                                          }),
+                                        successMessage: () => 'Marked as not verified.',
+                                      })
+                                    }
+                                  >
+                                    Not verified
+                                  </button>
+                                </div>
+                              </>
+                            );
+                          })()}
+                        </section>
                         <section className="drawer-section">
                           <h3>Supporting documents</h3>
                           {detail.documents.length === 0 && (

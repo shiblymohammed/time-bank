@@ -36,6 +36,12 @@ export class MatchingWorker implements OnApplicationBootstrap, OnApplicationShut
       this.logger.error('Could not recover bookings', error);
     }
     try {
+      // Offers nobody took on requests that no longer need volunteers.
+      await this.matching.closeStaleOffers();
+    } catch (error) {
+      this.logger.error('Could not close stale offers', error);
+    }
+    try {
       const due = await this.matching.findRequestsDueForProgression();
       for (const request of due) {
         try {
