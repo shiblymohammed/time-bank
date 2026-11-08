@@ -8,7 +8,7 @@ import {
   Inject,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { EntityManager, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import { randomUUID } from 'crypto';
 import {
   AssignmentReviewDecision,
@@ -420,7 +420,23 @@ export class RequestsService {
       .take(limit);
 
     const [data, total] = await qb.getManyAndCount();
-    return { data: data.map((request) => toRequestView(request, Boolean(isCoordOrAdmin))), total };
+    // Lists carry no assignments, but each started visit still needs its stage.
+    const started = data.filter((r) => r.status === ServiceRequestStatus.IN_PROGRESS);
+    const visits = started.length
+      ? await this.requestRepo.manager.find(VolunteerAssignment, {
+          where: { serviceRequestId: In(started.map((r) => r.id)) },
+        })
+      : [];
+    return {
+      data: data.map((request) =>
+        toRequestView(
+          request,
+          Boolean(isCoordOrAdmin),
+          visits.filter((visit) => visit.serviceRequestId === request.id),
+        ),
+      ),
+      total,
+    };
   }
 
   async getRequestById(

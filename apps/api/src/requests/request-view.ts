@@ -1,4 +1,5 @@
-import { VolunteerAssignmentStatus } from '@ktb/shared-types';
+import { ServiceRequestStatus, VolunteerAssignmentStatus } from '@ktb/shared-types';
+import type { VolunteerAssignment } from '../matching/entities/volunteer-assignment.entity';
 import type { ServiceRequest } from './entities/service-request.entity';
 
 const HELP_DELIVERY_STATUSES = [
@@ -7,14 +8,42 @@ const HELP_DELIVERY_STATUSES = [
   VolunteerAssignmentStatus.COMPLETED,
 ];
 
+/** Where a started visit stands once the volunteer has stopped working. */
+export type VisitStage = 'AWAITING_CONFIRMATION' | 'UNDER_REVIEW';
+
+/**
+ * A request stays IN_PROGRESS until the help is confirmed. Once no volunteer is still
+ * working, the visit is either waiting for confirmation or with a coordinator.
+ */
+export function visitStage(
+  status: ServiceRequestStatus,
+  assignments: Pick<
+    VolunteerAssignment,
+    'status' | 'confirmedAt' | 'reviewRequestedAt' | 'reviewResolvedAt'
+  >[] = [],
+): VisitStage | null {
+  if (status !== ServiceRequestStatus.IN_PROGRESS) return null;
+  if (assignments.some((a) => a.status === VolunteerAssignmentStatus.IN_PROGRESS)) return null;
+  const finished = assignments.filter(
+    (a) => a.status === VolunteerAssignmentStatus.COMPLETED && !a.confirmedAt,
+  );
+  if (finished.some((a) => a.reviewRequestedAt && !a.reviewResolvedAt)) return 'UNDER_REVIEW';
+  return finished.length > 0 ? 'AWAITING_CONFIRMATION' : null;
+}
+
 /**
  * What a request reader may see. Member records stay out: they hold phone numbers and
  * application answers. Only staff see offers nobody took up.
  */
-export function toRequestView(request: ServiceRequest, isStaff: boolean) {
+export function toRequestView(
+  request: ServiceRequest,
+  isStaff: boolean,
+  stageAssignments: VolunteerAssignment[] | undefined = request.assignments,
+) {
   const { beneficiaryMembership, assignments, ...details } = request;
   return {
     ...details,
+    stage: visitStage(request.status, stageAssignments),
     beneficiaryMembership: beneficiaryMembership
       ? {
           id: beneficiaryMembership.id,
