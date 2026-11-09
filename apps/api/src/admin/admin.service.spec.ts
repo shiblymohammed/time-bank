@@ -26,6 +26,7 @@ import { MembershipRoleGrant } from '../memberships/entities/membership-role-gra
 import { AuditService } from '../audit/audit.service';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { RoleHierarchyService } from '../authorization/role-hierarchy.service';
+import { RestrictionsService } from '../restrictions/restrictions.service';
 
 describe('AdminService', () => {
   let service: AdminService;
@@ -108,6 +109,11 @@ describe('AdminService', () => {
     requiresSuperAdminToGrant: jest.fn().mockReturnValue(false),
   };
 
+  const mockRestrictions = {
+    afterDirectRestriction: jest.fn().mockResolvedValue(undefined),
+    afterDirectLift: jest.fn().mockResolvedValue(undefined),
+  };
+
   beforeEach(async () => {
     jest.clearAllMocks();
     superAdmins.holds = false;
@@ -135,6 +141,7 @@ describe('AdminService', () => {
         { provide: AuditService, useValue: mockAuditService },
         { provide: AuthorizationService, useValue: mockAuthorizationService },
         { provide: RoleHierarchyService, useValue: mockRoleHierarchyService },
+        { provide: RestrictionsService, useValue: mockRestrictions },
       ],
     }).compile();
 
@@ -196,6 +203,7 @@ describe('AdminService', () => {
 
   describe('imposeRestriction', () => {
     it('should throw BadRequestException if admin restricts self', async () => {
+      mockUserRepo.findOne.mockResolvedValueOnce({ id: 'admin-1', status: AccountStatus.ACTIVE });
       await expect(
         service.imposeRestriction(
           {
@@ -294,6 +302,15 @@ describe('AdminService', () => {
       expect(user.status).toBe(AccountStatus.ACTIVE);
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'GLOBAL_RESTRICTION_RESOLVED' }),
+        mockManager,
+      );
+      expect(mockRestrictions.afterDirectLift).toHaveBeenCalledWith(
+        mockManager,
+        res,
+        true,
+        'admin-1',
+        'Documents cleared',
+        undefined,
       );
     });
   });

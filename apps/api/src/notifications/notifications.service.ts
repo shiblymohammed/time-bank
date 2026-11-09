@@ -20,8 +20,8 @@ export interface NewNotification {
 
 /** A change to a booking. Text stays generic: push messages show on locked screens. */
 export interface BookingNotice {
-  organizationId: string;
-  requestId: string;
+  organizationId: string | null;
+  requestId?: string;
   type: string;
   title: string;
   body: string;
@@ -58,7 +58,10 @@ export class NotificationsService {
       await this.enqueue(manager, {
         ...message,
         userId,
-        data: { organizationId, requestId },
+        data: {
+          ...(organizationId ? { organizationId } : {}),
+          ...(requestId ? { requestId } : {}),
+        },
         expiresAt: new Date(Date.now() + BOOKING_NOTICE_LIFETIME_MS),
       });
     }

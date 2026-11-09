@@ -660,6 +660,67 @@ export class CreditControlsService {
     });
   }
 
+  /**
+   * When a restriction ends and no other remains, what the person earned during it comes back
+   * (BR-11, D#85). A wallet frozen for another reason stays frozen, and an open review keeps what
+   * it reserved. Earlier holds stay with an administrator, through releaseFrozen.
+   */
+  async releaseRestrictionHolds(
+    m: EntityManager,
+    userId: string,
+    since: Date,
+    actor: string,
+    reference: string,
+  ): Promise<number> {
+    const [wallet] = await m.query('SELECT id FROM universal_time_wallets WHERE user_id=$1', [
+      userId,
+    ]);
+    if (!wallet) return 0;
+    const account = await this.account(m, wallet.id, null);
+    if (account.status !== 'ACTIVE') return 0;
+    const held: { org: string; amount: string }[] = await m.query(
+      `SELECT originating_org_id AS org, sum(amount) AS amount FROM time_credit_ledger
+       WHERE wallet_id=$1 AND tx_type='SERVICE_EARNED' AND held AND created_at>=$2
+         AND originating_org_id IS NOT NULL
+       GROUP BY originating_org_id`,
+      [account.id, since],
+    );
+    let released = 0;
+    for (const { org, amount } of held) {
+      const releasable = Math.min(
+        cents(amount),
+        await this.availableFrozenEarnings(m, account, org),
+      );
+      if (releasable <= 0) continue;
+      const dto = {
+        amount: releasable / 100,
+        idempotencyKey: `restriction-${reference}-${org}`,
+        reason: `Access returned (${reference})`,
+      } as CreditAmountDto;
+      await this.move(m, account, false, releasable, -releasable);
+      const operation = await this.operation(
+        m,
+        org,
+        actor,
+        dto,
+        'FROZEN_RELEASED',
+        account.id,
+        null,
+        null,
+      );
+      await this.post(m, org, account, false, 'FROZEN_RELEASED', releasable, -releasable, {
+        operationId: operation.id,
+      });
+      await this.event(m, org, actor, operation.id, 'FROZEN_CREDITS_RELEASED', {
+        userId,
+        amount: dto.amount,
+        reason: dto.reason,
+      });
+      released += releasable;
+    }
+    return released / 100;
+  }
+
   /** Unreviewed held earnings; resolved frozen-source cases also consume their attribution. */
   private async availableFrozenEarnings(m: EntityManager, account: Account, org: string) {
     const [{ attributable, reserved }] = await m.query(

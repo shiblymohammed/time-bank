@@ -112,7 +112,7 @@ describe('Service decisions', () => {
       {} as any,
       {} as any,
       { verifyCaregiverProxyAccess: caregiverAccess } as any,
-      {} as any,
+      { afterVolunteerStopped: jest.fn() } as any,
       { logEvent: jest.fn() } as any,
       {} as any,
       ledger,

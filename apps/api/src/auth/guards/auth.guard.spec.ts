@@ -1,7 +1,33 @@
 import { ExecutionContext, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { AuthGuard } from './auth.guard';
+import { AuthGuard, reachableWhileRestricted } from './auth.guard';
+
+describe('reachableWhileRestricted', () => {
+  const caseId = '11111111-2222-3333-4444-555555555555';
+
+  it.each([
+    ['GET', '/api/auth/me'],
+    ['GET', '/api/v1/organizations'],
+    ['GET', '/api/me/restriction'],
+    ['POST', `/api/me/restriction/${caseId}/appeal`],
+  ])('allows %s %s', (method, url) => {
+    expect(reachableWhileRestricted(method, url)).toBe(true);
+  });
+
+  it.each([
+    ['POST', '/api/auth/me'],
+    ['POST', '/api/v1/organizations'],
+    ['GET', `/api/organizations/${caseId}`],
+    ['GET', `/api/organizations/${caseId}/complaints/mine`],
+    ['POST', `/api/me/restriction/${caseId}/appeal/extra`],
+    ['POST', '/api/notifications/devices'],
+    ['GET', '/api/v1/admin/overview'],
+    ['GET', '/api/auth/staff-code'],
+  ])('refuses %s %s', (method, url) => {
+    expect(reachableWhileRestricted(method, url)).toBe(false);
+  });
+});
 
 describe('AuthGuard development identity isolation', () => {
   it.each([

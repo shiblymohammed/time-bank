@@ -5,6 +5,8 @@ import type { Action } from '@/lib/admin-types';
 import { CoordinatorRequests } from '@/components/coordinator-requests';
 import { ServiceCatalogue } from '@/components/service-catalogue';
 import { SafetyAlerts, useOpenSafetyAlerts } from '@/components/safety-alerts';
+import { Complaints, useOpenComplaints } from '@/components/complaints';
+import { RestrictionCases, useWaitingRestrictions } from '@/components/restriction-cases';
 import { ServiceOperations } from '@/components/service-operations';
 import { TimeCredits } from '@/components/time-credits';
 import { ApiManagement } from '@/components/api-management';
@@ -18,6 +20,7 @@ type Tab =
   | 'memberships'
   | 'requests'
   | 'safety'
+  | 'complaints'
   | 'catalogue'
   | 'operations'
   | 'credits'
@@ -94,14 +97,6 @@ type Organization = {
   status: string;
   branding?: { appDisplayName: string; primaryColor: string; secondaryColor: string };
 };
-type Restriction = {
-  id: string;
-  userId: string;
-  user?: { phoneE164: string; fullName?: string | null };
-  restrictionType: string;
-  reasonCode: string;
-  status: string;
-};
 type Audit = {
   id: string;
   eventType: string;
@@ -129,14 +124,12 @@ type Metrics = {
 };
 type View = {
   memberships: Membership[];
-  restrictions: Restriction[];
   events: Audit[];
   metrics: Metrics | null;
   total: number;
 };
 const empty = (): View => ({
   memberships: [],
-  restrictions: [],
   events: [],
   metrics: null,
   total: 0,
@@ -186,6 +179,13 @@ const PAGES: {
     description: 'Visits paused or ended by a safety alert',
   },
   {
+    id: 'complaints',
+    text: 'Complaints',
+    icon: 'complaints',
+    group: 'Community',
+    description: 'Confidential complaints from members',
+  },
+  {
     id: 'catalogue',
     text: 'Service catalogue',
     icon: 'catalogue',
@@ -211,8 +211,7 @@ const PAGES: {
     text: 'Restrictions',
     icon: 'restrictions',
     group: 'Governance',
-    description: 'Account restrictions across the platform',
-    centralOnly: true,
+    description: 'Suspensions, bans, reinstatement and appeals',
   },
   {
     id: 'audit',
@@ -665,6 +664,16 @@ export default function AdminDashboard(): React.JSX.Element {
     profile && tenant !== 'GLOBAL' ? tenant : null,
     revision,
   );
+  const openComplaints = useOpenComplaints(
+    Boolean(profile),
+    tenant === 'GLOBAL' ? null : tenant,
+    revision,
+  );
+  const waitingRestrictions = useWaitingRestrictions(
+    Boolean(profile) && canManageRoles,
+    tenant === 'GLOBAL' ? null : tenant,
+    revision,
+  );
   const initialRoles = [
     ...OPERATIONS,
     ...(canManageRoles ? ['COORDINATOR'] : []),
@@ -696,6 +705,7 @@ export default function AdminDashboard(): React.JSX.Element {
           'memberships',
           'requests',
           'safety',
+          'complaints',
           'catalogue',
           'operations',
           'credits',
@@ -772,13 +782,6 @@ export default function AdminDashboard(): React.JSX.Element {
           )),
         };
       }
-      if (tab === 'restrictions' && isGlobal)
-        next.restrictions = await backend<Restriction[]>(
-          `/admin/restrictions${status ? `?status=${status}` : ''}`,
-          'GET',
-          undefined,
-          controller.signal,
-        );
       if (tab === 'audit' && isGlobal) {
         if (tenant !== 'GLOBAL') query.set('organizationId', tenant);
         if (eventType) query.set('eventType', eventType);
@@ -920,6 +923,18 @@ export default function AdminDashboard(): React.JSX.Element {
                     <span className="sr-only"> open</span>
                   </span>
                 )}
+                {item.id === 'complaints' && openComplaints > 0 && (
+                  <span className="nav-alert-count" role="status">
+                    {openComplaints}
+                    <span className="sr-only"> open</span>
+                  </span>
+                )}
+                {item.id === 'restrictions' && waitingRestrictions > 0 && (
+                  <span className="nav-alert-count" role="status">
+                    {waitingRestrictions}
+                    <span className="sr-only"> waiting</span>
+                  </span>
+                )}
               </button>
             </React.Fragment>
           ))}
@@ -964,8 +979,8 @@ export default function AdminDashboard(): React.JSX.Element {
             <p>{page?.description}</p>
           </div>
           <div className="top-actions">
-            {/* Overview and restrictions always cover every organization. */}
-            {tab !== 'overview' && tab !== 'restrictions' && (
+            {/* The overview always covers every organization. */}
+            {tab !== 'overview' && (
               <label className="scope-label">
                 Organization
                 <select
@@ -1127,6 +1142,17 @@ export default function AdminDashboard(): React.JSX.Element {
                 onExpired={expired}
               />
             ))}
+          {tab === 'complaints' && (
+            <Complaints
+              key={tenant}
+              organizationId={tenant === 'GLOBAL' ? null : tenant}
+              isGlobal={isGlobal}
+              revision={revision}
+              pending={pending}
+              openAction={openAction}
+              onExpired={expired}
+            />
+          )}
           {tab === 'catalogue' && (
             <ServiceCatalogue
               key={tenant}
@@ -1952,109 +1978,16 @@ export default function AdminDashboard(): React.JSX.Element {
             </>
           )}
           {tab === 'restrictions' && (
-            <>
-              <div className="section-heading">
-                <label>
-                  Status
-                  <select
-                    className="form-input"
-                    value={status}
-                    disabled={pending}
-                    onChange={(event) => setStatus(event.target.value)}
-                  >
-                    <option value="">All statuses</option>
-                    <option value="ACTIVE">Active</option>
-                    <option value="RESOLVED">Resolved</option>
-                  </select>
-                </label>
-                <button
-                  className="btn btn-primary"
-                  disabled={pending}
-                  onClick={() =>
-                    openAction({
-                      title: 'Impose account restriction',
-                      fields: [
-                        { key: 'userId', label: 'Target user ID', pattern: '[0-9a-fA-F-]{36}' },
-                        {
-                          key: 'restrictionType',
-                          label: 'Restriction type',
-                          options: [
-                            'TEMPORARY_SUSPENSION',
-                            'PERMANENT_BAN',
-                            'DUPLICATE_FREEZE',
-                            'FRAUD_INVESTIGATION_HOLD',
-                          ],
-                        },
-                        { key: 'reasonCode', label: 'Reason code' },
-                      ],
-                      submit: (values) => backend('/admin/restrictions', 'POST', values),
-                    })
-                  }
-                >
-                  <Icon name="plus" />
-                  Impose restriction
-                </button>
-              </div>
-              <div className="table-container glass-panel">
-                <table className="custom-table">
-                  <thead>
-                    <tr>
-                      <th>Target account</th>
-                      <th>Restriction</th>
-                      <th>Reason</th>
-                      <th>Status</th>
-                      <th>Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {view.restrictions.map((restriction) => (
-                      <tr key={restriction.id}>
-                        <td>
-                          {restriction.user?.fullName ??
-                            phone(restriction.user?.phoneE164) ??
-                            'Unknown number'}
-                          <div className="mono">
-                            {restriction.user?.fullName
-                              ? phone(restriction.user.phoneE164)
-                              : restriction.userId}
-                          </div>
-                        </td>
-                        <td>{label(restriction.restrictionType)}</td>
-                        <td>{restriction.reasonCode}</td>
-                        <td>
-                          <Badge value={restriction.status} />
-                        </td>
-                        <td>
-                          {restriction.status === 'ACTIVE' && (
-                            <button
-                              className="btn btn-sm btn-secondary"
-                              disabled={pending}
-                              onClick={() =>
-                                openAction({
-                                  title: 'Resolve account restriction',
-                                  fields: [{ key: 'resolutionNotes', label: 'Resolution notes' }],
-                                  submit: (values) =>
-                                    backend(
-                                      `/admin/restrictions/${restriction.id}/resolve`,
-                                      'POST',
-                                      values,
-                                    ),
-                                })
-                              }
-                            >
-                              Resolve
-                            </button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {!loading && !error && view.restrictions.length === 0 && (
-                  <p className="empty-state">No restrictions match this filter.</p>
-                )}
-              </div>
-            </>
+            <RestrictionCases
+              key={tenant}
+              organizationId={tenant === 'GLOBAL' ? null : tenant}
+              isGlobal={isGlobal}
+              canDecide={canManageRoles}
+              revision={revision}
+              pending={pending}
+              openAction={openAction}
+              onExpired={expired}
+            />
           )}
           {tab === 'audit' && (
             <>

@@ -22,6 +22,12 @@ import { AcceptVolunteerOfferDto } from './dto/accept-volunteer-offer.dto';
 import { DeclineVolunteerOfferDto } from './dto/decline-volunteer-offer.dto';
 import { WithdrawVolunteerAssignmentDto } from './dto/withdraw-volunteer-assignment.dto';
 import { FinishVolunteerAssignmentDto } from './dto/finish-volunteer-assignment.dto';
+import {
+  HandOverVisitDto,
+  InviteTeammateDto,
+  LeaveTeamVisitDto,
+  StopReplacementSearchDto,
+} from './dto/team-visit.dto';
 import { CoordinatorDispatchDto } from './dto/coordinator-dispatch.dto';
 import { DispatchVolunteerQueryDto } from './dto/dispatch-volunteer-query.dto';
 import { CreateOperationalZoneDto } from './dto/create-operational-zone.dto';
@@ -288,6 +294,63 @@ export class MatchingController {
     );
   }
 
+  @Post('assignments/:assignmentId/leave')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @ApiOperation({ summary: 'A team member leaves early; their own time still counts (D#69)' })
+  async leaveTeamVisit(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @Param('assignmentId', ParseUUIDPipe) assignmentId: string,
+    @Body() dto: LeaveTeamVisitDto,
+    @Req() req: Request,
+  ) {
+    const membershipContext = (req as any).organizationMembership;
+    return this.matchingService.leaveTeamVisit(
+      organizationId,
+      assignmentId,
+      membershipContext.membershipId,
+      dto,
+      req.ip ?? req.socket.remoteAddress,
+    );
+  }
+
+  @Post('assignments/:assignmentId/hand-over')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @ApiOperation({ summary: 'The last volunteer on site hands over, unpaid (D#31 to D#33, BR-06)' })
+  async handOverVisit(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @Param('assignmentId', ParseUUIDPipe) assignmentId: string,
+    @Body() dto: HandOverVisitDto,
+    @Req() req: Request,
+  ) {
+    const membershipContext = (req as any).organizationMembership;
+    return this.matchingService.handOverVisit(
+      organizationId,
+      assignmentId,
+      membershipContext.membershipId,
+      dto,
+      req.ip ?? req.socket.remoteAddress,
+    );
+  }
+
+  @Post('assignments/:assignmentId/invite')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @ApiOperation({ summary: 'Invite a teammate by exact membership or phone number (D#65)' })
+  async inviteTeammate(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @Param('assignmentId', ParseUUIDPipe) assignmentId: string,
+    @Body() dto: InviteTeammateDto,
+    @Req() req: Request,
+  ) {
+    const membershipContext = (req as any).organizationMembership;
+    return this.matchingService.inviteTeammate(
+      organizationId,
+      assignmentId,
+      membershipContext.membershipId,
+      dto,
+      req.ip ?? req.socket.remoteAddress,
+    );
+  }
+
   @Post('assignments/:assignmentId/finish')
   @UseGuards(AuthGuard, OrganizationAccessGuard)
   @ApiOperation({
@@ -356,6 +419,26 @@ export class MatchingController {
   ) {
     const ip = req.ip ?? req.socket.remoteAddress;
     return this.matchingService.coordinatorDispatch(organizationId, requestId, dto, userId, ip);
+  }
+
+  @Post('requests/:requestId/stop-replacement')
+  @UseGuards(AuthGuard, OrganizationAccessGuard, RolesGuard)
+  @Roles(UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN, UserRole.SUPER_ADMIN)
+  @ApiOperation({ summary: 'Stop looking for a replacement during a visit' })
+  async stopReplacementSearch(
+    @Param('id', ParseUUIDPipe) organizationId: string,
+    @Param('requestId', ParseUUIDPipe) requestId: string,
+    @Body() dto: StopReplacementSearchDto,
+    @CurrentUserId() userId: string,
+    @Req() req: Request,
+  ) {
+    return this.matchingService.stopReplacementSearch(
+      organizationId,
+      requestId,
+      userId,
+      dto.notes,
+      req.ip ?? req.socket.remoteAddress,
+    );
   }
 
   @Post('requests/:requestId/expand-radius')

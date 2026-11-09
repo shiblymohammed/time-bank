@@ -39,6 +39,25 @@ export function organizationsNamedBy(request: {
   return named.filter((value) => /^[0-9a-f-]{36}$/i.test(value)).map((v) => v.toLowerCase());
 }
 
+/** Marks the access token of someone who is suspended, banned or on hold. */
+export const RESTRICTED_SCOPE = 'RESTRICTED';
+
+/**
+ * All a restricted sign-in can reach: who they are, which communities exist, and their own
+ * restriction with its appeal. Everything else is refused here, before any other check.
+ */
+export function reachableWhileRestricted(method: string, url: string): boolean {
+  const path = (url.split('?')[0] ?? '').replace(/\/+$/, '').replace(/^\/api(?:\/v1)?/i, '');
+  if (method === 'GET') {
+    return (
+      /^\/auth\/me$/i.test(path) ||
+      /^\/organizations$/i.test(path) ||
+      /^\/me\/restriction$/i.test(path)
+    );
+  }
+  return method === 'POST' && /^\/me\/restriction\/[0-9a-f-]{36}\/appeal$/i.test(path);
+}
+
 /** STAFF_SECOND_FACTOR=off turns the emailed staff code off, for private QA only. */
 export function staffCodeRequired(config: ConfigService): boolean {
   return config.get<string>('STAFF_SECOND_FACTOR', 'email') !== 'off';
@@ -122,6 +141,12 @@ export class AuthGuard implements CanActivate {
       appOrganizationId: typeof payload.appOrg === 'string' ? payload.appOrg : undefined,
     };
     request.userId = request.user.id;
+    if (
+      payload.scope === RESTRICTED_SCOPE &&
+      !reachableWhileRestricted(request.method ?? 'GET', request.originalUrl ?? request.url ?? '')
+    ) {
+      throw new ForbiddenException('This account is restricted');
+    }
     // A sign-in from a community's own app stays inside that community.
     if (typeof payload.appOrg === 'string') {
       const appOrg = payload.appOrg.toLowerCase();

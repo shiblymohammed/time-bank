@@ -431,6 +431,7 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
                     nameMl: str(data, 'nameMl'),
                     defaultMinVolunteers: number(data, 'minimum'),
                     defaultPreferredVolunteers: number(data, 'preferred'),
+                    isHazardousPhysical: str(data, 'hazardous') === 'true',
                   })
                 }
               >
@@ -454,6 +455,10 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
                   min={1}
                   value={1}
                 />
+                <Select name="hazardous" label="Heavy or risky physical work">
+                  <option value="false">No</option>
+                  <option value="true">Yes: stop this work if a team falls below its minimum</option>
+                </Select>
               </ActionForm>
             )}
             {organizationId && (

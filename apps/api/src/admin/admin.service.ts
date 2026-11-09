@@ -10,7 +10,6 @@ import { EntityManager, Repository, In } from 'typeorm';
 import {
   AccountStatus,
   GlobalRestrictionStatus,
-  GlobalRestrictionType,
   MembershipStatus,
   OrganizationStatus,
   RoleGrantStatus,
@@ -26,6 +25,14 @@ import { MembershipRoleGrant } from '../memberships/entities/membership-role-gra
 import { AuditService } from '../audit/audit.service';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { RoleHierarchyService } from '../authorization/role-hierarchy.service';
+import { normalizeToE164 } from '../auth/utils/phone.util';
+import {
+  applyPlatformRestriction,
+  assertSuperAdminRemains,
+  countSuperAdmins,
+  liftPlatformRestriction,
+} from '../restrictions/platform-restriction';
+import { RestrictionsService } from '../restrictions/restrictions.service';
 import { ImposeRestrictionDto } from './dto/impose-restriction.dto';
 import { ResolveRestrictionDto } from './dto/resolve-restriction.dto';
 import { UpdateOrgStatusDto } from './dto/update-org-status.dto';
@@ -51,6 +58,7 @@ export class AdminService {
     private readonly auditService: AuditService,
     private readonly authorizationService: AuthorizationService,
     private readonly roleHierarchyService: RoleHierarchyService,
+    private readonly restrictions: RestrictionsService,
   ) {}
 
   /**
@@ -110,114 +118,52 @@ export class AdminService {
     adminId: string,
     ipAddress?: string,
   ): Promise<GlobalAccountRestriction> {
-    if (dto.userId === adminId) {
-      throw new BadRequestException('Super Admin cannot impose a restriction on themselves');
-    }
-
     return this.userRepo.manager.transaction(async (m) => {
-      const user = await m.getRepository(User).findOne({ where: { id: dto.userId } });
-      if (!user) {
-        throw new NotFoundException('Target user not found');
+      const user = await this.findRestrictionTarget(m, dto);
+      if (user.id === adminId) {
+        throw new BadRequestException('Super Admin cannot impose a restriction on themselves');
       }
-      // Every restriction type removes access, including a Super Admin's.
-      if (await this.holdsSuperAdmin(m, dto.userId)) {
-        await this.assertSuperAdminRemains(m, { userId: dto.userId });
-      }
-
-      const restrictions = m.getRepository(GlobalAccountRestriction);
-      const saved = await restrictions.save(
-        restrictions.create({
-          userId: dto.userId,
-          restrictionType: dto.restrictionType,
-          reasonCode: dto.reasonCode,
-          status: GlobalRestrictionStatus.ACTIVE,
-          authorizedBy: adminId,
-        }),
-      );
-
-      // Apply corresponding account status update
-      if (dto.restrictionType === GlobalRestrictionType.PERMANENT_BAN) {
-        user.status = AccountStatus.PERMANENTLY_BANNED;
-        await m.getRepository(User).save(user);
-      } else if (dto.restrictionType === GlobalRestrictionType.TEMPORARY_SUSPENSION) {
-        user.status = AccountStatus.SUSPENDED;
-        await m.getRepository(User).save(user);
-      }
-      // Stop push to the person's phones; they register again after signing back in.
-      await m.query('DELETE FROM push_devices WHERE user_id = $1', [user.id]);
-
-      await this.auditService.logEvent(
-        {
-          eventType: 'GLOBAL_RESTRICTION_IMPOSED',
-          actorId: adminId,
-          targetId: saved.id,
-          targetType: 'GLOBAL_ACCOUNT_RESTRICTION',
-          ipAddress,
-          payload: {
-            userId: dto.userId,
-            restrictionType: dto.restrictionType,
-            reasonCode: dto.reasonCode,
-          },
-        },
-        m,
-      );
-
+      const saved = await applyPlatformRestriction(m, this.auditService, {
+        user,
+        restrictionType: dto.restrictionType,
+        reasonCode: dto.reasonCode,
+        actorId: adminId,
+        ipAddress,
+      });
+      await this.restrictions.afterDirectRestriction(m, saved, user, dto, adminId, ipAddress);
       return saved;
     });
   }
 
-  private async holdsSuperAdmin(m: EntityManager, userId: string): Promise<boolean> {
-    const rows: unknown[] = await m.query(
-      `SELECT 1 FROM membership_role_grants g
-       JOIN organization_memberships om ON om.id = g.membership_id
-       WHERE om.user_id = $1 AND g.role = $2 AND g.status = $3 LIMIT 1`,
-      [userId, UserRole.SUPER_ADMIN, RoleGrantStatus.ACTIVE],
-    );
-    return rows.length > 0;
-  }
-
-  /**
-   * Refuses a change that would leave no one able to act as Super Admin. Changes are
-   * taken one at a time, so two admins cannot remove each other at the same moment.
-   */
-  private async assertSuperAdminRemains(
+  /** By id, or by the phone or member number staff actually have to hand. */
+  private async findRestrictionTarget(
     m: EntityManager,
-    without: { userId?: string; grantId?: string },
-  ): Promise<void> {
-    await m.query(`SELECT pg_advisory_xact_lock(hashtext('ktb:super-admins'))`);
-    if (!(await this.countSuperAdmins(m, without))) {
-      throw new ConflictException(
-        'This would leave no active Super Admin. Make someone else a Super Admin first.',
+    dto: ImposeRestrictionDto,
+  ): Promise<User> {
+    let userId = dto.userId;
+    if (!userId && dto.member) {
+      const value = dto.member.trim();
+      let phone: string | null = null;
+      try {
+        phone = normalizeToE164(value);
+      } catch {
+        // Not a phone number, so it can only be a member number.
+      }
+      const rows: { id: string }[] = await m.query(
+        `SELECT DISTINCT u.id FROM users u
+         LEFT JOIN organization_memberships om ON om.user_id = u.id
+         WHERE u.phone_e164 = $1 OR upper(om.membership_number) = upper($2) LIMIT 2`,
+        [phone, value],
       );
+      if (rows.length > 1) {
+        throw new ConflictException('That number matches more than one person. Use their phone.');
+      }
+      userId = rows[0]?.id;
     }
-  }
-
-  /** People who can act as Super Admin right now, leaving out a user or one grant. */
-  private async countSuperAdmins(
-    m: EntityManager,
-    without: { userId?: string; grantId?: string },
-  ): Promise<number> {
-    const rows: { remaining: number }[] = await m.query(
-      `SELECT COUNT(DISTINCT om.user_id)::int AS remaining
-       FROM membership_role_grants g
-       JOIN organization_memberships om ON om.id = g.membership_id
-       JOIN users u ON u.id = om.user_id
-       WHERE g.role = $1 AND g.status = $2 AND om.status = $3 AND u.status = $4
-         AND ($5::uuid IS NULL OR om.user_id <> $5::uuid)
-         AND ($6::uuid IS NULL OR g.id <> $6::uuid)
-         AND NOT EXISTS (SELECT 1 FROM global_account_restrictions r
-           WHERE r.user_id = u.id AND r.status = $7)`,
-      [
-        UserRole.SUPER_ADMIN,
-        RoleGrantStatus.ACTIVE,
-        MembershipStatus.APPROVED,
-        AccountStatus.ACTIVE,
-        without.userId ?? null,
-        without.grantId ?? null,
-        GlobalRestrictionStatus.ACTIVE,
-      ],
-    );
-    return rows[0]?.remaining ?? 0;
+    if (!userId) throw new NotFoundException('Target user not found');
+    const user = await m.getRepository(User).findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException('Target user not found');
+    return user;
   }
 
   /**
@@ -248,41 +194,24 @@ export class AdminService {
       throw new BadRequestException('Restriction is not active');
     }
 
-    restriction.status = GlobalRestrictionStatus.RESOLVED;
-    restriction.resolvedAt = new Date();
-    restriction.resolvedBy = adminId;
-    restriction.resolutionNotes = dto.resolutionNotes;
-    const saved = await this.restrictionRepo.save(restriction);
-
-    // Check if target user has any remaining active restrictions
-    const otherActive = await this.restrictionRepo.count({
-      where: {
-        userId: restriction.userId,
-        status: GlobalRestrictionStatus.ACTIVE,
-      },
+    return this.userRepo.manager.transaction(async (m) => {
+      const { saved, accessRestored } = await liftPlatformRestriction(m, this.auditService, {
+        restriction,
+        status: GlobalRestrictionStatus.RESOLVED,
+        actorId: adminId,
+        notes: dto.resolutionNotes,
+        ipAddress,
+      });
+      await this.restrictions.afterDirectLift(
+        m,
+        saved,
+        accessRestored,
+        adminId,
+        dto.resolutionNotes,
+        ipAddress,
+      );
+      return saved;
     });
-
-    if (otherActive === 0) {
-      const user = await this.userRepo.findOne({ where: { id: restriction.userId } });
-      if (user && user.status !== AccountStatus.ACTIVE) {
-        user.status = AccountStatus.ACTIVE;
-        await this.userRepo.save(user);
-      }
-    }
-
-    await this.auditService.logEvent({
-      eventType: 'GLOBAL_RESTRICTION_RESOLVED',
-      actorId: adminId,
-      targetId: saved.id,
-      targetType: 'GLOBAL_ACCOUNT_RESTRICTION',
-      ipAddress,
-      payload: {
-        userId: restriction.userId,
-        resolutionNotes: dto.resolutionNotes,
-      },
-    });
-
-    return saved;
   }
 
   /**
@@ -430,7 +359,7 @@ export class AdminService {
     // the only Super Admin there is: then nobody else could ever approve it.
     const needsSecondApproval =
       dto.role === UserRole.SUPER_ADMIN &&
-      (await this.countSuperAdmins(this.userRepo.manager, { userId: adminId })) > 0;
+      (await countSuperAdmins(this.userRepo.manager, { userId: adminId })) > 0;
     const newGrant = this.roleGrantRepo.create({
       membershipId: membership.id,
       role: dto.role,
@@ -486,7 +415,7 @@ export class AdminService {
         throw new BadRequestException('Role grant is already revoked');
       }
       if (grant.role === UserRole.SUPER_ADMIN && grant.status === RoleGrantStatus.ACTIVE) {
-        await this.assertSuperAdminRemains(m, { grantId: grant.id });
+        await assertSuperAdminRemains(m, { grantId: grant.id });
       }
 
       grant.status = RoleGrantStatus.REVOKED;

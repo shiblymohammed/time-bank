@@ -289,6 +289,83 @@ export enum SafetyAlertStatus {
   RESOLVED = 'RESOLVED',
 }
 
+/** Who a complaint is about. This decides who handles it (D#28, D#75, D#76). */
+export enum ComplaintSubject {
+  SERVICE_OR_MEMBER = 'SERVICE_OR_MEMBER',
+  COORDINATOR = 'COORDINATOR',
+  MUNICIPALITY_ADMIN = 'MUNICIPALITY_ADMIN',
+}
+
+export enum ComplaintLevel {
+  COORDINATOR = 'COORDINATOR',
+  MUNICIPALITY_ADMIN = 'MUNICIPALITY_ADMIN',
+  SUPER_ADMIN = 'SUPER_ADMIN',
+}
+
+export enum ComplaintStatus {
+  OPEN = 'OPEN',
+  IN_REVIEW = 'IN_REVIEW',
+  CLOSED = 'CLOSED',
+}
+
+export enum ComplaintOutcome {
+  UPHELD = 'UPHELD',
+  NOT_UPHELD = 'NOT_UPHELD',
+}
+
+export enum ComplaintEventType {
+  RAISED = 'RAISED',
+  TAKEN = 'TAKEN',
+  NOTE = 'NOTE',
+  PASSED_UP = 'PASSED_UP',
+  DECIDED = 'DECIDED',
+  APPEALED = 'APPEALED',
+  APPEAL_DECIDED = 'APPEAL_DECIDED',
+}
+
+/** How far a restriction reaches. A ban always covers every community. */
+export enum RestrictionScope {
+  COMMUNITY = 'COMMUNITY',
+  PLATFORM = 'PLATFORM',
+}
+
+export enum RestrictionCaseStatus {
+  RECOMMENDED = 'RECOMMENDED',
+  REFUSED = 'REFUSED',
+  ACTIVE = 'ACTIVE',
+  REINSTATED = 'REINSTATED',
+  OVERTURNED = 'OVERTURNED',
+}
+
+export enum RestrictionCaseEventType {
+  RECOMMENDED = 'RECOMMENDED',
+  REFUSED = 'REFUSED',
+  APPROVED = 'APPROVED',
+  IMPOSED_DIRECTLY = 'IMPOSED_DIRECTLY',
+  NOTE = 'NOTE',
+  REINSTATEMENT_RECOMMENDED = 'REINSTATEMENT_RECOMMENDED',
+  REINSTATEMENT_REFUSED = 'REINSTATEMENT_REFUSED',
+  REINSTATED = 'REINSTATED',
+  APPEALED = 'APPEALED',
+  APPEAL_STANDS = 'APPEAL_STANDS',
+  OVERTURNED = 'OVERTURNED',
+}
+
+export enum AppealKind {
+  RESTRICTION = 'RESTRICTION',
+  COMPLAINT = 'COMPLAINT',
+}
+
+export enum AppealStatus {
+  OPEN = 'OPEN',
+  DECIDED = 'DECIDED',
+}
+
+export enum AppealOutcome {
+  STANDS = 'STANDS',
+  OVERTURNED = 'OVERTURNED',
+}
+
 export enum SafetyAlertOutcome {
   RESTARTED = 'RESTARTED',
   ENDED = 'ENDED',

@@ -161,6 +161,17 @@ export class VolunteerAssignment {
   @Column({ name: 'review_outcome', type: 'varchar', length: 20, nullable: true })
   reviewOutcome?: string | null;
 
+  /** A team member is on site and waiting for enough teammates. Timers start together. */
+  @Column({ name: 'arrived_at', type: 'timestamptz', nullable: true })
+  arrivedAt?: Date | null;
+
+  @Column({ name: 'invited_by_membership_id', type: 'uuid', nullable: true })
+  invitedByMembershipId?: string | null;
+
+  @ManyToOne(() => OrganizationMembership, { onDelete: 'SET NULL', nullable: true })
+  @JoinColumn({ name: 'invited_by_membership_id' })
+  invitedByMembership?: OrganizationMembership | null;
+
   @Column({ name: 'replaced_by_assignment_id', type: 'uuid', nullable: true })
   replacedByAssignmentId?: string | null;
 

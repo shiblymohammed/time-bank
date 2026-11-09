@@ -10,12 +10,18 @@ Part 1 of Milestone 7 (FR-SAFE-01, FR-SAFE-02, BR-10, D#70 to D#74).
    alerts** screen shows who raised it, the note and both phone numbers, and refreshes every 30 seconds.
 3. **Paused visit:** it stays `IN_PROGRESS` with `paused_at` set. It cannot be finished, paid, reminded or closed
    automatically. A coordinator can **Allow restart**, after which the volunteer chooses to restart. Either person can
-   end it instead, at any time.
+   end it instead, at any time. On a team, see below.
 4. **Ended visit:** it becomes `COMPLETED` under review with the reason `SAFETY_ALERT`. No credits move until a
    coordinator uses Pay for visit or Not delivered in Requests & matching. The coordinator then closes the alert.
 
-An alert covers the whole request. If a request ever has several volunteers, one press pauses or ends all of them, and
-one volunteer restarts all of them. Milestone 5 needs to revisit this.
+## Teams
+
+- An alert pauses every volunteer on the request, whoever raises it.
+- Each volunteer then restarts or leaves for themselves. A coordinator's **Allow restart** clears everyone who is paused,
+  and each still chooses.
+- A volunteer who chooses to end leaves on their own. The beneficiary, their caregiver or staff can end it for everyone.
+- The alert closes itself once everyone still on the visit is working again.
+- If someone leaving puts the team below its minimum, [the usual steps](TEAM_VISITS.md) follow after 10 minutes.
 
 ## Time and credits
 
@@ -49,8 +55,8 @@ A `clientOperationId` on a new alert makes a retry find the alert already raised
 
 ## Limits
 
-- An alert can be raised only once a visit has started. A problem before Start or after Finish goes to the coordinator
-  by phone, until complaints (Milestone 7, part 2) are built.
+- An alert can be raised only once a visit has started. A problem before Start or after Finish is a
+  [complaint](COMPLAINTS.md), or a call to the coordinator if it cannot wait.
 - An app that cannot reach the server says "Not sent yet" and offers a retry and a call to 112. It does not keep the
   alert to send later: the offline queue is Milestone 8.
 - Staff are reached only by push and by the panel's list. If nobody responds, nothing escalates further, so the pilot

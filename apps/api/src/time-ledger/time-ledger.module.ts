@@ -12,6 +12,6 @@ import { CreditControlsService } from './credit-controls.service';
   imports: [TypeOrmModule.forFeature([TimeCreditLedgerEntry, UniversalTimeWallet])],
   controllers: [TimeLedgerController, CreditControlsController],
   providers: [TimeLedgerService, CreditControlsService],
-  exports: [TimeLedgerService],
+  exports: [TimeLedgerService, CreditControlsService],
 })
 export class TimeLedgerModule {}

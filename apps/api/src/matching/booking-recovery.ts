@@ -8,6 +8,11 @@ export const NO_SHOW_GRACE_MINUTES = 30;
 export const UNFILLED_GRACE_MINUTES = 120;
 /** A volunteer still working this long past the expected duration is reminded to finish. */
 export const FINISH_REMINDER_GRACE_MINUTES = 60;
+/**
+ * After one team member presses Finish, how long to wait before calling the team short.
+ * Teammates usually finish within minutes of each other. Leaving early alerts straight away.
+ */
+export const TEAM_FINISH_WAIT_MINUTES = 10;
 
 /** Help still due, under way, or waiting for a confirmation or a coordinator's decision. */
 export function openHelpCount(manager: EntityManager, requestId: string): Promise<number> {

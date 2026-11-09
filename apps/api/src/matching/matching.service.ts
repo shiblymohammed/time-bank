@@ -8,9 +8,10 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { DataSource, EntityManager, Repository, LessThan, In } from 'typeorm';
+import { DataSource, EntityManager, Repository, LessThan, In, IsNull, Not } from 'typeorm';
 import {
   AccountStatus,
+  CancellerRole,
   GlobalRestrictionStatus,
   MembershipStatus,
   RoleGrantStatus,
@@ -30,6 +31,7 @@ import { OperationalZone } from './entities/operational-zone.entity';
 import { VolunteerZoneAssignment } from './entities/volunteer-zone-assignment.entity';
 import { MatchingRound } from './entities/matching-round.entity';
 import { RequestRescheduleHistory } from '../requests/entities/request-reschedule.entity';
+import { RequestCancellation } from '../requests/entities/request-cancellation.entity';
 import { ServiceRequest } from '../requests/entities/service-request.entity';
 import { OrganizationMembership } from '../memberships/entities/organization-membership.entity';
 import { GlobalAccountRestriction } from '../identity/entities/global-account-restriction.entity';
@@ -42,6 +44,7 @@ import { assignmentSchedule } from './assignment-schedule';
 import {
   FINISH_REMINDER_GRACE_MINUTES,
   NO_SHOW_GRACE_MINUTES,
+  TEAM_FINISH_WAIT_MINUTES,
   UNFILLED_GRACE_MINUTES,
   openHelpCount,
   workedMinutes,
@@ -59,6 +62,7 @@ import { AcceptVolunteerOfferDto } from './dto/accept-volunteer-offer.dto';
 import { DeclineVolunteerOfferDto } from './dto/decline-volunteer-offer.dto';
 import { WithdrawVolunteerAssignmentDto } from './dto/withdraw-volunteer-assignment.dto';
 import { FinishVolunteerAssignmentDto } from './dto/finish-volunteer-assignment.dto';
+import { HandOverVisitDto, InviteTeammateDto, LeaveTeamVisitDto } from './dto/team-visit.dto';
 import { CoordinatorDispatchDto } from './dto/coordinator-dispatch.dto';
 import { DispatchVolunteerQueryDto } from './dto/dispatch-volunteer-query.dto';
 import { OrganizationServiceCatalog } from '../catalogue/entities/organization-service-catalog.entity';
@@ -73,6 +77,10 @@ export const MAX_SERVICE_MINUTES = 720;
 
 /** Unfilled requests handled per worker run; the next run picks up any remainder. */
 const PROGRESSION_BATCH_SIZE = 50;
+/** How many teammates one volunteer can invite to a visit. */
+const MAX_INVITES_PER_VISIT = 5;
+/** Booked: taking up a place, whether or not they have started. */
+const BOOKED_STATUSES = [VolunteerAssignmentStatus.ACCEPTED, VolunteerAssignmentStatus.IN_PROGRESS];
 
 /**
  * SQL over an assignment aliased `a`: its volunteer would no longer pass lockVolunteer.
@@ -462,7 +470,11 @@ export class MatchingService {
         'serviceRequest.reschedules',
         'serviceRequest.beneficiaryMembership',
         'serviceRequest.beneficiaryMembership.user',
+        'serviceRequest.serviceCatalog',
+        'serviceRequest.serviceCatalog.globalService',
         'reschedule',
+        'invitedByMembership',
+        'invitedByMembership.user',
       ],
       order: { offeredAt: 'DESC' },
       take: 100,
@@ -472,6 +484,15 @@ export class MatchingService {
     const needsAddress = (status: VolunteerAssignmentStatus) =>
       status === VolunteerAssignmentStatus.ACCEPTED ||
       status === VolunteerAssignmentStatus.IN_PROGRESS;
+    const openRequestIds = assignments
+      .filter((assignment) => needsAddress(assignment.status))
+      .map((assignment) => assignment.serviceRequestId);
+    const booked = openRequestIds.length
+      ? await this.assignmentRepo.find({
+          where: { serviceRequestId: In(openRequestIds), status: In(BOOKED_STATUSES) },
+          relations: ['volunteerMembership', 'volunteerMembership.user'],
+        })
+      : [];
     return assignments.map((assignment) => ({
       id: assignment.id,
       organizationId: assignment.organizationId,
@@ -481,11 +502,14 @@ export class MatchingService {
       offeredAt: assignment.offeredAt,
       offerExpiresAt: assignment.offerExpiresAt,
       acceptedAt: assignment.acceptedAt,
+      arrivedAt: assignment.arrivedAt ?? null,
       startedAt: assignment.startedAt ?? null,
       finishedAt: assignment.finishedAt ?? null,
       reportedMinutes: assignment.reportedMinutes ?? null,
       confirmedAt: assignment.confirmedAt ?? null,
       confirmedMinutes: assignment.confirmedMinutes ?? null,
+      invitedByName: assignment.invitedByMembership?.user?.fullName ?? null,
+      team: needsAddress(assignment.status) ? teamView(assignment, booked) : null,
       ...safetyState(assignment),
       scheduledStartTime: assignmentSchedule(assignment),
       reschedule: assignment.reschedule
@@ -538,7 +562,8 @@ export class MatchingService {
         ServiceRequestStatus.MATCHING_ACTIVE,
         ServiceRequestStatus.PARTIALLY_ACCEPTED,
         ServiceRequestStatus.FULLY_MATCHED,
-      ].includes(locked.status)
+      ].includes(locked.status) &&
+      !isShortMidVisit(locked)
     )
       return [];
     const current = await repo.findOne({
@@ -744,6 +769,7 @@ export class MatchingService {
       VolunteerAssignmentStatus.TIMED_OUT,
       VolunteerAssignmentStatus.WITHDRAWN,
     ];
+    // Someone who handed this visit over has already said they cannot carry on.
     const alreadyHandledMemIds = new Set(
       existingAssignments
         .filter(
@@ -753,6 +779,7 @@ export class MatchingService {
               VolunteerAssignmentStatus.ACCEPTED,
               VolunteerAssignmentStatus.IN_PROGRESS,
               VolunteerAssignmentStatus.COMPLETED,
+              VolunteerAssignmentStatus.REPLACED,
             ].includes(a.status) ||
             (passedOn.includes(a.status) &&
               (a.rescheduleId ?? null) === (request.latestRescheduleId ?? null)),
@@ -1022,7 +1049,7 @@ export class MatchingService {
       ServiceRequestStatus.FULLY_MATCHED,
     ];
     if (manual) states.push(ServiceRequestStatus.ESCALATED_TO_COORDINATOR);
-    if (!states.includes(request.status)) {
+    if (!states.includes(request.status) && !isShortMidVisit(request)) {
       throw new ConflictException('This request is no longer accepting volunteer assignments');
     }
   }
@@ -1115,6 +1142,10 @@ export class MatchingService {
         assignment.status === VolunteerAssignmentStatus.ACCEPTED
       )
         return { assignment };
+      // Offers close the moment a visit fills, so this is an ordinary thing to run into.
+      if (assignment.status === VolunteerAssignmentStatus.CANCELLED) {
+        throw new ConflictException('This offer is no longer open');
+      }
       if (assignment.status !== VolunteerAssignmentStatus.OFFERED) {
         throw new BadRequestException(
           `Assignment is not in OFFERED status (current: ${assignment.status})`,
@@ -1127,12 +1158,9 @@ export class MatchingService {
         return { error: new ConflictException('Offer has expired (D#12)') };
       }
 
-      // 3. Count currently accepted assignments
+      // 3. Count the places already taken, including volunteers who have started
       const acceptedCount = await manager.count(VolunteerAssignment, {
-        where: {
-          serviceRequestId: request.id,
-          status: VolunteerAssignmentStatus.ACCEPTED,
-        },
+        where: { serviceRequestId: request.id, status: In(BOOKED_STATUSES) },
       });
 
       if (acceptedCount >= request.preferredVolunteers) {
@@ -1167,20 +1195,14 @@ export class MatchingService {
 
       // 6. Update request status
       const newAcceptedCount = acceptedCount + 1;
-      if (newAcceptedCount >= request.minVolunteers) {
-        request.status = ServiceRequestStatus.FULLY_MATCHED;
-        if (assignment.matchingRoundId) {
-          await manager.update(
-            MatchingRound,
-            { id: assignment.matchingRoundId },
-            { status: MatchingRoundStatus.COMPLETED },
-          );
-        }
-      } else {
-        request.status = ServiceRequestStatus.PARTIALLY_ACCEPTED;
+      if (newAcceptedCount >= request.minVolunteers && assignment.matchingRoundId) {
+        await manager.update(
+          MatchingRound,
+          { id: assignment.matchingRoundId },
+          { status: MatchingRoundStatus.COMPLETED },
+        );
       }
-      await manager.save(ServiceRequest, request);
-      await this.closeStaleOffers(manager, request.id);
+      await this.settleAfterBooking(manager, request, savedAssignment, newAcceptedCount);
       await this.notifications.notifyRequestOwners(manager, request, {
         organizationId: orgId,
         requestId: request.id,
@@ -1358,9 +1380,25 @@ export class MatchingService {
     const started = await count([
       VolunteerAssignmentStatus.IN_PROGRESS,
       VolunteerAssignmentStatus.COMPLETED,
+      VolunteerAssignmentStatus.REPLACED,
     ]);
     if (started > 0) {
-      if ((await openHelpCount(manager, request.id)) === 0) {
+      if (request.belowMinimumAt) {
+        // The person coming to fill the place has dropped out, so it goes back on offer.
+        const booked = await count(BOOKED_STATUSES);
+        if (request.belowMinimumAlertedAt && booked < request.minVolunteers) {
+          await this.raiseShortage(manager, request, new Date());
+        }
+        return;
+      }
+      const open = await openHelpCount(manager, request.id);
+      if (open === 0 && (await count([VolunteerAssignmentStatus.COMPLETED])) === 0) {
+        // Only handovers are left, so no help was delivered: a coordinator has to decide.
+        request.belowMinimumAt = new Date();
+        await this.raiseShortage(manager, request, new Date());
+        return;
+      }
+      if (open === 0) {
         request.status = ServiceRequestStatus.COMPLETED;
         await manager.save(ServiceRequest, request);
       }
@@ -1374,6 +1412,40 @@ export class MatchingService {
           : ServiceRequestStatus.MATCHING_ACTIVE;
       await manager.save(ServiceRequest, request);
     }
+  }
+
+  /**
+   * After a place is taken. Offers stay open until the preferred team is booked or the visit
+   * starts. During a visit the status does not change, and whoever comes takes over from the
+   * volunteer who handed over.
+   */
+  private async settleAfterBooking(
+    manager: EntityManager,
+    request: ServiceRequest,
+    assignment: VolunteerAssignment,
+    booked: number,
+  ): Promise<void> {
+    if (request.status === ServiceRequestStatus.IN_PROGRESS) {
+      const handedOver = await manager.findOne(VolunteerAssignment, {
+        where: {
+          serviceRequestId: request.id,
+          status: VolunteerAssignmentStatus.REPLACED,
+          replacedByAssignmentId: IsNull(),
+        },
+        order: { finishedAt: 'ASC' },
+      });
+      if (handedOver) {
+        handedOver.replacedByAssignmentId = assignment.id;
+        await manager.save(VolunteerAssignment, handedOver);
+      }
+    } else {
+      request.status =
+        booked >= request.minVolunteers
+          ? ServiceRequestStatus.FULLY_MATCHED
+          : ServiceRequestStatus.PARTIALLY_ACCEPTED;
+      await manager.save(ServiceRequest, request);
+    }
+    await this.closeStaleOffers(manager, request.id);
   }
 
   /** The person behind a volunteer membership, for the audit log. */
@@ -1436,11 +1508,14 @@ export class MatchingService {
           `Only an accepted assignment can be started (current: ${assignment.status})`,
         );
       }
+      const isTeam = request.minVolunteers > 1;
       if (
         ![
           ServiceRequestStatus.PARTIALLY_ACCEPTED,
           ServiceRequestStatus.FULLY_MATCHED,
           ServiceRequestStatus.IN_PROGRESS,
+          // A coordinator may still be finding the rest of a team while this one is on site.
+          ...(isTeam ? [ServiceRequestStatus.ESCALATED_TO_COORDINATOR] : []),
         ].includes(request.status)
       ) {
         throw new ConflictException(`This request cannot be started (status: ${request.status})`);
@@ -1452,13 +1527,24 @@ export class MatchingService {
         );
       }
 
+      // FR-TEAM-04: a team starts once its safe minimum is on site. After that, each late
+      // arrival simply starts their own timer.
+      if (isTeam && request.status !== ServiceRequestStatus.IN_PROGRESS) {
+        return this.recordTeamArrival(manager, request, assignment, ipAddress, now);
+      }
+
+      if (await this.isSafetyPaused(manager, request.id)) {
+        throw new ConflictException('This visit is paused. A coordinator will contact you.');
+      }
       assignment.status = VolunteerAssignmentStatus.IN_PROGRESS;
       assignment.startedAt = now;
       const saved = await manager.save(VolunteerAssignment, assignment);
       if (request.status !== ServiceRequestStatus.IN_PROGRESS) {
         request.status = ServiceRequestStatus.IN_PROGRESS;
         await manager.save(ServiceRequest, request);
+        await this.closeStaleOffers(manager, request.id);
       }
+      if (request.belowMinimumAt) await this.clearShortageIfStaffed(manager, request);
       await this.auditService.logEvent(
         {
           eventType: 'SERVICE_STARTED',
@@ -1516,6 +1602,7 @@ export class MatchingService {
       assignment.reportedMinutes = minutes;
       assignment.completionNotes = dto.notes?.trim() || null;
       const saved = await manager.save(VolunteerAssignment, assignment);
+      await this.afterVolunteerStopped(manager, request, now);
       await this.notifications.notifyRequestOwners(manager, request, {
         organizationId: orgId,
         requestId: request.id,
@@ -1536,6 +1623,607 @@ export class MatchingService {
         manager,
       );
       return saved;
+    });
+  }
+
+  // ─── Teams and Handovers (FR-TEAM, D#31 to D#34, D#63 to D#69) ──────────────
+  private async recordTeamArrival(
+    manager: EntityManager,
+    request: ServiceRequest,
+    assignment: VolunteerAssignment,
+    ipAddress: string | undefined,
+    now: Date,
+  ): Promise<VolunteerAssignment> {
+    const notice = { organizationId: request.organizationId, requestId: request.id };
+    assignment.arrivedAt = assignment.arrivedAt ?? now;
+    const saved = await manager.save(VolunteerAssignment, assignment);
+    const arrived = await manager.find(VolunteerAssignment, {
+      where: {
+        serviceRequestId: request.id,
+        status: VolunteerAssignmentStatus.ACCEPTED,
+        arrivedAt: Not(IsNull()),
+      },
+    });
+    if (arrived.length < request.minVolunteers) {
+      await this.auditService.logEvent(
+        {
+          eventType: 'TEAM_MEMBER_ARRIVED',
+          actorId: await this.volunteerUserId(
+            manager,
+            request.organizationId,
+            assignment.volunteerMembershipId,
+          ),
+          targetId: saved.id,
+          targetType: 'volunteer_assignments',
+          organizationId: request.organizationId,
+          payload: { serviceRequestId: request.id, arrived: arrived.length },
+          ipAddress: ipAddress ?? null,
+        },
+        manager,
+      );
+      return saved;
+    }
+
+    for (const member of arrived) {
+      member.status = VolunteerAssignmentStatus.IN_PROGRESS;
+      member.startedAt = now;
+      await manager.save(VolunteerAssignment, member);
+      await this.auditService.logEvent(
+        {
+          eventType: 'SERVICE_STARTED',
+          actorId: await this.volunteerUserId(
+            manager,
+            request.organizationId,
+            member.volunteerMembershipId,
+          ),
+          targetId: member.id,
+          targetType: 'volunteer_assignments',
+          organizationId: request.organizationId,
+          payload: {
+            serviceRequestId: request.id,
+            volunteerMembershipId: member.volunteerMembershipId,
+            teamStart: true,
+          },
+          ipAddress: ipAddress ?? null,
+        },
+        manager,
+      );
+    }
+    request.status = ServiceRequestStatus.IN_PROGRESS;
+    await manager.save(ServiceRequest, request);
+    await this.closeStaleOffers(manager, request.id);
+    await this.notifications.notifyMemberships(
+      manager,
+      arrived.map((member) => member.volunteerMembershipId),
+      {
+        ...notice,
+        type: 'TEAM_STARTED',
+        title: 'Your team is here',
+        body: 'Enough volunteers have arrived, so your time has started.',
+      },
+    );
+    return arrived.find((member) => member.id === assignment.id) ?? saved;
+  }
+
+  private isSafetyPaused(manager: EntityManager, requestId: string): Promise<boolean> {
+    return manager.exists(VolunteerAssignment, {
+      where: {
+        serviceRequestId: requestId,
+        status: VolunteerAssignmentStatus.IN_PROGRESS,
+        pausedAt: Not(IsNull()),
+      },
+    });
+  }
+
+  /**
+   * Someone stopped working. Teammates usually finish within minutes of each other, so being
+   * short is only noted here. The worker raises it if nobody else stops soon.
+   */
+  async afterVolunteerStopped(
+    manager: EntityManager,
+    request: ServiceRequest,
+    now: Date,
+  ): Promise<void> {
+    const onSite = await manager.count(VolunteerAssignment, {
+      where: { serviceRequestId: request.id, status: VolunteerAssignmentStatus.IN_PROGRESS },
+    });
+    if (onSite === 0) {
+      if (request.belowMinimumAt) await this.clearShortage(manager, request);
+      return;
+    }
+    if (onSite < request.minVolunteers && !request.belowMinimumAt) {
+      request.belowMinimumAt = now;
+      await manager.save(ServiceRequest, request);
+    }
+  }
+
+  private async clearShortage(manager: EntityManager, request: ServiceRequest): Promise<void> {
+    request.belowMinimumAt = null;
+    request.belowMinimumAlertedAt = null;
+    request.replacementEscalatedAt = null;
+    await manager.save(ServiceRequest, request);
+    await this.closeStaleOffers(manager, request.id);
+  }
+
+  private async clearShortageIfStaffed(
+    manager: EntityManager,
+    request: ServiceRequest,
+  ): Promise<void> {
+    const onSite = await manager.find(VolunteerAssignment, {
+      where: { serviceRequestId: request.id, status: VolunteerAssignmentStatus.IN_PROGRESS },
+    });
+    if (onSite.length < request.minVolunteers) return;
+    const wasAlerted = Boolean(request.belowMinimumAlertedAt);
+    await this.clearShortage(manager, request);
+    if (wasAlerted) {
+      const notice = {
+        organizationId: request.organizationId,
+        requestId: request.id,
+        type: 'TEAM_STAFFED',
+        title: 'Enough volunteers are here',
+        body: 'This visit has enough people again.',
+      };
+      await this.notifications.notifyMemberships(
+        manager,
+        onSite.map((visit) => visit.volunteerMembershipId),
+        notice,
+      );
+      await this.notifications.notifyCoordinators(manager, notice);
+    }
+  }
+
+  /**
+   * D#69, BR-07: tell the coordinator, tell whoever is on site what to stop, and put the open
+   * place back on offer. D#32: sensitive and urgent visits go only to a coordinator.
+   */
+  private async raiseShortage(
+    manager: EntityManager,
+    request: ServiceRequest,
+    now: Date,
+  ): Promise<void> {
+    const catalogue = await manager.getRepository(OrganizationServiceCatalog).findOne({
+      where: { id: request.serviceCatalogId, organizationId: request.organizationId },
+      relations: ['globalService'],
+    });
+    const hazardous = catalogue?.globalService?.isHazardousPhysical ?? false;
+    // Nobody new is sent into a visit paused by a safety alert.
+    const coordinatorOnly =
+      Boolean(catalogue?.requiresCoordinatorDispatch) ||
+      request.urgency === UrgencyType.IMMEDIATE ||
+      (await this.isSafetyPaused(manager, request.id));
+    request.belowMinimumAlertedAt = now;
+    request.replacementEscalatedAt = null;
+    await manager.save(ServiceRequest, request);
+
+    const notice = { organizationId: request.organizationId, requestId: request.id };
+    const onSite = await manager.find(VolunteerAssignment, {
+      where: { serviceRequestId: request.id, status: VolunteerAssignmentStatus.IN_PROGRESS },
+    });
+    await this.notifications.notifyMemberships(
+      manager,
+      onSite.map((visit) => visit.volunteerMembershipId),
+      {
+        ...notice,
+        type: 'TEAM_SHORT',
+        title: hazardous ? 'Stop heavy or risky work' : 'Your team is short',
+        body: hazardous
+          ? 'Too few volunteers are here. Carry on with safe tasks only until someone joins you.'
+          : 'A volunteer has left. Carry on safely. We are looking for someone to join you.',
+      },
+    );
+
+    const booked = await manager.count(VolunteerAssignment, {
+      where: { serviceRequestId: request.id, status: In(BOOKED_STATUSES) },
+    });
+    const stillNeeded = booked < request.minVolunteers;
+    const offers =
+      stillNeeded && !coordinatorOnly
+        ? await this.findCandidatesAndDispatchOffers(request, undefined, manager)
+        : [];
+    if (stillNeeded && offers.length === 0) {
+      request.replacementEscalatedAt = now;
+      await manager.save(ServiceRequest, request);
+    }
+    await this.notifications.notifyCoordinators(manager, {
+      ...notice,
+      type: 'TEAM_SHORT',
+      title: 'A visit under way is short of volunteers',
+      body:
+        stillNeeded && offers.length === 0
+          ? 'Nobody has been offered the place. Please arrange someone in the admin panel.'
+          : 'Open the admin panel to check this visit.',
+    });
+    await this.auditService.logEvent(
+      {
+        eventType: 'TEAM_BELOW_MINIMUM',
+        actorId: null,
+        targetId: request.id,
+        targetType: 'service_requests',
+        organizationId: request.organizationId,
+        payload: { onSite: onSite.length, booked, offers: offers.length, hazardous },
+      },
+      manager,
+    );
+  }
+
+  /** A team member goes early. Their own time still counts, and is confirmed in the usual way. */
+  async leaveTeamVisit(
+    orgId: string,
+    assignmentId: string,
+    volunteerMembershipId: string,
+    dto: LeaveTeamVisitDto,
+    ipAddress?: string,
+    now = new Date(),
+  ): Promise<VolunteerAssignment> {
+    return this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const { assignment, request } = await this.lockOwnAssignment(
+        manager,
+        orgId,
+        assignmentId,
+        volunteerMembershipId,
+      );
+      this.assertWorking(assignment);
+      const others = await manager.count(VolunteerAssignment, {
+        where: {
+          serviceRequestId: request.id,
+          status: VolunteerAssignmentStatus.IN_PROGRESS,
+          id: Not(assignment.id),
+        },
+      });
+      if (others === 0) {
+        throw new ConflictException('You are the only one here. Finish or hand over this visit.');
+      }
+
+      assignment.status = VolunteerAssignmentStatus.COMPLETED;
+      assignment.finishedAt = now;
+      assignment.reportedMinutes = Math.min(workedMinutes(assignment, now), MAX_SERVICE_MINUTES);
+      assignment.withdrawalReason = dto.reason.trim();
+      const saved = await manager.save(VolunteerAssignment, assignment);
+
+      await this.notifications.notifyRequestOwners(manager, request, {
+        organizationId: orgId,
+        requestId: request.id,
+        type: 'SERVICE_FINISHED',
+        title: 'Please confirm the help',
+        body: 'A volunteer had to leave. Open the app to confirm their time.',
+      });
+      if (others < request.minVolunteers) {
+        request.belowMinimumAt = request.belowMinimumAt ?? now;
+        await this.raiseShortage(manager, request, now);
+      }
+      await this.auditService.logEvent(
+        {
+          eventType: 'TEAM_MEMBER_LEFT',
+          actorId: await this.volunteerUserId(manager, orgId, volunteerMembershipId),
+          targetId: saved.id,
+          targetType: 'volunteer_assignments',
+          organizationId: orgId,
+          payload: {
+            serviceRequestId: request.id,
+            reason: saved.withdrawalReason,
+            minutes: saved.reportedMinutes,
+            stillOnSite: others,
+          },
+          ipAddress: ipAddress ?? null,
+        },
+        manager,
+      );
+      return saved;
+    });
+  }
+
+  /**
+   * FR-TEAM-07, D#33, BR-06: the last volunteer on site passes the visit on. Only the volunteer
+   * who finishes it earns credits, so this one's time is kept on record but never paid.
+   */
+  async handOverVisit(
+    orgId: string,
+    assignmentId: string,
+    volunteerMembershipId: string,
+    dto: HandOverVisitDto,
+    ipAddress?: string,
+    now = new Date(),
+  ): Promise<VolunteerAssignment> {
+    return this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const { assignment, request } = await this.lockOwnAssignment(
+        manager,
+        orgId,
+        assignmentId,
+        volunteerMembershipId,
+      );
+      this.assertWorking(assignment);
+      const others = await manager.count(VolunteerAssignment, {
+        where: {
+          serviceRequestId: request.id,
+          status: VolunteerAssignmentStatus.IN_PROGRESS,
+          id: Not(assignment.id),
+        },
+      });
+      if (others > 0) {
+        throw new ConflictException('Your team is still here. Choose "I have to leave" instead.');
+      }
+
+      assignment.status = VolunteerAssignmentStatus.REPLACED;
+      assignment.finishedAt = now;
+      assignment.reportedMinutes = Math.min(workedMinutes(assignment, now), MAX_SERVICE_MINUTES);
+      assignment.withdrawnAt = now;
+      assignment.withdrawalReason = dto.reason.trim();
+      const saved = await manager.save(VolunteerAssignment, assignment);
+
+      request.belowMinimumAt = request.belowMinimumAt ?? now;
+      await this.raiseShortage(manager, request, now);
+      await this.notifications.notifyRequestOwners(manager, request, {
+        organizationId: orgId,
+        requestId: request.id,
+        type: 'VISIT_HANDED_OVER',
+        title: 'Your volunteer had to leave',
+        body: 'We are arranging someone else to carry on. Open the app for details.',
+      });
+      await this.auditService.logEvent(
+        {
+          eventType: 'VISIT_HANDED_OVER',
+          actorId: await this.volunteerUserId(manager, orgId, volunteerMembershipId),
+          targetId: saved.id,
+          targetType: 'volunteer_assignments',
+          organizationId: orgId,
+          payload: {
+            serviceRequestId: request.id,
+            reason: saved.withdrawalReason,
+            minutes: saved.reportedMinutes,
+          },
+          ipAddress: ipAddress ?? null,
+        },
+        manager,
+      );
+      return saved;
+    });
+  }
+
+  private assertWorking(assignment: VolunteerAssignment): void {
+    if (assignment.status !== VolunteerAssignmentStatus.IN_PROGRESS || !assignment.startedAt) {
+      throw new ConflictException('This visit is not under way for you');
+    }
+    if (assignment.pausedAt) {
+      throw new ConflictException('This visit is paused. A coordinator will contact you.');
+    }
+  }
+
+  /**
+   * FR-TEAM-02, D#65: a volunteer invites a teammate they know, by exact number. Every refusal
+   * about the person reads the same, so this cannot be used to find out who is a member.
+   */
+  async inviteTeammate(
+    orgId: string,
+    assignmentId: string,
+    callerMembershipId: string,
+    dto: InviteTeammateDto,
+    ipAddress?: string,
+    now = new Date(),
+  ) {
+    const refusal = () =>
+      new ConflictException(
+        'That member cannot be invited to this visit. Check the number, or ask your coordinator.',
+      );
+    const value = dto.memberNumberOrPhone.trim();
+    const number = /^\d{10}$/.test(value) ? `+91${value}` : value;
+    return this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const target = await manager
+        .getRepository(OrganizationMembership)
+        .createQueryBuilder('m')
+        .innerJoin('m.user', 'u')
+        .where('m.organizationId = :orgId', { orgId })
+        .andWhere('(m.membershipNumber = :number OR u.phoneE164 = :number)', { number })
+        .getOne();
+      if (!target || target.id === callerMembershipId) throw refusal();
+      // The usual lock order: the volunteer first, then the request.
+      const volunteer = await this.lockVolunteer(manager, orgId, target.id).catch(() => {
+        throw refusal();
+      });
+      const { assignment: mine, request } = await this.lockOwnAssignment(
+        manager,
+        orgId,
+        assignmentId,
+        callerMembershipId,
+      );
+      if (!BOOKED_STATUSES.includes(mine.status)) {
+        throw new ConflictException('You can invite someone only to a visit you are on');
+      }
+      const catalogue = await manager.getRepository(OrganizationServiceCatalog).findOne({
+        where: { id: request.serviceCatalogId, organizationId: orgId },
+      });
+      if (catalogue?.requiresCoordinatorDispatch) {
+        throw new ConflictException('A coordinator arranges volunteers for this service');
+      }
+      this.assertBookable(request);
+      const booked = await manager.count(VolunteerAssignment, {
+        where: { serviceRequestId: request.id, status: In(BOOKED_STATUSES) },
+      });
+      const places = isShortMidVisit(request) ? request.minVolunteers : request.preferredVolunteers;
+      if (booked >= places) throw new ConflictException('This visit has no open places');
+      const sent = await manager.count(VolunteerAssignment, {
+        where: { serviceRequestId: request.id, invitedByMembershipId: callerMembershipId },
+      });
+      if (sent >= MAX_INVITES_PER_VISIT) {
+        throw new ConflictException('You have invited as many people as you can to this visit');
+      }
+
+      if (target.id === request.beneficiaryMembershipId) throw refusal();
+      const [caregiver]: unknown[] = await manager.query(
+        `SELECT 1 FROM caregiver_authorizations
+         WHERE caregiver_membership_id = $1 AND beneficiary_membership_id = $2
+           AND status = 'APPROVED'`,
+        [target.id, request.beneficiaryMembershipId],
+      );
+      if (caregiver) throw refusal();
+      const earlier = await manager.count(VolunteerAssignment, {
+        where: {
+          serviceRequestId: request.id,
+          volunteerMembershipId: target.id,
+          rescheduleId: request.latestRescheduleId ?? IsNull(),
+          // An offer that closed by itself is not an answer from this person.
+          status: Not(VolunteerAssignmentStatus.CANCELLED),
+        },
+      });
+      if (earlier > 0) throw refusal();
+      await this.assertRequiredSkills(manager, request, target.id).catch(() => {
+        throw refusal();
+      });
+      await this.assertNoScheduleConflict(manager, volunteer.userId, request).catch(() => {
+        throw refusal();
+      });
+
+      const offerExpiresAt = this.matchingConfig.getOfferExpiresAt(
+        request.urgency,
+        request.scheduledStartTime,
+      );
+      const offer = await manager.save(
+        VolunteerAssignment,
+        manager.create(VolunteerAssignment, {
+          organizationId: orgId,
+          serviceRequestId: request.id,
+          volunteerMembershipId: target.id,
+          slotNumber: booked + 1,
+          status: VolunteerAssignmentStatus.OFFERED,
+          offeredAt: now,
+          offerExpiresAt,
+          rescheduleId: request.latestRescheduleId ?? null,
+          invitedByMembershipId: callerMembershipId,
+        }),
+      );
+      await this.notifications.enqueue(manager, {
+        userId: volunteer.userId,
+        type: 'VOLUNTEER_OFFER',
+        title: 'A volunteer invited you to help',
+        body: 'Open the app to respond.',
+        data: { assignmentId: offer.id, organizationId: orgId },
+        expiresAt: offerExpiresAt,
+      });
+      await this.auditService.logEvent(
+        {
+          eventType: 'TEAMMATE_INVITED',
+          actorId: await this.volunteerUserId(manager, orgId, callerMembershipId),
+          targetId: offer.id,
+          targetType: 'volunteer_assignments',
+          organizationId: orgId,
+          payload: { serviceRequestId: request.id, invitedMembershipId: target.id },
+          ipAddress: ipAddress ?? null,
+        },
+        manager,
+      );
+      // Nothing about the person: the caller already knows who they asked.
+      return { status: VolunteerAssignmentStatus.OFFERED, offerExpiresAt };
+    });
+  }
+
+  /**
+   * A coordinator decides nobody else is coming. Whoever is on site carries on. With nobody
+   * left to wait for, the request ends: cancelled if no help was delivered.
+   */
+  async stopReplacementSearch(
+    orgId: string,
+    requestId: string,
+    actorId: string,
+    notes: string,
+    ipAddress?: string,
+  ) {
+    await this.assertMatchingStaff(orgId, actorId);
+    return this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const request = await manager.getRepository(ServiceRequest).findOne({
+        where: { id: requestId, organizationId: orgId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!request) throw new NotFoundException('Service request not found in this organization');
+      if (!isShortMidVisit(request)) {
+        throw new ConflictException('This visit is not looking for a replacement');
+      }
+      await this.clearShortage(manager, request);
+      if ((await openHelpCount(manager, request.id)) === 0) {
+        const delivered = await manager.count(VolunteerAssignment, {
+          where: { serviceRequestId: request.id, status: VolunteerAssignmentStatus.COMPLETED },
+        });
+        request.status = delivered
+          ? ServiceRequestStatus.COMPLETED
+          : ServiceRequestStatus.CANCELLED;
+        await manager.save(ServiceRequest, request);
+        await this.closeStaleOffers(manager, request.id);
+        if (!delivered) {
+          await manager.save(
+            RequestCancellation,
+            manager.create(RequestCancellation, {
+              organizationId: orgId,
+              serviceRequestId: request.id,
+              cancelledByUserId: actorId,
+              cancellerRole: CancellerRole.COORDINATOR,
+              reasonCode: 'NO_REPLACEMENT_FOUND',
+              notes,
+              hoursBeforeStart: 0,
+            }),
+          );
+        }
+      }
+      await this.notifications.notifyRequestOwners(manager, request, {
+        organizationId: orgId,
+        requestId: request.id,
+        type: 'REPLACEMENT_STOPPED',
+        title: 'Nobody else is coming today',
+        body: 'Your coordinator will contact you. Open the app for details.',
+      });
+      await this.auditService.logEvent(
+        {
+          eventType: 'REPLACEMENT_SEARCH_STOPPED',
+          actorId,
+          targetId: request.id,
+          targetType: 'service_requests',
+          organizationId: orgId,
+          payload: { notes, requestStatus: request.status },
+          ipAddress: ipAddress ?? null,
+        },
+        manager,
+      );
+      return { id: request.id, status: request.status };
+    });
+  }
+
+  /** The wait after a teammate pressed Finish has passed, and the team is still short. */
+  async alertBelowMinimum(requestId: string, now = new Date()): Promise<void> {
+    await this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const request = await manager.getRepository(ServiceRequest).findOne({
+        where: { id: requestId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!request || !isShortMidVisit(request) || request.belowMinimumAlertedAt) return;
+      const due = new Date(request.belowMinimumAt!).getTime() + TEAM_FINISH_WAIT_MINUTES * 60_000;
+      if (now.getTime() < due) return;
+      // Staff are already on a paused visit. This waits until it restarts.
+      if (await this.isSafetyPaused(manager, request.id)) return;
+      await this.raiseShortage(manager, request, now);
+    });
+  }
+
+  /** Every offer for the open place has run out, so a coordinator has to step in. */
+  async escalateUnfilledReplacement(requestId: string, now = new Date()): Promise<void> {
+    await this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const request = await manager.getRepository(ServiceRequest).findOne({
+        where: { id: requestId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (
+        !request ||
+        !isShortMidVisit(request) ||
+        !request.belowMinimumAlertedAt ||
+        request.replacementEscalatedAt
+      )
+        return;
+      request.replacementEscalatedAt = now;
+      await manager.save(ServiceRequest, request);
+      await this.closeStaleOffers(manager, request.id);
+      await this.notifications.notifyCoordinators(manager, {
+        organizationId: request.organizationId,
+        requestId: request.id,
+        type: 'REPLACEMENT_NOT_FOUND',
+        title: 'Nobody took the open place',
+        body: 'A visit under way still needs a volunteer. Open the admin panel.',
+      });
     });
   }
 
@@ -1566,7 +2254,13 @@ export class MatchingService {
       if (!request) throw new NotFoundException('Service request not found in this organization');
       const assignments = await manager.getRepository(VolunteerAssignment).find({
         where: { serviceRequestId: requestId, organizationId: orgId },
-        relations: ['volunteerMembership', 'volunteerMembership.user', 'reschedule'],
+        relations: [
+          'volunteerMembership',
+          'volunteerMembership.user',
+          'reschedule',
+          'invitedByMembership',
+          'invitedByMembership.user',
+        ],
         order: { offeredAt: 'DESC', id: 'DESC' },
       });
       const rounds = await manager.getRepository(MatchingRound).find({
@@ -1605,9 +2299,12 @@ export class MatchingService {
           requiresCoordinatorDispatch: request.serviceCatalog?.requiresCoordinatorDispatch ?? false,
           requiresReconfirmation: Boolean(request.latestRescheduleId),
           latestRescheduleId: request.latestRescheduleId ?? null,
+          belowMinimumAt: request.belowMinimumAt ?? null,
+          belowMinimumAlertedAt: request.belowMinimumAlertedAt ?? null,
+          replacementEscalatedAt: request.replacementEscalatedAt ?? null,
         },
-        acceptedCount: assignments.filter(
-          (assignment) => assignment.status === VolunteerAssignmentStatus.ACCEPTED,
+        acceptedCount: assignments.filter((assignment) =>
+          BOOKED_STATUSES.includes(assignment.status),
         ).length,
         pendingCount: assignments.filter(
           (assignment) => assignment.status === VolunteerAssignmentStatus.OFFERED,
@@ -1622,10 +2319,13 @@ export class MatchingService {
           offeredAt: assignment.offeredAt,
           offerExpiresAt: assignment.offerExpiresAt,
           acceptedAt: assignment.acceptedAt ?? null,
+          arrivedAt: assignment.arrivedAt ?? null,
           startedAt: assignment.startedAt ?? null,
           finishedAt: assignment.finishedAt ?? null,
           reportedMinutes: assignment.reportedMinutes ?? null,
           completionNotes: assignment.completionNotes ?? null,
+          leavingReason: assignment.withdrawalReason ?? null,
+          invitedByName: assignment.invitedByMembership?.user?.fullName ?? null,
           confirmedAt: assignment.confirmedAt ?? null,
           reviewReason: assignment.reviewReason ?? null,
           reviewNotes: assignment.reviewNotes ?? null,
@@ -1811,7 +2511,12 @@ export class MatchingService {
           ]),
         },
       });
-      if (existing?.status === VolunteerAssignmentStatus.ACCEPTED) return existing;
+      if (
+        existing?.status === VolunteerAssignmentStatus.ACCEPTED ||
+        // Already working on this visit: dispatching them again must not touch their timer.
+        existing?.status === VolunteerAssignmentStatus.IN_PROGRESS
+      )
+        return existing;
       this.assertBookable(request, true);
       await this.assertRequiredSkills(manager, request, volunteer.id);
       if (request.latestRescheduleId) {
@@ -1860,10 +2565,7 @@ export class MatchingService {
       }
 
       const acceptedCount = await manager.count(VolunteerAssignment, {
-        where: {
-          serviceRequestId: request.id,
-          status: VolunteerAssignmentStatus.ACCEPTED,
-        },
+        where: { serviceRequestId: request.id, status: In(BOOKED_STATUSES) },
       });
 
       if (acceptedCount >= request.preferredVolunteers) {
@@ -1893,15 +2595,7 @@ export class MatchingService {
         assignment = await manager.save(VolunteerAssignment, assignment);
       }
 
-      // Update request status
-      const newAcceptedCount = acceptedCount + 1;
-      if (newAcceptedCount >= request.minVolunteers) {
-        request.status = ServiceRequestStatus.FULLY_MATCHED;
-      } else {
-        request.status = ServiceRequestStatus.PARTIALLY_ACCEPTED;
-      }
-      await manager.save(ServiceRequest, request);
-      await this.closeStaleOffers(manager, request.id);
+      await this.settleAfterBooking(manager, request, assignment, acceptedCount + 1);
 
       await this.notifications.enqueue(manager, {
         userId: volunteer.userId,
@@ -1935,21 +2629,27 @@ export class MatchingService {
 
   // ─── Offer Expiry & Progression Processing (D#7, D#12, D#13) ────────────────
   /**
-   * Offers go to several volunteers at once. Once a request no longer needs volunteers (filled,
-   * started, finished, cancelled or given up), the offers nobody took are closed, so they leave
-   * volunteers' lists. Expired offers on such requests are timed out as well; open requests
-   * time out their own offers during progression. Offers asking an accepted volunteer to confirm
-   * a new time belong to a reschedule and are left to it.
+   * Offers go to several volunteers at once. Once a request no longer needs volunteers (the
+   * preferred team is booked, or it has started, finished, been cancelled or given up), the offers
+   * nobody took are closed, so they leave volunteers' lists. A visit under way that is short
+   * keeps its offers until enough people are booked. Expired offers on such requests are timed out
+   * as well; open requests time out their own offers during progression. Offers asking an accepted
+   * volunteer to confirm a new time belong to a reschedule and are left to it.
    */
   async closeStaleOffers(manager?: EntityManager, requestId?: string): Promise<number> {
     const run = manager ?? this.dataSource.manager;
     const one = requestId ? 'AND a.service_request_id = $1' : '';
     const params = requestId ? [requestId] : [];
+    const booked = `(SELECT COUNT(*) FROM volunteer_assignments b
+      WHERE b.service_request_id = r.id AND b.status IN ('ACCEPTED', 'IN_PROGRESS'))`;
     const [, cancelled] = await run.query(
       `UPDATE volunteer_assignments a SET status = 'CANCELLED', updated_at = now()
        FROM service_requests r
        WHERE r.id = a.service_request_id AND a.status = 'OFFERED' AND a.reschedule_id IS NULL
-         AND r.status IN ('FULLY_MATCHED', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'EXPIRED_UNMATCHED')
+         AND (r.status IN ('COMPLETED', 'CANCELLED', 'EXPIRED_UNMATCHED')
+           OR (r.status = 'FULLY_MATCHED' AND ${booked} >= r.preferred_volunteers)
+           OR (r.status = 'IN_PROGRESS'
+             AND (r.below_minimum_at IS NULL OR ${booked} >= r.min_volunteers)))
          ${one}`,
       params,
     );
@@ -2063,7 +2763,7 @@ export class MatchingService {
     );
     await attempt(
       await assignments(
-        `a.status = 'ACCEPTED'
+        `a.status = 'ACCEPTED' AND a.arrived_at IS NULL
          AND r.status IN ('PARTIALLY_ACCEPTED', 'FULLY_MATCHED', 'IN_PROGRESS')
          AND GREATEST(r.scheduled_start_time, a.accepted_at)
            + interval '${NO_SHOW_GRACE_MINUTES} minutes' < $1`,
@@ -2103,6 +2803,34 @@ export class MatchingService {
       ),
       'expire an unfilled request',
       (id, at) => this.expireUnfilledRequest(id, at),
+    );
+    await attempt(
+      await this.dataSource.query(
+        `SELECT r.id FROM service_requests r ${activeOrganization}
+         WHERE r.status = 'IN_PROGRESS' AND r.below_minimum_alerted_at IS NULL
+           AND r.below_minimum_at + interval '${TEAM_FINISH_WAIT_MINUTES} minutes' < $1
+           AND NOT EXISTS (SELECT 1 FROM volunteer_assignments p WHERE p.service_request_id = r.id
+             AND p.status = 'IN_PROGRESS' AND p.paused_at IS NOT NULL)
+         ORDER BY r.below_minimum_at LIMIT ${PROGRESSION_BATCH_SIZE}`,
+        [now],
+      ),
+      'alert a short team',
+      (id, at) => this.alertBelowMinimum(id, at),
+    );
+    await attempt(
+      await this.dataSource.query(
+        `SELECT r.id FROM service_requests r ${activeOrganization}
+         WHERE r.status = 'IN_PROGRESS' AND r.below_minimum_alerted_at IS NOT NULL
+           AND r.replacement_escalated_at IS NULL
+           AND (SELECT COUNT(*) FROM volunteer_assignments b WHERE b.service_request_id = r.id
+             AND b.status IN ('ACCEPTED', 'IN_PROGRESS')) < r.min_volunteers
+           AND NOT EXISTS (SELECT 1 FROM volunteer_assignments o WHERE o.service_request_id = r.id
+             AND o.status = 'OFFERED' AND o.offer_expires_at > $1)
+         ORDER BY r.below_minimum_alerted_at LIMIT ${PROGRESSION_BATCH_SIZE}`,
+        [now],
+      ),
+      'escalate an unfilled replacement',
+      (id, at) => this.escalateUnfilledReplacement(id, at),
     );
   }
 
@@ -2205,7 +2933,8 @@ export class MatchingService {
         assignmentId,
         VolunteerAssignmentStatus.ACCEPTED,
       );
-      if (!locked) return;
+      // Someone on site waiting for their team has not missed anything.
+      if (!locked || locked.assignment.arrivedAt) return;
       const { assignment, request } = locked;
       assignment.status = VolunteerAssignmentStatus.NO_SHOW;
       assignment.withdrawnAt = now;
@@ -2295,6 +3024,7 @@ export class MatchingService {
       assignment.reportedMinutes = Math.min(request.expectedDurationMinutes, MAX_SERVICE_MINUTES);
       assignment.completionNotes = 'Closed automatically because Finish was not pressed.';
       await manager.save(VolunteerAssignment, assignment);
+      await this.afterVolunteerStopped(manager, request, now);
       const notice = { organizationId: request.organizationId, requestId: request.id };
       await this.notifications.notifyMemberships(manager, [assignment.volunteerMembershipId], {
         ...notice,
@@ -2549,4 +3279,52 @@ export class MatchingService {
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     return R * c;
   }
+}
+
+/** A visit under way with an open place to fill. */
+function isShortMidVisit(request: ServiceRequest): boolean {
+  return request.status === ServiceRequestStatus.IN_PROGRESS && Boolean(request.belowMinimumAt);
+}
+
+/**
+ * What a volunteer on a visit sees about their team. Teammates' names and numbers are shown only
+ * while both are booked or under way (the list is built from booked assignments only).
+ */
+function teamView(assignment: VolunteerAssignment, booked: VolunteerAssignment[]) {
+  const request = assignment.serviceRequest!;
+  const team = booked.filter((other) => other.serviceRequestId === assignment.serviceRequestId);
+  const teammates = team.filter((other) => other.id !== assignment.id);
+  const started = request.status === ServiceRequestStatus.IN_PROGRESS;
+  const working = assignment.status === VolunteerAssignmentStatus.IN_PROGRESS;
+  const othersWorking = teammates.some(
+    (other) => other.status === VolunteerAssignmentStatus.IN_PROGRESS,
+  );
+  const arrived = team.filter((other) => other.arrivedAt).length;
+  const short = Boolean(request.belowMinimumAt);
+  const places = short ? request.minVolunteers : request.preferredVolunteers;
+  const sensitive = request.serviceCatalog?.requiresCoordinatorDispatch ?? false;
+  return {
+    minVolunteers: request.minVolunteers,
+    preferredVolunteers: request.preferredVolunteers,
+    teammates: teammates.map((other) => ({
+      fullName: other.volunteerMembership?.user?.fullName ?? null,
+      phoneE164: other.volunteerMembership?.user?.phoneE164 ?? null,
+      onSite: other.status === VolunteerAssignmentStatus.IN_PROGRESS || Boolean(other.arrivedAt),
+    })),
+    waitingForTeam: !started && Boolean(assignment.arrivedAt),
+    stillNeeded: started ? 0 : Math.max(0, request.minVolunteers - arrived),
+    short: short && Boolean(request.belowMinimumAlertedAt),
+    stopHazardousWork:
+      short &&
+      Boolean(request.belowMinimumAlertedAt) &&
+      (request.serviceCatalog?.globalService?.isHazardousPhysical ?? false),
+    canLeave: working && othersWorking,
+    canHandOver: working && !othersWorking,
+    canInvite:
+      !sensitive &&
+      // Once escalated, a coordinator is arranging the rest of the team.
+      request.status !== ServiceRequestStatus.ESCALATED_TO_COORDINATOR &&
+      (!started || short) &&
+      team.length < places,
+  };
 }

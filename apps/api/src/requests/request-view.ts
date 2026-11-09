@@ -19,7 +19,11 @@ const HELP_DELIVERY_STATUSES = [
 ];
 
 /** Where a started visit stands once the volunteer has stopped working. */
-export type VisitStage = 'SAFETY_PAUSED' | 'AWAITING_CONFIRMATION' | 'UNDER_REVIEW';
+export type VisitStage =
+  | 'SAFETY_PAUSED'
+  | 'AWAITING_REPLACEMENT'
+  | 'AWAITING_CONFIRMATION'
+  | 'UNDER_REVIEW';
 
 /**
  * What the two people on a visit may know about a safety alert: that the visit is paused, may
@@ -45,12 +49,14 @@ export function visitStage(
     VolunteerAssignment,
     'status' | 'confirmedAt' | 'reviewRequestedAt' | 'reviewResolvedAt' | 'pausedAt'
   >[] = [],
+  replacementNeeded = false,
 ): VisitStage | null {
   if (status !== ServiceRequestStatus.IN_PROGRESS) return null;
   if (assignments.some((a) => a.status === VolunteerAssignmentStatus.IN_PROGRESS && a.pausedAt)) {
     return 'SAFETY_PAUSED';
   }
   if (assignments.some((a) => a.status === VolunteerAssignmentStatus.IN_PROGRESS)) return null;
+  if (replacementNeeded) return 'AWAITING_REPLACEMENT';
   const finished = assignments.filter(
     (a) => a.status === VolunteerAssignmentStatus.COMPLETED && !a.confirmedAt,
   );
@@ -70,7 +76,7 @@ export function toRequestView(
   const { beneficiaryMembership, assignments, ...details } = request;
   return {
     ...details,
-    stage: visitStage(request.status, stageAssignments),
+    stage: visitStage(request.status, stageAssignments, Boolean(request.belowMinimumAt)),
     beneficiaryMembership: beneficiaryMembership
       ? {
           id: beneficiaryMembership.id,
@@ -98,6 +104,7 @@ export function toRequestView(
         status: assignment.status,
         slotNumber: assignment.slotNumber,
         acceptedAt: assignment.acceptedAt ?? null,
+        arrivedAt: assignment.arrivedAt ?? null,
         startedAt: assignment.startedAt ?? null,
         finishedAt: assignment.finishedAt ?? null,
         reportedMinutes: assignment.reportedMinutes ?? null,

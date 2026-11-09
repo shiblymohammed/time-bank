@@ -68,6 +68,15 @@ import {
 } from '../src/notifications/entities/notification-outbox.entity';
 import { PushSender } from '../src/notifications/push-sender.service';
 import { PushDevice } from '../src/notifications/entities/push-device.entity';
+import { SecurityReviewFixes1729118400012 } from '../src/database/migrations/1729118400012-SecurityReviewFixes';
+import { BookingRecovery1729118400013 } from '../src/database/migrations/1729118400013-BookingRecovery';
+import { StaffEmailCode1729118400014 } from '../src/database/migrations/1729118400014-StaffEmailCode';
+import { NamesAndIdentity1729118400015 } from '../src/database/migrations/1729118400015-NamesAndIdentity';
+import { PushDeviceOrganization1729118400016 } from '../src/database/migrations/1729118400016-PushDeviceOrganization';
+import { SafetyAlerts1729118400017 } from '../src/database/migrations/1729118400017-SafetyAlerts';
+import { TeamVisits1729118400018 } from '../src/database/migrations/1729118400018-TeamVisits';
+import { Complaints1729118400019 } from '../src/database/migrations/1729118400019-Complaints';
+import { RestrictionCases1729118400020 } from '../src/database/migrations/1729118400020-RestrictionCases';
 import { Foundation1729118400001 } from '../src/database/migrations/1729118400001-Foundation';
 import { IdentityAndOrganizations1729118400002 } from '../src/database/migrations/1729118400002-IdentityAndOrganizations';
 import { ServiceCatalogueAndRequests1729118400003 } from '../src/database/migrations/1729118400003-ServiceCatalogueAndRequests';
@@ -97,6 +106,15 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       MembershipApplications1729118400009,
       CreditControls1729118400010,
       PushNotifications1729118400011,
+      SecurityReviewFixes1729118400012,
+      BookingRecovery1729118400013,
+      StaffEmailCode1729118400014,
+      NamesAndIdentity1729118400015,
+      PushDeviceOrganization1729118400016,
+      SafetyAlerts1729118400017,
+      TeamVisits1729118400018,
+      Complaints1729118400019,
+      RestrictionCases1729118400020,
     ],
     synchronize: false,
     extra: {
@@ -186,6 +204,11 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       audit,
       authorization,
       ledger,
+      new NotificationsService(
+        db.getRepository(PushDevice),
+        db,
+        new PushSender(new ConfigService()),
+      ),
     );
   });
 
@@ -195,6 +218,8 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
 
   beforeEach(async () => {
     jest.restoreAllMocks();
+    // Visits here are fixed in January 2030, and bookings are limited to 90 days ahead.
+    jest.spyOn(Date, 'now').mockReturnValue(new Date('2029-12-15T10:00:00Z').getTime());
     await db.query(
       'TRUNCATE otp_challenges, audit_events, users, organizations, service_categories CASCADE',
     );
@@ -367,6 +392,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
 
   describe('OTP concurrency and expiry', () => {
     const phone = '+919000000001';
+    beforeEach(() => jest.restoreAllMocks());
     function authentication() {
       const sms = { sendOtp: jest.fn().mockResolvedValue(true) };
       return {
@@ -422,10 +448,18 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       ).toBe(1);
       expect(sessions.every((s) => s.roles.length === 0 && !s.isSuperAdmin)).toBe(true);
     });
-    it('does not let a verified phone bypass a suspended Time Bank account', async () => {
+    it('gives a suspended account a limited session and no roles, however the phone was verified', async () => {
       const { auth } = authentication();
       await db.query("UPDATE users SET status='SUSPENDED' WHERE id=$1", [volunteer]);
-      await expect(auth.signInVerifiedPhone(phone, {})).rejects.toThrow('suspended');
+      const session = await auth.signInVerifiedPhone(phone, {});
+      expect(session.accountRestricted).toBe(true);
+      expect(session.roles).toEqual([]);
+    });
+
+    it('does not let a verified phone into a closed account', async () => {
+      const { auth } = authentication();
+      await db.query("UPDATE users SET status='DEACTIVATED' WHERE id=$1", [volunteer]);
+      await expect(auth.signInVerifiedPhone(phone, {})).rejects.toThrow('deactivated');
       expect(await db.getRepository(AuthenticationSession).count()).toBe(0);
     });
 
@@ -799,7 +833,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
     expect(
       await db
         .getRepository(VolunteerAssignment)
-        .countBy({ status: VolunteerAssignmentStatus.DECLINED }),
+        .countBy({ status: VolunteerAssignmentStatus.CANCELLED }),
     ).toBe(1);
   });
 
@@ -918,7 +952,9 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       await worker().tick();
 
       expect(await status(requestId)).toBe('ESCALATED_TO_COORDINATOR');
-      expect(await queued()).toBe(2);
+      expect(
+        await db.getRepository(NotificationOutbox).countBy({ type: 'VOLUNTEER_OFFER' }),
+      ).toBe(2);
       expect(await db.getRepository(VolunteerAssignment).count()).toBe(2);
       expect(await service.findRequestsDueForProgression()).toEqual([]);
     });
@@ -965,6 +1001,11 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       await db.query(
         'INSERT INTO push_devices(user_id,token,platform) VALUES($1,$2,$3),($4,$5,$6)',
         [volunteer, 'token-1', 'ANDROID', otherVolunteer, 'token-2', 'ANDROID'],
+      );
+      await db.query(
+        `INSERT INTO authentication_sessions(user_id,refresh_token_hash,expires_at)
+         VALUES($1,'session-1',NOW()+interval '1 day'),($2,'session-2',NOW()+interval '1 day')`,
+        [volunteer, otherVolunteer],
       );
       const send = jest.fn(async () => {
         await new Promise((resolve) => setTimeout(resolve, 50));
@@ -1407,7 +1448,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         memberA,
         { minutes: 30 },
         undefined,
-        at(scheduled),
+        at('2030-01-01T10:30:00Z'),
       );
       await db.query(
         "INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,'CAREGIVER',$2)",
@@ -1516,6 +1557,11 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         [second, otherMember],
       ] as const) {
         await service.startAssignment(orgA, assignment, member, undefined, at(scheduled));
+      }
+      for (const [assignment, member] of [
+        [first, memberA],
+        [second, otherMember],
+      ] as const) {
         await service.finishAssignment(orgA, assignment, member, {}, undefined, at(scheduled));
       }
       const staff = await authorization.evaluateOrganizationAccess(coordinator, orgA);
@@ -2596,7 +2642,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         new RoleHierarchyService(),
       );
     const applicant = () =>
-      id("INSERT INTO users(phone_e164) VALUES('+919000000099') RETURNING id");
+      id("INSERT INTO users(phone_e164,full_name) VALUES('+919000000099','Test Applicant') RETURNING id");
     const requireFirstAid = () =>
       db.query('UPDATE global_service_definitions SET required_skill_codes = \'["FIRST_AID"]\'');
 

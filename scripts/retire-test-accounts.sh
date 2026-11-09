@@ -132,6 +132,18 @@ UPDATE safety_alerts SET status = 'RESOLVED', outcome = 'ENDED', resolved_at = n
     staff_notes = 'Test account retired', updated_at = now()
   WHERE status <> 'RESOLVED' AND service_request_id IN (SELECT id FROM ending);
 
+-- Their complaints close. The record stays.
+UPDATE complaints SET status = 'CLOSED', outcome = 'NOT_UPHELD', decided_at = now(),
+    member_message = 'Test account retired', updated_at = now()
+  WHERE status <> 'CLOSED' AND raised_by_user_id IN (SELECT id FROM targets);
+
+-- Their open recommendations and appeals close. The records stay.
+UPDATE restriction_cases SET status = 'REFUSED', decided_at = now(), updated_at = now()
+  WHERE status = 'RECOMMENDED' AND subject_user_id IN (SELECT id FROM targets);
+UPDATE appeals SET status = 'DECIDED', outcome = 'STANDS', decided_at = now(),
+    member_message = 'Test account retired', updated_at = now()
+  WHERE status = 'OPEN' AND appellant_user_id IN (SELECT id FROM targets);
+
 -- Offers to a listed volunteer on someone else's request; matching moves on to others.
 UPDATE volunteer_assignments SET status = 'CANCELLED', updated_at = now()
   WHERE status = 'OFFERED'

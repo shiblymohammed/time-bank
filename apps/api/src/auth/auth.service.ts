@@ -38,6 +38,7 @@ import { REFRESH_OVERLAP_MS, refreshLifetimeMs } from './session-policy';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
 import { RefreshTokenDto } from './dto/refresh-token.dto';
+import { RESTRICTED_SCOPE } from './guards/auth.guard';
 
 export interface AuthSessionResponse {
   accessToken: string;
@@ -64,6 +65,8 @@ export interface AuthSessionResponse {
   } | null;
   roles: string[];
   isSuperAdmin: boolean;
+  /** This sign-in can only read the restriction and appeal it. */
+  accountRestricted?: boolean;
 }
 
 @Injectable()
@@ -297,10 +300,10 @@ export class AuthService {
       await queryRunner.release();
     }
 
-    // 4. Check user status
-    if (user.status !== AccountStatus.ACTIVE) {
-      throw new ForbiddenException(`Your account is ${user.status.toLowerCase()}. Access denied.`);
-    }
+    // 4. Check user status. A restricted person may still sign in, but only to read and appeal.
+    const restricted = await this.isRestricted(user, () =>
+      new ForbiddenException(`Your account is ${user.status.toLowerCase()}. Access denied.`),
+    );
 
     // 5. Resolve organization context (if provided)
     let activeOrg: Organization | null = null;
@@ -319,7 +322,7 @@ export class AuthService {
       })
       .getOne();
 
-    if (superAdminGrant) {
+    if (superAdminGrant && !restricted) {
       isSuperAdmin = true;
       roles.push(UserRole.SUPER_ADMIN);
     }
@@ -332,7 +335,7 @@ export class AuthService {
           relations: ['roleGrants'],
         });
 
-        if (membership && membership.status === MembershipStatus.APPROVED) {
+        if (membership && membership.status === MembershipStatus.APPROVED && !restricted) {
           const activeGrants = membership.roleGrants
             .filter((g) => g.status === RoleGrantStatus.ACTIVE)
             .map((g) => g.role);
@@ -351,6 +354,7 @@ export class AuthService {
       isSuperAdmin,
       // The sign-in is locked to this app's community (see AuthGuard).
       ...(activeOrg ? { appOrg: activeOrg.id } : {}),
+      ...(restricted ? { scope: RESTRICTED_SCOPE } : {}),
     };
 
     // Cryptographically secure refresh token (30-day lifetime per D#39)
@@ -434,7 +438,27 @@ export class AuthService {
         : null,
       roles,
       isSuperAdmin,
+      ...(restricted ? { accountRestricted: true } : {}),
     };
+  }
+
+  /**
+   * True for a person restricted by a suspension, ban or hold. Any other closed account,
+   * such as a retired or deceased one, cannot sign in at all.
+   */
+  private async isRestricted(user: User, refuse: () => Error): Promise<boolean> {
+    if (
+      user.status === AccountStatus.SUSPENDED ||
+      user.status === AccountStatus.PERMANENTLY_BANNED
+    ) {
+      return true;
+    }
+    if (user.status !== AccountStatus.ACTIVE) throw refuse();
+    const rows: unknown[] = await this.dataSource.query(
+      `SELECT 1 FROM global_account_restrictions WHERE user_id = $1 AND status = 'ACTIVE' LIMIT 1`,
+      [user.id],
+    );
+    return rows.length > 0;
   }
 
   /**
@@ -459,9 +483,12 @@ export class AuthService {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
 
-    if (session.user.status !== AccountStatus.ACTIVE) {
-      throw new ForbiddenException('Account is not active');
-    }
+    // Someone restricted since signing in drops to the limited sign-in, and comes back from it
+    // on the next refresh after access returns.
+    const sessionRestricted = await this.isRestricted(
+      session.user,
+      () => new ForbiddenException('Account is not active'),
+    );
 
     if (
       session.refreshTokenHash !== tokenHash &&
@@ -494,12 +521,12 @@ export class AuthService {
       })
       .getOne();
 
-    if (superAdminGrant) {
+    if (superAdminGrant && !sessionRestricted) {
       isSuperAdmin = true;
       roles.push(UserRole.SUPER_ADMIN);
     }
 
-    if (session.activeOrgId) {
+    if (session.activeOrgId && !sessionRestricted) {
       const membership = await this.membershipRepo.findOne({
         where: { organizationId: session.activeOrgId, userId: session.user.id },
         relations: ['roleGrants'],
@@ -522,6 +549,7 @@ export class AuthService {
       isSuperAdmin,
       sid: session.id,
       ...(session.activeOrgId ? { appOrg: session.activeOrgId } : {}),
+      ...(sessionRestricted ? { scope: RESTRICTED_SCOPE } : {}),
     };
 
     const accessToken = this.jwtService.sign(payload);

@@ -139,6 +139,17 @@ export class ServiceRequest {
   @Column({ name: 'escalated_at', type: 'timestamptz', nullable: true })
   escalatedAt?: Date | null;
 
+  // During a visit: too few volunteers are on site, or the only one has handed over.
+  @Column({ name: 'below_minimum_at', type: 'timestamptz', nullable: true })
+  belowMinimumAt?: Date | null;
+
+  @Column({ name: 'below_minimum_alerted_at', type: 'timestamptz', nullable: true })
+  belowMinimumAlertedAt?: Date | null;
+
+  /** A coordinator has been told that nobody is taking the open place. */
+  @Column({ name: 'replacement_escalated_at', type: 'timestamptz', nullable: true })
+  replacementEscalatedAt?: Date | null;
+
   @Column({ name: 'assigned_coordinator_id', type: 'uuid', nullable: true })
   assignedCoordinatorId?: string | null;
 

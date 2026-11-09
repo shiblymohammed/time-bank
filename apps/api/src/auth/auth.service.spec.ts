@@ -103,6 +103,7 @@ describe('AuthService', () => {
   const mockDataSource = {
     createQueryRunner: jest.fn().mockReturnValue(mockQueryRunner),
     transaction: jest.fn(),
+    query: jest.fn().mockResolvedValue([]),
   };
 
   beforeEach(async () => {
@@ -332,7 +333,7 @@ describe('AuthService', () => {
       );
     });
 
-    it('should throw ForbiddenException if user status is suspended', async () => {
+    it('gives a suspended person a sign-in that can only appeal', async () => {
       const challenge = {
         attemptCount: 0,
         expiresAt: new Date(Date.now() + 60_000),
@@ -351,6 +352,36 @@ describe('AuthService', () => {
         }),
       };
       mockQueryRunner.manager.getRepository.mockReturnValue(mockTransactionalUserRepo);
+      mockSessionRepo.create.mockReturnValue({ id: 'sess-restricted' });
+      mockSessionRepo.save.mockResolvedValue({ id: 'sess-restricted' });
+
+      const session = await service.verifyOtp({ phone: '9876543210', code: '123456' });
+
+      expect(session.accountRestricted).toBe(true);
+      expect(session.roles).toEqual([]);
+      expect(session.isSuperAdmin).toBe(false);
+      expect(mockJwtService.sign).toHaveBeenCalledWith(
+        expect.objectContaining({ scope: 'RESTRICTED', roles: [], isSuperAdmin: false }),
+      );
+    });
+
+    it('still refuses a closed account', async () => {
+      const challenge = {
+        attemptCount: 0,
+        expiresAt: new Date(Date.now() + 60_000),
+        maxAttempts: 3,
+        codeHash: sha256('123456'),
+        consumedAt: null as Date | null,
+      };
+      mockOtpRepo.findOne.mockResolvedValueOnce(challenge);
+      mockOtpRepo.save.mockResolvedValue(challenge);
+      mockQueryRunner.manager.getRepository.mockReturnValue({
+        findOne: jest.fn().mockResolvedValue({
+          id: 'user-closed',
+          phoneE164: '+919876543210',
+          status: AccountStatus.DUPLICATE_CLOSED,
+        }),
+      });
 
       await expect(service.verifyOtp({ phone: '9876543210', code: '123456' })).rejects.toThrow(
         ForbiddenException,

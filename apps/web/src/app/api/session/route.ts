@@ -73,6 +73,16 @@ export async function POST(request: NextRequest) {
             : { phone: body.phone, code: body.code },
       },
     )) as Record<string, unknown>;
+    if (session['accountRestricted']) {
+      await upstream('/auth/logout', {
+        method: 'POST',
+        body: { refreshToken: session['refreshToken'] },
+      });
+      throw new GatewayError(
+        'This account is restricted. Open the member app to read why, or to appeal.',
+        403,
+      );
+    }
     const profile = await profileWithStaffCheck(session['accessToken'] as string);
     if (!isStaff(profile)) {
       await upstream('/auth/logout', {

@@ -273,6 +273,7 @@ function fixture() {
     audit,
     authz,
     hierarchy,
+    { afterDirectRestriction: jest.fn(), afterDirectLift: jest.fn() } as any,
   );
   const jwt = new JwtService({ secret: 'permission-regression-test-secret' });
   const config = new ConfigService();

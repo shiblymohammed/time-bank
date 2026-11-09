@@ -51,6 +51,20 @@ import { DisputeServiceCompletionDto } from './dto/dispute-service-completion.dt
 import { ResolveServiceReviewDto } from './dto/resolve-service-review.dto';
 
 /** A missed Start button should not send every visit to a coordinator. */
+/** A request in one of these has no one on the way yet. */
+const NOT_STARTED = [
+  ServiceRequestStatus.DRAFT,
+  ServiceRequestStatus.MATCHING_ACTIVE,
+  ServiceRequestStatus.PARTIALLY_ACCEPTED,
+  ServiceRequestStatus.FULLY_MATCHED,
+  ServiceRequestStatus.RESCHEDULED,
+  ServiceRequestStatus.ESCALATED_TO_COORDINATOR,
+];
+const hasStarted = (assignment: VolunteerAssignment) =>
+  [VolunteerAssignmentStatus.IN_PROGRESS, VolunteerAssignmentStatus.COMPLETED].includes(
+    assignment.status,
+  );
+
 const TIMED_WORK_TOLERANCE_MINUTES = 10;
 const EXPECTED_DURATION_TOLERANCE_MINUTES = 60;
 const PAIR_LIMIT_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
@@ -257,6 +271,18 @@ export class RequestsService {
       throw new BadRequestException(`Unsupported creation channel '${creationChannel}'`);
     }
 
+    const blocked: unknown[] = await manager.query(
+      `SELECT 1 FROM organization_memberships m
+       JOIN users u ON u.id = m.user_id
+       WHERE m.id = $1 AND (m.status = 'SUSPENDED' OR u.status IN ('SUSPENDED', 'PERMANENTLY_BANNED')
+         OR EXISTS (SELECT 1 FROM global_account_restrictions r
+           WHERE r.user_id = u.id AND r.status = 'ACTIVE'))`,
+      [beneficiaryMembershipId],
+    );
+    if (blocked.length > 0) {
+      throw new ForbiddenException('This person cannot be booked for right now');
+    }
+
     // 3. Verify Beneficiary Eligibility and Frequency Quota (D#24, D#26, FR-BEN-04)
     await this.beneficiariesService.checkEligibilityAndQuota(
       orgId,
@@ -399,10 +425,11 @@ export class RequestsService {
     }
     if (query.needsReview && isCoordOrAdmin) {
       qb.andWhere(
-        `EXISTS (SELECT 1 FROM volunteer_assignments review
+        `(req.below_minimum_alerted_at IS NOT NULL OR EXISTS (
+          SELECT 1 FROM volunteer_assignments review
           WHERE review.service_request_id = req.id
             AND review.review_requested_at IS NOT NULL
-            AND review.review_resolved_at IS NULL)`,
+            AND review.review_resolved_at IS NULL))`,
       );
     }
     if (query.urgency) {
@@ -573,25 +600,77 @@ export class RequestsService {
         throw new BadRequestException('Request is already cancelled');
       }
 
-      // Compute hours before start for reliability scoring
-      const nowMs = Date.now();
-      const startMs = new Date(request.scheduledStartTime).getTime();
-      const hoursBeforeStart = Math.max(0, (startMs - nowMs) / (1000 * 60 * 60));
-
       request.assignments = await manager
         .getRepository(VolunteerAssignment)
         .find({ where: { serviceRequestId: request.id } });
-      if (
-        request.assignments?.some((assignment) =>
-          [VolunteerAssignmentStatus.IN_PROGRESS, VolunteerAssignmentStatus.COMPLETED].includes(
-            assignment.status,
-          ),
-        )
-      ) {
+      if (request.assignments.some(hasStarted)) {
         throw new BadRequestException(
           'A volunteer has already started. A coordinator must decide this visit.',
         );
       }
+      return this.cancelLocked(manager, request, callingUserId, cancellerRole, dto, ipAddress);
+    });
+  }
+
+  /**
+   * A restricted beneficiary's requests that have not started are cancelled in the transaction
+   * that restricts them. A visit under way is returned, for the coordinator to decide.
+   */
+  async cancelForRestriction(
+    manager: EntityManager,
+    membershipIds: string[],
+    actorId: string,
+    ipAddress?: string,
+  ): Promise<{ cancelled: number; underWay: { organizationId: string; id: string }[] }> {
+    const requests = await manager.getRepository(ServiceRequest).find({
+      where: {
+        beneficiaryMembershipId: In(membershipIds),
+        status: In([...NOT_STARTED, ServiceRequestStatus.IN_PROGRESS]),
+      },
+      lock: { mode: 'pessimistic_write' },
+    });
+    const underWay: { organizationId: string; id: string }[] = [];
+    let cancelled = 0;
+    for (const request of requests) {
+      request.assignments = await manager
+        .getRepository(VolunteerAssignment)
+        .find({ where: { serviceRequestId: request.id } });
+      if (
+        request.status === ServiceRequestStatus.IN_PROGRESS ||
+        request.assignments.some(hasStarted)
+      ) {
+        underWay.push({ organizationId: request.organizationId, id: request.id });
+        continue;
+      }
+      await this.cancelLocked(
+        manager,
+        request,
+        actorId,
+        CancellerRole.SYSTEM,
+        // Neutral on purpose: volunteers and caregivers may read why a visit was cancelled.
+        { reasonCode: 'ACCOUNT_UNAVAILABLE', notes: 'Cancelled automatically' },
+        ipAddress,
+      );
+      cancelled += 1;
+    }
+    return { cancelled, underWay };
+  }
+
+  /** The caller holds the request's lock, has loaded its assignments and has checked it can end. */
+  private async cancelLocked(
+    manager: EntityManager,
+    request: ServiceRequest,
+    callingUserId: string,
+    cancellerRole: CancellerRole,
+    dto: CancelServiceRequestDto,
+    ipAddress?: string,
+  ): Promise<ServiceRequest> {
+    const orgId = request.organizationId;
+    {
+      // Compute hours before start for reliability scoring
+      const nowMs = Date.now();
+      const startMs = new Date(request.scheduledStartTime).getTime();
+      const hoursBeforeStart = Math.max(0, (startMs - nowMs) / (1000 * 60 * 60));
 
       request.status = ServiceRequestStatus.CANCELLED;
       const saved = await manager.getRepository(ServiceRequest).save(request);
@@ -657,7 +736,7 @@ export class RequestsService {
       );
 
       return saved;
-    });
+    }
   }
 
   // ─── Reschedule Request (D#62) ──────────────────────────────────────────────
@@ -995,6 +1074,8 @@ export class RequestsService {
         saved = await manager.getRepository(VolunteerAssignment).save(assignment);
       }
 
+      // The coordinator stopped someone still working, which can leave a team short.
+      if (inProgress) await this.matchingService.afterVolunteerStopped(manager, request, now);
       await this.closeRequestIfDone(manager, request, callingUserId, dto.notes);
       const notice = {
         organizationId: orgId,
@@ -1204,6 +1285,8 @@ export class RequestsService {
   ): Promise<boolean> {
     if ((await openHelpCount(manager, request.id)) > 0) return false;
     if (request.status === ServiceRequestStatus.CANCELLED) return false;
+    // Someone must still take over, or a coordinator must stop looking.
+    if (request.belowMinimumAt) return false;
     const delivered =
       !decidedBy ||
       (await manager.getRepository(VolunteerAssignment).count({

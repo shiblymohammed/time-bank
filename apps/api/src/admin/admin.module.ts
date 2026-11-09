@@ -9,6 +9,7 @@ import { OrganizationMembership } from '../memberships/entities/organization-mem
 import { MembershipRoleGrant } from '../memberships/entities/membership-role-grant.entity';
 import { AuditEvent } from '../audit/entities/audit-event.entity';
 
+import { RestrictionsModule } from '../restrictions/restrictions.module';
 import { AdminService } from './admin.service';
 import { AdminController } from './admin.controller';
 
@@ -23,6 +24,7 @@ import { AdminController } from './admin.controller';
       MembershipRoleGrant,
       AuditEvent,
     ]),
+    RestrictionsModule,
   ],
   controllers: [AdminController],
   providers: [AdminService],

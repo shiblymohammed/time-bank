@@ -21,6 +21,8 @@ import { TimeLedgerModule } from './time-ledger/time-ledger.module';
 import { DonationsModule } from './donations/donations.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SafetyModule } from './safety/safety.module';
+import { ComplaintsModule } from './complaints/complaints.module';
+import { RestrictionsModule } from './restrictions/restrictions.module';
 
 /**
  * Root application module.
@@ -101,6 +103,8 @@ import { SafetyModule } from './safety/safety.module';
     DonationsModule,
     NotificationsModule,
     SafetyModule,
+    ComplaintsModule,
+    RestrictionsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

@@ -33,9 +33,11 @@ const volunteer = person('m-volunteer', 'u-volunteer', [UserRole.VOLUNTEER]);
 const beneficiary = person('m-beneficiary', 'u-beneficiary', [UserRole.BENEFICIARY]);
 const stranger = person('m-stranger', 'u-stranger', [UserRole.VOLUNTEER]);
 const coordinator = person('m-coordinator', 'u-coordinator', [UserRole.COORDINATOR]);
+const teammate = person('m-teammate', 'u-teammate', [UserRole.VOLUNTEER]);
 
 describe('SafetyService', () => {
   let visit: VolunteerAssignment;
+  let secondVisit: VolunteerAssignment | null;
   let request: ServiceRequest;
   let alerts: SafetyAlert[];
   let notifications: {
@@ -59,7 +61,9 @@ describe('SafetyService', () => {
     });
 
   const rows = (entity: unknown): Record<string, unknown>[] => {
-    if (entity === VolunteerAssignment) return [visit as never];
+    if (entity === VolunteerAssignment) {
+      return (secondVisit ? [visit, secondVisit] : [visit]) as never;
+    }
     if (entity === SafetyAlert) return alerts as never;
     if (entity === ServiceRequest) return [request as never];
     if (entity === OrganizationMembership) {
@@ -73,6 +77,7 @@ describe('SafetyService', () => {
   };
 
   beforeEach(() => {
+    secondVisit = null;
     visit = {
       id: 'visit',
       organizationId: 'org',
@@ -309,6 +314,89 @@ describe('SafetyService', () => {
     });
   });
 
+  describe('team visits', () => {
+    const respond = (who: never, restart: boolean, minutes = 40) =>
+      service.respondToRestart(
+        'org',
+        'request',
+        (who as { userId: string }).userId,
+        who,
+        restart,
+        undefined,
+        minutesAfterStart(minutes),
+      );
+
+    beforeEach(() => {
+      request.minVolunteers = 2;
+      secondVisit = {
+        ...visit,
+        id: 'visit-2',
+        volunteerMembershipId: 'm-teammate',
+        volunteerMembership: { userId: 'u-teammate' },
+      } as never;
+    });
+
+    it('pauses everyone, whoever raises the alert', async () => {
+      await raise(teammate);
+      expect(visit.pausedAt).not.toBeNull();
+      expect(secondVisit!.pausedAt).not.toBeNull();
+    });
+
+    it('ends only their own visit when a volunteer chooses to end, and pauses the rest', async () => {
+      await raise(volunteer, SafetyAlertAction.END);
+      expect(visit.status).toBe(VolunteerAssignmentStatus.COMPLETED);
+      expect(secondVisit!.status).toBe(VolunteerAssignmentStatus.IN_PROGRESS);
+      expect(secondVisit!.pausedAt).not.toBeNull();
+      expect(request.belowMinimumAt).toEqual(minutesAfterStart(20));
+    });
+
+    it('ends everyone when the beneficiary chooses to end', async () => {
+      await raise(beneficiary, SafetyAlertAction.END);
+      expect(visit.status).toBe(VolunteerAssignmentStatus.COMPLETED);
+      expect(secondVisit!.status).toBe(VolunteerAssignmentStatus.COMPLETED);
+      expect(request.belowMinimumAt ?? null).toBeNull();
+    });
+
+    it('restarts one volunteer at a time and keeps the alert open until all are working', async () => {
+      await raise(beneficiary);
+      await service.allowRestart('org', alerts[0]!.id, coordinator, 'Spoke to everyone');
+      await respond(volunteer, true);
+      expect(visit.pausedAt).toBeNull();
+      expect(secondVisit!.pausedAt).not.toBeNull();
+      expect(alerts[0]!.status).not.toBe(SafetyAlertStatus.RESOLVED);
+      await respond(teammate, true);
+      expect(secondVisit!.pausedAt).toBeNull();
+      expect(alerts[0]!.outcome).toBe(SafetyAlertOutcome.RESTARTED);
+    });
+
+    it('lets one volunteer leave while the other restarts, and notes the team is short', async () => {
+      await raise(beneficiary);
+      await service.allowRestart('org', alerts[0]!.id, coordinator, 'Spoke to everyone');
+      await respond(volunteer, true);
+      await respond(teammate, false);
+      expect(secondVisit!.status).toBe(VolunteerAssignmentStatus.COMPLETED);
+      expect(secondVisit!.reviewReason).toBe(AssignmentReviewReason.SAFETY_ALERT);
+      expect(visit.status).toBe(VolunteerAssignmentStatus.IN_PROGRESS);
+      expect(alerts[0]!.status).toBe(SafetyAlertStatus.RESOLVED);
+      expect(request.belowMinimumAt).toEqual(minutesAfterStart(40));
+    });
+
+    it('stops looking for a replacement when a coordinator ends the visit for everyone', async () => {
+      await raise(volunteer, SafetyAlertAction.END);
+      expect(request.belowMinimumAt).not.toBeNull();
+      await service.endVisit('org', alerts[0]!.id, coordinator, 'Spoke to everyone');
+      expect(secondVisit!.status).toBe(VolunteerAssignmentStatus.COMPLETED);
+      expect(request.belowMinimumAt).toBeNull();
+    });
+
+    it('lets the beneficiary end the visit for everyone instead of restarting', async () => {
+      await raise(volunteer);
+      await respond(beneficiary, false);
+      expect(visit.status).toBe(VolunteerAssignmentStatus.COMPLETED);
+      expect(secondVisit!.status).toBe(VolunteerAssignmentStatus.COMPLETED);
+    });
+  });
+
   describe('coordinator actions', () => {
     it('are refused for members', async () => {
       await raise(volunteer);
@@ -393,6 +481,21 @@ describe('safety pause time', () => {
 
   it('is never below one minute', () => {
     expect(workedMinutes(visit(), START)).toBe(1);
+  });
+});
+
+describe('a visit waiting for a replacement', () => {
+  const replaced = { status: VolunteerAssignmentStatus.REPLACED } as never;
+
+  it('says so while nobody is on site', () => {
+    expect(visitStage(ServiceRequestStatus.IN_PROGRESS, [replaced], true)).toBe(
+      'AWAITING_REPLACEMENT',
+    );
+  });
+
+  it('says nothing once someone is working again', () => {
+    const working = { status: VolunteerAssignmentStatus.IN_PROGRESS } as never;
+    expect(visitStage(ServiceRequestStatus.IN_PROGRESS, [replaced, working], true)).toBeNull();
   });
 });
 

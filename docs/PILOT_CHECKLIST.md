@@ -3,6 +3,9 @@
 The gate between the test server and real people using the service. A pilot is a small, supervised run with one
 municipality. It is a decision for the project owner and the municipality, and nothing here is approved by finishing it.
 
+The pilot comes last, after every feature is built and the front end is polished. See
+[MILESTONES.md](MILESTONES.md).
+
 ## Before anyone real signs up
 
 ### Sign-off by people
@@ -45,7 +48,7 @@ Check these weekly with the coordinator:
 - Sign-in failures and SMS costs.
 - Any credit correction or review, and why it was needed.
 - Every safety alert, how quickly someone responded, and how it ended.
-- Complaints. There is no complaints workflow yet, so log them by hand and act on them the same day.
+- [Complaints](COMPLAINTS.md): how many, how quickly someone picked each up, and how each ended.
 
 ## Stop the pilot if
 
@@ -56,10 +59,9 @@ Check these weekly with the coordinator:
 
 ## Known gaps to accept or close first
 
-- Complaints, appeals and reports (the rest of Milestone 7) are not built. [Safety alerts](SAFETY_ALERTS.md) are, within
-  their stated limits.
+- Account closure and reports (the rest of Milestone 7) are not built. [Safety alerts](SAFETY_ALERTS.md),
+  [complaints](COMPLAINTS.md) and [restrictions and appeals](RESTRICTIONS.md) are, within their stated limits.
 - Offline use (Milestone 8) is not built, so volunteers need a connection.
 - Load, security and accessibility reviews and Malayalam validation (Milestone 9) have not been done.
-- Team services and transfers (Milestone 5) are not built, so start with services for one volunteer.
 - [Other remaining issues](FULL_APPLICATION_AUDIT_2026-11-02.md), including request-key reuse and quota month
   boundaries.

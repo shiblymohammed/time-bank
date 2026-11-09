@@ -258,6 +258,7 @@ export class CatalogueService {
         isActive: saved.isActive,
         requiresSkills: saved.requiresSkills,
         requiredSkillCodes: saved.requiredSkillCodes,
+        isHazardousPhysical: saved.isHazardousPhysical,
       },
       ipAddress: ipAddress ?? null,
     });

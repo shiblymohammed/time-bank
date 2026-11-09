@@ -41,6 +41,9 @@ type Snapshot = {
     beneficiaryNotes?: string;
     requiredSkills: string[];
     requiresReconfirmation: boolean;
+    belowMinimumAt: string | null;
+    belowMinimumAlertedAt: string | null;
+    replacementEscalatedAt: string | null;
   };
   acceptedCount: number;
   pendingCount: number;
@@ -53,6 +56,9 @@ type Snapshot = {
     offeredAt: string;
     acceptedAt: string | null;
     offerExpiresAt: string;
+    arrivedAt: string | null;
+    leavingReason: string | null;
+    invitedByName: string | null;
     confirmedSchedule: string | null;
     scheduledStartTime: string | null;
     startedAt: string | null;
@@ -339,6 +345,8 @@ export function CoordinatorRequests({
   const mutable =
     request &&
     !['IN_PROGRESS', 'COMPLETED', 'CANCELLED', 'EXPIRED_UNMATCHED'].includes(request.status);
+  // During a visit: too few volunteers on site, or the only one has handed over.
+  const short = request?.status === 'IN_PROGRESS' && Boolean(request.belowMinimumAt);
   const decideVisit = (assignment: Snapshot['assignments'][number], pay: boolean) => {
     const unfinished = assignment.status === 'IN_PROGRESS';
     openAction({
@@ -553,6 +561,59 @@ export function CoordinatorRequests({
               ? ` · Required skills: ${request.requiredSkills.join(', ')}`
               : ''}
           </p>
+          {short && (
+            <div className="glass-panel" role="status" data-testid="team-short">
+              <p>
+                <strong>
+                  {detail.acceptedCount === 0
+                    ? 'Nobody is on this visit now. A volunteer handed it over.'
+                    : `This visit is short of volunteers (minimum ${request.minVolunteers}).`}
+                </strong>
+              </p>
+              <p className="help-text">
+                {request.replacementEscalatedAt
+                  ? 'Nobody is being offered the open place. Dispatch someone, or stop looking if nobody else is coming.'
+                  : request.belowMinimumAlertedAt
+                    ? 'The open place is on offer to other volunteers.'
+                    : 'A teammate has finished. If nobody else stops soon, this becomes an alert.'}
+              </p>
+              <div className="action-row">
+                <button
+                  className="btn btn-secondary"
+                  disabled={pending || detail.acceptedCount >= request.preferredVolunteers}
+                  onClick={() => setDispatching(!dispatching)}
+                >
+                  {dispatching ? 'Close volunteer picker' : 'Dispatch volunteer'}
+                </button>
+                <button
+                  className="btn btn-danger"
+                  disabled={pending}
+                  onClick={() =>
+                    openAction({
+                      title: 'Stop looking for someone',
+                      description:
+                        'Open offers close. Anyone still on the visit carries on. If nobody is left and no help was given, the request is cancelled.',
+                      submitLabel: 'Stop looking',
+                      fields: [
+                        {
+                          key: 'notes',
+                          label: 'What you checked or decided',
+                          minLength: 3,
+                          maxLength: 1000,
+                        },
+                      ],
+                      submit: (v) =>
+                        backend(`${base}/requests/${selected}/stop-replacement`, 'POST', {
+                          notes: v.notes,
+                        }),
+                    })
+                  }
+                >
+                  Stop looking
+                </button>
+              </div>
+            </div>
+          )}
           {mutable && (
             <div className="action-row">
               <button
@@ -641,7 +702,7 @@ export function CoordinatorRequests({
               )}
             </div>
           )}
-          {dispatching && mutable && (
+          {dispatching && (mutable || short) && (
             <People
               path={`${base}/requests/${selected}/dispatch-volunteers`}
               kind="volunteer"
@@ -690,7 +751,22 @@ export function CoordinatorRequests({
                   Offered {indiaTime(a.offeredAt)} · Accepted {indiaTime(a.acceptedAt)}
                   {a.status === 'OFFERED' ? ` · Expires ${indiaTime(a.offerExpiresAt)}` : ''}
                   {` · Offered schedule ${indiaTime(a.scheduledStartTime)}`}
+                  {a.invitedByName ? ` · Invited by ${a.invitedByName}` : ''}
                 </p>
+                {a.arrivedAt && !a.startedAt && (
+                  <p className="help-text">
+                    Arrived {indiaTime(a.arrivedAt)}, waiting for the rest of the team
+                  </p>
+                )}
+                {a.status === 'REPLACED' && (
+                  <p className="help-text">
+                    <strong>Handed over.</strong> No time credits: only the volunteer who finishes
+                    this visit earns them.
+                  </p>
+                )}
+                {a.leavingReason && a.startedAt && (
+                  <p className="help-text">Reason for leaving: {a.leavingReason}</p>
+                )}
                 {a.startedAt && (
                   <p className="help-text">
                     Started {indiaTime(a.startedAt)}

@@ -6,7 +6,10 @@ tests and documented limitations.
 
 ---
 
-## Status on 8 November 2026
+## Status on 9 November 2026
+
+The pilot runs after every feature is built. Order of work: rest of M7, M6, M8, front-end polish, M9, then deploy and
+pilot.
 
 | Step                           | Status                                                                                                              |
 | ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
@@ -14,11 +17,12 @@ tests and documented limitations.
 | M2 Identity and administration | Built; SIM-swap recovery and nominees open                                                                          |
 | M3 Catalogue and matching      | Built, including automatic matching, booking recovery and the push queue                                            |
 | M4 Time credits                | Built                                                                                                               |
-| Kottakkal pilot                | Staff second factor and restore drill built. Next: deploy, real SMS and push, [pilot checklist](PILOT_CHECKLIST.md) |
+| M5 Team and transfer workflows | Built. See [TEAM_VISITS.md](TEAM_VISITS.md)                                                                         |
 | Second-organization readiness  | See below; needed before a second organization goes live                                                            |
-| M7 Governance and reporting    | Safety alerts built; complaints, appeals, restrictions, closure and reports planned                                 |
-| M5, M6, M8                     | Planned                                                                                                             |
+| M7 Governance and reporting    | Alerts, complaints, restrictions and appeals built; closure and reports planned                                 |
+| M6, M8                         | Planned                                                                                                             |
 | M9 Production hardening        | Security review done; the rest planned                                                                              |
+| Kottakkal pilot                | Last, after all of the above. Staff second factor and restore drill built; see [checklist](PILOT_CHECKLIST.md)      |
 
 ## Second-organization readiness
 
@@ -158,17 +162,19 @@ implementation does not imply overall production readiness.
 
 ---
 
-## Milestone 5: Team and transfer workflows
+## Milestone 5: Team and transfer workflows ✅ BUILT
 
 **Goal:** Team-size rules, invitation matching, separate timers, transfer rewards, cancellations.
 
-**Planned scope:**
+Rules, API and limits: [TEAM_VISITS.md](TEAM_VISITS.md).
 
-- Team positions: minimum safe + preferred (FR-TEAM-01, D#64)
-- Team invitation and auto-matching (FR-TEAM-02, D#65)
-- Separate timer per team member (FR-TEAM-04, D#66)
-- Sub-minimum mid-service handling (FR-TEAM-05, D#69, BR-07)
-- Sequential transfer: only finishing volunteer earns (FR-TEAM-07, D#33, BR-06)
+**Scope:**
+
+- [x] Team positions: minimum safe + preferred (FR-TEAM-01, D#64)
+- [x] Team invitation and auto-matching (FR-TEAM-02, D#65)
+- [x] Separate timer per team member (FR-TEAM-04, D#66)
+- [x] Sub-minimum mid-service handling (FR-TEAM-05, D#69, BR-07)
+- [x] Sequential transfer: only finishing volunteer earns (FR-TEAM-07, D#33, BR-06)
 
 ---
 
@@ -192,9 +198,9 @@ implementation does not imply overall production readiness.
 **Planned scope:**
 
 - [x] SafetyModule: alerts, pause/resume (FR-SAFE). See [SAFETY_ALERTS.md](SAFETY_ALERTS.md).
-- ComplaintsModule: escalation hierarchy (FR-SAFE-04, D#75, D#76)
-- AppealModule: appeals to Super Admin (D#77, D#78, BR-11)
-- RestrictionsModule: suspension, ban, reinstatement (FR-SAFE-06, FR-SAFE-07)
+- [x] ComplaintsModule: escalation hierarchy (FR-SAFE-03, D#75, D#76). See [COMPLAINTS.md](COMPLAINTS.md).
+- [x] RestrictionsModule: suspension, ban, reinstatement (FR-SAFE-06, FR-SAFE-07). See [RESTRICTIONS.md](RESTRICTIONS.md).
+- [x] Appeals, to Super Admin and through the complaint levels (D#77, D#78, BR-11, AT-09). Same document.
 - Account closure: death, duplicate (FR-IDENT-06, FR-IDENT-07)
 - ReportsModule: municipality dashboard, PDF/XLSX/CSV exports (FR-REPORT)
 - External sponsor impact report export (D#54, UC-28, AT-29)

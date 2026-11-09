@@ -1,15 +1,31 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsEnum, IsNotEmpty, IsOptional, IsString, IsUUID } from 'class-validator';
+import {
+  IsDateString,
+  IsEnum,
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  Length,
+  ValidateIf,
+} from 'class-validator';
 import { GlobalRestrictionType } from '@ktb/shared-types';
 
 export class ImposeRestrictionDto {
-  @ApiProperty({
-    description: 'Target user ID to restrict',
+  @ApiPropertyOptional({
+    description: 'Target user ID to restrict. Or use member.',
     example: 'a1b2c3d4-e5f6-7a8b-9c0d-1e2f3a4b5c6d',
   })
+  @ValidateIf((dto: ImposeRestrictionDto) => !dto.member)
   @IsNotEmpty()
   @IsUUID()
-  userId!: string;
+  userId?: string;
+
+  @ApiPropertyOptional({ description: "The person's phone or member number" })
+  @IsOptional()
+  @IsString()
+  @Length(3, 50)
+  member?: string;
 
   @ApiProperty({
     enum: GlobalRestrictionType,
@@ -32,4 +48,15 @@ export class ImposeRestrictionDto {
   @IsOptional()
   @IsString()
   notes?: string;
+
+  @ApiPropertyOptional({ description: 'What the person is told. Name no one and no complaint.' })
+  @IsOptional()
+  @IsString()
+  @Length(10, 1000)
+  memberMessage?: string;
+
+  @ApiPropertyOptional({ description: 'Staff are reminded then. Access does not return by itself.' })
+  @IsOptional()
+  @IsDateString()
+  reviewOn?: string;
 }

@@ -16,6 +16,7 @@ type Service = {
   defaultPreferredVolunteers: number;
   requiresSkills: boolean;
   requiredSkillCodes: string[];
+  isHazardousPhysical?: boolean;
 };
 type Local = {
   id: string;
@@ -179,7 +180,7 @@ export function ServiceCatalogue({
   }
   function editSkills(service: Service) {
     openAction({
-      title: `Skills for ${service.nameEn}`,
+      title: `Central rules for ${service.nameEn}`,
       description:
         'Central service rules apply across all organizations. New matching, dispatch and pending-offer acceptance use the current required skills. Existing accepted commitments remain recorded. Skill codes must match coordinator-verified credentials.',
       fields: [
@@ -196,11 +197,18 @@ export function ServiceCatalogue({
           optional: true,
           maxLength: 2548,
         },
+        {
+          key: 'hazardous',
+          label: 'Heavy or risky physical work (a team below its minimum is told to stop)',
+          value: String(Boolean(service.isHazardousPhysical)),
+          choices: yesNo,
+        },
       ],
       submit: (v) =>
         backend(`/catalogue/global/${service.id}`, 'PATCH', {
           requiresSkills: v.required === 'true',
           requiredSkillCodes: skillCodes(v.codes, v.required === 'true'),
+          isHazardousPhysical: v.hazardous === 'true',
         }),
     });
   }
@@ -311,6 +319,7 @@ export function ServiceCatalogue({
                             : `Default preferred: ${service.defaultPreferredVolunteers}`}
                         </p>
                         {local?.requiresCoordinatorDispatch && <p>Coordinator dispatch only</p>}
+                        {service.isHazardousPhysical && <p>Heavy or risky physical work</p>}
                       </td>
                       <td>
                         {service.requiresSkills
@@ -345,7 +354,7 @@ export function ServiceCatalogue({
                               disabled={pending}
                               onClick={() => editSkills(service)}
                             >
-                              Edit central skills
+                              Edit central rules
                             </button>
                           )}
                         </div>

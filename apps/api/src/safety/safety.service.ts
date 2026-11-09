@@ -29,8 +29,9 @@ import { SafetyAlert } from './entities/safety-alert.entity';
 const ALERT_LIST_LIMIT = 100;
 
 /**
- * Safety alerts during a visit (FR-SAFE-01, FR-SAFE-02, BR-10). An alert belongs to the whole
- * request: every volunteer on it pauses or ends together.
+ * Safety alerts during a visit (FR-SAFE-01, FR-SAFE-02, BR-10). An alert pauses every volunteer
+ * on the request. Each volunteer then restarts or leaves for themselves. Only the person being
+ * helped, their caregiver or staff can end the visit for the whole team.
  *
  * Messages to the two people on a visit are the same and never say who raised the alert or why,
  * and push text stays generic because it shows on locked screens.
@@ -81,23 +82,28 @@ export class SafetyService {
         }),
       );
 
-      if (dto.action === SafetyAlertAction.END) {
-        await this.endVisits(manager, visits, userId, now);
-      } else {
-        for (const visit of visits) {
-          visit.pausedAt = visit.pausedAt ?? now;
-          // A new alert takes back any earlier permission to restart.
-          visit.restartAllowedAt = null;
-          await manager.save(VolunteerAssignment, visit);
-        }
+      const ending =
+        dto.action !== SafetyAlertAction.END
+          ? []
+          : role === SafetyAlertRaiserRole.VOLUNTEER
+            ? visits.filter((visit) => visit.volunteerMembershipId === context.membershipId)
+            : visits;
+      const pausing = visits.filter((visit) => !ending.includes(visit));
+      await this.endVisits(manager, ending, userId, now);
+      for (const visit of pausing) {
+        visit.pausedAt = visit.pausedAt ?? now;
+        // A new alert takes back any earlier permission to restart.
+        visit.restartAllowedAt = null;
+        await manager.save(VolunteerAssignment, visit);
       }
+      await this.noteStaffingAfterDeparture(manager, request, pausing, now);
 
       await this.notifyStaff(manager, request, visits, userId);
       await this.notifyParties(
         manager,
         request,
         visits,
-        dto.action === SafetyAlertAction.END ? ENDED_MESSAGE : PAUSED_MESSAGE,
+        pausing.length > 0 ? PAUSED_MESSAGE : ENDED_MESSAGE,
       );
       await this.audit(manager, 'SAFETY_ALERT_RAISED', userId, alert, ipAddress, {
         action: dto.action,
@@ -107,7 +113,10 @@ export class SafetyService {
     });
   }
 
-  /** A volunteer restarts once a coordinator allows it. Either person can end the visit instead. */
+  /**
+   * A volunteer restarts their own visit once a coordinator allows it, or leaves. The person being
+   * helped, or their caregiver, can end it for the whole team.
+   */
   async respondToRestart(
     orgId: string,
     requestId: string,
@@ -125,34 +134,45 @@ export class SafetyService {
       if (paused.length === 0) throw new ConflictException('This visit is not paused');
       const alerts = await this.lockUnresolvedAlerts(manager, request.id);
 
+      const own = visits.filter((visit) => visit.volunteerMembershipId === context.membershipId);
+
       if (!restart) {
-        await this.endVisits(manager, visits, userId, now);
+        const ending = role === SafetyAlertRaiserRole.VOLUNTEER ? own : visits;
+        const remaining = visits.filter((visit) => !ending.includes(visit));
+        await this.endVisits(manager, ending, userId, now);
+        await this.noteStaffingAfterDeparture(manager, request, remaining, now);
         await this.notifyStaff(manager, request, visits, userId);
-        await this.notifyParties(manager, request, visits, ENDED_MESSAGE);
+        await this.notifyParties(
+          manager,
+          request,
+          visits,
+          remaining.length > 0 ? VOLUNTEER_LEFT_MESSAGE : ENDED_MESSAGE,
+        );
         for (const alert of alerts) {
           await this.audit(manager, 'SAFETY_RESTART_DECLINED', userId, alert, ipAddress, { role });
         }
+        await this.resolveIfEveryoneRestarted(manager, remaining, alerts, userId, now);
         return { status: 'ENDED' };
       }
 
       if (role !== SafetyAlertRaiserRole.VOLUNTEER) {
         throw new ForbiddenException('The volunteer restarts the visit');
       }
-      if (paused.some((visit) => !visit.restartAllowedAt)) {
+      const mine = own[0];
+      if (!mine?.pausedAt) throw new ConflictException('Your visit is not paused');
+      if (!mine.restartAllowedAt) {
         throw new ConflictException('A coordinator must allow this visit to restart first');
       }
-      for (const visit of paused) {
-        visit.pausedSeconds = pausedSecondsAt(visit, now);
-        visit.pausedAt = null;
-        visit.restartAllowedAt = null;
-        await manager.save(VolunteerAssignment, visit);
-      }
+      mine.pausedSeconds = pausedSecondsAt(mine, now);
+      mine.pausedAt = null;
+      mine.restartAllowedAt = null;
+      await manager.save(VolunteerAssignment, mine);
       for (const alert of alerts) {
-        this.resolve(alert, SafetyAlertOutcome.RESTARTED, userId, now);
-        await manager.save(SafetyAlert, alert);
         await this.audit(manager, 'SAFETY_VISIT_RESTARTED', userId, alert, ipAddress, {});
       }
-      await this.notifyParties(manager, request, visits, RESTARTED_MESSAGE, userId);
+      if (await this.resolveIfEveryoneRestarted(manager, visits, alerts, userId, now)) {
+        await this.notifyParties(manager, request, visits, RESTARTED_MESSAGE, userId);
+      }
       return { status: 'RESTARTED' };
     });
   }
@@ -265,6 +285,7 @@ export class SafetyService {
       if (visits.length === 0) throw new ConflictException('This visit has already ended');
       // Recorded against whoever raised the alert, so the same coordinator can decide the credits.
       await this.endVisits(manager, visits, alert.raisedByUserId, now);
+      await this.noteStaffingAfterDeparture(manager, request, [], now);
       await this.resolveAll(manager, request.id, context.userId, notes, now);
       await this.notifyParties(manager, request, visits, ENDED_MESSAGE);
       await this.audit(manager, 'SAFETY_VISIT_ENDED', context.userId, alert, ipAddress, { notes });
@@ -415,6 +436,47 @@ export class SafetyService {
     }
   }
 
+  /** The alert is over once everyone still on the visit is working again. */
+  private async resolveIfEveryoneRestarted(
+    manager: EntityManager,
+    remaining: VolunteerAssignment[],
+    alerts: SafetyAlert[],
+    userId: string,
+    now: Date,
+  ): Promise<boolean> {
+    if (remaining.length === 0 || remaining.some((visit) => visit.pausedAt)) return false;
+    for (const alert of alerts) {
+      this.resolve(alert, SafetyAlertOutcome.RESTARTED, userId, now);
+      await manager.save(SafetyAlert, alert);
+    }
+    return true;
+  }
+
+  /**
+   * One volunteer has left a team during an alert. Staff already know about the visit, so the
+   * usual wait applies before the open place goes on offer.
+   */
+  private async noteStaffingAfterDeparture(
+    manager: EntityManager,
+    request: ServiceRequest,
+    remaining: VolunteerAssignment[],
+    now: Date,
+  ): Promise<void> {
+    if (
+      remaining.length > 0 &&
+      remaining.length < request.minVolunteers &&
+      !request.belowMinimumAt
+    ) {
+      request.belowMinimumAt = now;
+      await manager.save(ServiceRequest, request);
+    } else if (remaining.length === 0 && request.belowMinimumAt) {
+      request.belowMinimumAt = null;
+      request.belowMinimumAlertedAt = null;
+      request.replacementEscalatedAt = null;
+      await manager.save(ServiceRequest, request);
+    }
+  }
+
   private markSeen(alert: SafetyAlert, userId: string, now: Date): void {
     alert.status = SafetyAlertStatus.ACKNOWLEDGED;
     alert.acknowledgedAt = now;
@@ -519,6 +581,11 @@ const PAUSED_MESSAGE = {
 const ENDED_MESSAGE = {
   type: 'SAFETY_VISIT_ENDED',
   title: 'This visit has ended',
+  body: 'A coordinator will contact you.',
+};
+const VOLUNTEER_LEFT_MESSAGE = {
+  type: 'SAFETY_VOLUNTEER_LEFT',
+  title: 'A volunteer has left this visit',
   body: 'A coordinator will contact you.',
 };
 const RESTART_ALLOWED_MESSAGE = {
