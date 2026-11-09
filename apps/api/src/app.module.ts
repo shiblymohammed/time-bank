@@ -22,6 +22,7 @@ import { DonationsModule } from './donations/donations.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { SafetyModule } from './safety/safety.module';
 import { ComplaintsModule } from './complaints/complaints.module';
+import { ReportsModule } from './reports/reports.module';
 import { RestrictionsModule } from './restrictions/restrictions.module';
 
 /**
@@ -105,6 +106,7 @@ import { RestrictionsModule } from './restrictions/restrictions.module';
     SafetyModule,
     ComplaintsModule,
     RestrictionsModule,
+    ReportsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

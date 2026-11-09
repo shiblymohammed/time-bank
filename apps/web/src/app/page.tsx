@@ -8,6 +8,7 @@ import { SafetyAlerts, useOpenSafetyAlerts } from '@/components/safety-alerts';
 import { Complaints, useOpenComplaints } from '@/components/complaints';
 import { RestrictionCases, useWaitingRestrictions } from '@/components/restriction-cases';
 import { Closures, useWaitingClosures } from '@/components/closures';
+import { Reports } from '@/components/reports';
 import { ServiceOperations } from '@/components/service-operations';
 import { TimeCredits } from '@/components/time-credits';
 import { ApiManagement } from '@/components/api-management';
@@ -27,6 +28,7 @@ type Tab =
   | 'credits'
   | 'restrictions'
   | 'closures'
+  | 'reports'
   | 'audit';
 type Grant = { id: string; role: string; status: string };
 type Membership = {
@@ -143,6 +145,8 @@ const PAGES: {
   group: string;
   description: string;
   centralOnly?: boolean;
+  /** Municipality Admins and Super Admins. */
+  managersOnly?: boolean;
 }[] = [
   {
     id: 'overview',
@@ -221,6 +225,14 @@ const PAGES: {
     icon: 'closures',
     group: 'Governance',
     description: 'Deaths, duplicate accounts and passing on credits',
+  },
+  {
+    id: 'reports',
+    text: 'Reports',
+    icon: 'reports',
+    group: 'Governance',
+    description: 'Figures and downloads for staff, and saved reports for sponsors',
+    managersOnly: true,
   },
   {
     id: 'audit',
@@ -693,7 +705,9 @@ export default function AdminDashboard(): React.JSX.Element {
     ...(canManageRoles ? ['COORDINATOR'] : []),
     ...(isGlobal ? ['MUNICIPALITY_ADMIN'] : []),
   ];
-  const tabs = PAGES.filter((page) => isGlobal || !page.centralOnly);
+  const tabs = PAGES.filter(
+    (page) => (isGlobal || !page.centralOnly) && (canManageRoles || !page.managersOnly),
+  );
   const selectedOrg = organizations.find((organization) => organization.id === tenant);
   const page = tabs.find((item) => item.id === tab);
   const shownOrgs = organizations.filter(
@@ -2015,6 +2029,16 @@ export default function AdminDashboard(): React.JSX.Element {
               organizationId={tenant === 'GLOBAL' ? null : tenant}
               isGlobal={isGlobal}
               canDecide={canManageRoles}
+              revision={revision}
+              pending={pending}
+              openAction={openAction}
+              onExpired={expired}
+            />
+          )}
+          {tab === 'reports' && canManageRoles && (
+            <Reports
+              key={tenant}
+              organizationId={tenant === 'GLOBAL' ? null : tenant}
               revision={revision}
               pending={pending}
               openAction={openAction}

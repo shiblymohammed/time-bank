@@ -105,6 +105,20 @@ before(async () => {
       });
     if (req.url.startsWith('/api/admin/') && actor !== 'admin')
       return send(403, { message: 'Current Super Admin authority required' });
+    if (req.url.startsWith('/api/admin/reports/download')) {
+      const format = new URL(req.url, 'http://stub.test').searchParams.get('format');
+      if (format === 'denied') return send(403, { message: 'Report access denied' });
+      const types = {
+        pdf: 'application/pdf',
+        xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        csv: 'text/csv; charset=utf-8',
+      };
+      res.writeHead(200, {
+        'content-type': types[format] ?? 'text/html',
+        'content-disposition': `attachment; filename="report.${format}"`,
+      });
+      return res.end(Buffer.from(`QA report bytes: ${format}`));
+    }
     return send(200, { scope: req.url });
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -360,11 +374,15 @@ test('logout clears browser cookies even when upstream revocation fails', async 
     assert.equal(response.status, 503);
     assert.equal(response.cookies.get('ktb_admin_access')?.maxAge, 0);
     assert.equal(response.cookies.get('ktb_admin_refresh')?.maxAge, 0);
-  } finally { failLogout = false; }
+  } finally {
+    failLogout = false;
+  }
 });
 test('rejected cross-origin logout does not alter session cookies', async () => {
   const signed = await login();
-  const response = await session.DELETE(request('DELETE', undefined, jar(signed), 'https://foreign.test'));
+  const response = await session.DELETE(
+    request('DELETE', undefined, jar(signed), 'https://foreign.test'),
+  );
   assert.equal(response.status, 403);
   assert.equal(response.cookies.getAll().length, 0);
 });
@@ -405,6 +423,51 @@ test('upstream failures are returned without successful placeholder data', async
   assert.equal(response.status, 503);
   assert.equal((await response.json()).message, 'Temporary API failure');
 });
+test('report downloads preserve file bytes and metadata, including after session refresh', async () => {
+  const signed = await login();
+  // The stub reuses token strings; this sign-in represents a new session after the logout test.
+  revoked.delete('refresh-admin');
+  for (const format of ['pdf', 'xlsx', 'csv']) {
+    const cookie =
+      format === 'pdf' ? 'ktb_admin_access=expired; ktb_admin_refresh=refresh-admin' : jar(signed);
+    const response = await proxy.GET(
+      new NextRequest(`http://dashboard.test/api/backend/admin/reports/download?format=${format}`, {
+        headers: { cookie },
+      }),
+      {
+        params: Promise.resolve({ path: ['admin', 'reports', 'download'] }),
+      },
+    );
+    assert.equal(response.status, 200);
+    assert.equal(await response.text(), `QA report bytes: ${format}`);
+    assert.match(response.headers.get('content-disposition'), new RegExp(`report\\.${format}`));
+    assert.equal(response.headers.get('cache-control'), 'no-store');
+    assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
+    if (format === 'pdf')
+      assert.equal(response.cookies.get('ktb_admin_access').value, 'access-admin');
+  }
+});
+
+test('report downloads reject anonymous users, backend denials and unexpected file types', async () => {
+  const signed = await login();
+  for (const [format, cookie, status] of [
+    ['pdf', '', 401],
+    ['denied', jar(signed), 403],
+    ['unexpected', jar(signed), 502],
+  ]) {
+    const response = await proxy.GET(
+      new NextRequest(`http://dashboard.test/api/backend/admin/reports/download?format=${format}`, {
+        headers: { cookie },
+      }),
+      {
+        params: Promise.resolve({ path: ['admin', 'reports', 'download'] }),
+      },
+    );
+    assert.equal(response.status, status);
+    assert.equal(response.headers.get('content-disposition'), null);
+  }
+});
+
 test('production cookies are Secure and development codes are suppressed', async () => {
   const original = process.env.NODE_ENV,
     previousGateway = gateway,

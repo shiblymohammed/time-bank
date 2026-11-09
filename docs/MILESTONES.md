@@ -8,21 +8,21 @@ tests and documented limitations.
 
 ## Status on 9 November 2026
 
-The pilot runs after every feature is built. Order of work: rest of M7, M6, M8, front-end polish, M9, then deploy and
-pilot.
+The pilot runs after every feature is built. Order of work: finish M7 sign-off, M6, M8, front-end polish, M9, then
+deploy and pilot.
 
-| Step                           | Status                                                                                                              |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------- |
-| M1 Foundation                  | Built                                                                                                               |
-| M2 Identity and administration | Built; SIM-swap recovery and nominees open                                                                          |
-| M3 Catalogue and matching      | Built, including automatic matching, booking recovery and the push queue                                            |
-| M4 Time credits                | Built                                                                                                               |
-| M5 Team and transfer workflows | Built. See [TEAM_VISITS.md](TEAM_VISITS.md)                                                                         |
-| Second-organization readiness  | See below; needed before a second organization goes live                                                            |
-| M7 Governance and reporting    | Alerts, complaints, restrictions, appeals and account closure built; reports planned                            |
-| M6, M8                         | Planned                                                                                                             |
-| M9 Production hardening        | Security review done; the rest planned                                                                              |
-| Kottakkal pilot                | Last, after all of the above. Staff second factor and restore drill built; see [checklist](PILOT_CHECKLIST.md)      |
+| Step                           | Status                                                                                                         |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| M1 Foundation                  | Built                                                                                                          |
+| M2 Identity and administration | Built; SIM-swap recovery open; nominees built                                                                  |
+| M3 Catalogue and matching      | Built, including automatic matching, booking recovery and the push queue                                       |
+| M4 Time credits                | Built                                                                                                          |
+| M5 Team and transfer workflows | Built. See [TEAM_VISITS.md](TEAM_VISITS.md)                                                                    |
+| Second-organization readiness  | See below; needed before a second organization goes live                                                       |
+| M7 Governance and reporting    | Built. See [REPORTS.md](REPORTS.md) and the documents linked under Milestone 7                                 |
+| M6, M8                         | Planned                                                                                                        |
+| M9 Production hardening        | Security review done; the rest planned                                                                         |
+| Kottakkal pilot                | Last, after all of the above. Staff second factor and restore drill built; see [checklist](PILOT_CHECKLIST.md) |
 
 ## Second-organization readiness
 
@@ -135,7 +135,7 @@ coordinator escalation.
 - [x] Multi-tenant isolation guards & cross-organization community drive authorization rules (ITB-005, ITB-006, ITB-007)
 - [x] Test suite: 24 test suites, 238 unit and integration tests passing with zero regressions
 
-## Milestone 4: Universal time-credit ledger — backend implemented, review pending
+## Milestone 4: Universal time-credit ledger — built, release review pending
 
 **Goal:** Atomic awards, redemption for assistance, cross-municipality donations, freeze/correction rules.
 
@@ -156,9 +156,9 @@ coordinator escalation.
 API details, product policy and rollback constraints: [CREDIT_CONTROLS.md](CREDIT_CONTROLS.md).
 
 **Release gates still open:** human ledger/authorization/migration review, CI on PostgreSQL 17, application of the new
-migration to the intended deployment, coordinator/admin UI integration, and full device-to-server validation. Earlier
-milestone gaps (live SMS/recovery and automatic matching progression/replacement) remain separate work. M4 backend
-implementation does not imply overall production readiness.
+migration to the intended deployment, and current device-to-server validation. Credit interfaces and automatic
+matching/replacement are built. Real SMS and lost-phone/SIM recovery remain separate work. Completed development does
+not imply overall production readiness.
 
 ---
 
@@ -188,7 +188,8 @@ Rules, API and limits: [TEAM_VISITS.md](TEAM_VISITS.md).
 - MerchantsModule: offer management, Municipality Admin approval (FR-LOY-03, D#20)
 - QR code + one-time code redemption (FR-LOY-04, D#21, AT-15)
 - Recognition: badges, certificates, opt-in leaderboard (D#36, D#37)
-- Retire a closed account's coins, on death or duplicate closure (D#46, D#90). See [ACCOUNT_CLOSURE.md](ACCOUNT_CLOSURE.md).
+- Retire a closed account's coins, on death or duplicate closure (D#46, D#90). See
+  [ACCOUNT_CLOSURE.md](ACCOUNT_CLOSURE.md).
 
 ---
 
@@ -200,12 +201,14 @@ Rules, API and limits: [TEAM_VISITS.md](TEAM_VISITS.md).
 
 - [x] SafetyModule: alerts, pause/resume (FR-SAFE). See [SAFETY_ALERTS.md](SAFETY_ALERTS.md).
 - [x] ComplaintsModule: escalation hierarchy (FR-SAFE-03, D#75, D#76). See [COMPLAINTS.md](COMPLAINTS.md).
-- [x] RestrictionsModule: suspension, ban, reinstatement (FR-SAFE-06, FR-SAFE-07). See [RESTRICTIONS.md](RESTRICTIONS.md).
+- [x] RestrictionsModule: suspension, ban, reinstatement (FR-SAFE-06, FR-SAFE-07). See
+      [RESTRICTIONS.md](RESTRICTIONS.md).
 - [x] Appeals, to Super Admin and through the complaint levels (D#77, D#78, BR-11, AT-09). Same document.
 - [x] Account closure: death, duplicate, nominees (FR-IDENT-06, FR-IDENT-07, FR-IDENT-08). See
       [ACCOUNT_CLOSURE.md](ACCOUNT_CLOSURE.md).
-- ReportsModule: municipality dashboard, PDF/XLSX/CSV exports (FR-REPORT)
-- External sponsor impact report export (D#54, UC-28, AT-29)
+- [x] ReportsModule: staff figures and PDF/Excel/CSV downloads (FR-REPORT-01, FR-REPORT-02). See
+      [REPORTS.md](REPORTS.md).
+- [x] Saved sponsor impact reports, monthly and versioned (FR-REPORT-03, D#54, D#57). Same document.
 
 ---
 

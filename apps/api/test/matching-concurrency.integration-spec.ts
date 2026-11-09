@@ -8,7 +8,13 @@ import { CaregiverAuthorization } from '../src/beneficiaries/entities/caregiver-
 import 'reflect-metadata';
 import { randomUUID } from 'crypto';
 import { join } from 'path';
-import { BadRequestException, ConflictException, ForbiddenException, ValidationPipe } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+  ValidationPipe,
+} from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import httpRequest from 'supertest';
@@ -90,6 +96,10 @@ import { TeamVisits1729118400018 } from '../src/database/migrations/172911840001
 import { Complaints1729118400019 } from '../src/database/migrations/1729118400019-Complaints';
 import { RestrictionCases1729118400020 } from '../src/database/migrations/1729118400020-RestrictionCases';
 import { AccountClosures1729118400021 } from '../src/database/migrations/1729118400021-AccountClosures';
+import { SponsorReports1729118400022 } from '../src/database/migrations/1729118400022-SponsorReports';
+import { staffFigures, summaryFigures } from '../src/reports/report-figures';
+import { monthPeriod } from '../src/reports/report-period';
+import { ReportsService } from '../src/reports/reports.service';
 import { Foundation1729118400001 } from '../src/database/migrations/1729118400001-Foundation';
 import { IdentityAndOrganizations1729118400002 } from '../src/database/migrations/1729118400002-IdentityAndOrganizations';
 import { ServiceCatalogueAndRequests1729118400003 } from '../src/database/migrations/1729118400003-ServiceCatalogueAndRequests';
@@ -129,6 +139,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       Complaints1729118400019,
       RestrictionCases1729118400020,
       AccountClosures1729118400021,
+      SponsorReports1729118400022,
     ],
     synchronize: false,
     extra: {
@@ -966,9 +977,9 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       await worker().tick();
 
       expect(await status(requestId)).toBe('ESCALATED_TO_COORDINATOR');
-      expect(
-        await db.getRepository(NotificationOutbox).countBy({ type: 'VOLUNTEER_OFFER' }),
-      ).toBe(2);
+      expect(await db.getRepository(NotificationOutbox).countBy({ type: 'VOLUNTEER_OFFER' })).toBe(
+        2,
+      );
       expect(await db.getRepository(VolunteerAssignment).count()).toBe(2);
       expect(await service.findRequestsDueForProgression()).toEqual([]);
     });
@@ -2660,7 +2671,9 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         new RoleHierarchyService(),
       );
     const applicant = () =>
-      id("INSERT INTO users(phone_e164,full_name) VALUES('+919000000099','Test Applicant') RETURNING id");
+      id(
+        "INSERT INTO users(phone_e164,full_name) VALUES('+919000000099','Test Applicant') RETURNING id",
+      );
     const requireFirstAid = () =>
       db.query('UPDATE global_service_definitions SET required_skill_codes = \'["FIRST_AID"]\'');
 
@@ -2743,6 +2756,373 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
           [orgA, user],
         ),
       ).rejects.toThrow(/chk_membership_application_details/);
+    });
+  });
+
+  describe('reports', () => {
+    let reports: ReportsService;
+    const october = monthPeriod('2029-10');
+    const inOctober = '2029-10-15T10:00:00Z';
+    const community = async (org: string) => {
+      const [row] = await db.query('SELECT id,name,code FROM organizations WHERE id=$1', [org]);
+      return row as { id: string; name: string; code: string };
+    };
+    const context = (org: string, role: UserRole, user = coordinator) => ({
+      userId: user,
+      organizationId: org,
+      membershipId: 'test',
+      membershipStatus: MembershipStatus.APPROVED,
+      roles: [role],
+      isSuperAdmin: false,
+    });
+    const admin = (org = orgA) => context(org, UserRole.MUNICIPALITY_ADMIN);
+    const figures = async (org: string, period = october) =>
+      staffFigures(db.manager, await community(org), period);
+
+    /** A finished visit, confirmed at a chosen moment. The volunteer reported more than was confirmed. */
+    async function visit(
+      confirmedAt: string,
+      options: { minutes?: number; ward?: string; member?: string; org?: string } = {},
+    ) {
+      const org = options.org ?? orgA;
+      const req = await request('2030-01-01T10:00:00Z', org);
+      if (options.ward !== undefined) {
+        await db.query('UPDATE service_requests SET location_ward_number=$2 WHERE id=$1', [
+          req,
+          options.ward,
+        ]);
+      }
+      const assignment = await offer(
+        req,
+        options.member ?? (org === orgA ? memberA : memberB),
+        org,
+      );
+      await db.query(
+        `UPDATE volunteer_assignments SET status='COMPLETED',accepted_at=$2,started_at=$2,finished_at=$2,
+         reported_minutes=$3,confirmed_at=$2,confirmed_by_user_id=$4,confirmed_minutes=$5 WHERE id=$1`,
+        [assignment, confirmedAt, 240, coordinator, options.minutes ?? 60],
+      );
+      await db.query("UPDATE service_requests SET status='COMPLETED' WHERE id=$1", [req]);
+      return { req, assignment };
+    }
+
+    async function walletOf(user: string) {
+      await db.query(
+        'INSERT INTO universal_time_wallets(user_id) VALUES($1) ON CONFLICT DO NOTHING',
+        [user],
+      );
+      return id('SELECT id FROM universal_time_wallets WHERE user_id=$1', [user]);
+    }
+
+    /** Credits paid for a visit. Held credits go to the frozen balance instead. */
+    async function earned(
+      wallet: string,
+      amount: number,
+      org: string,
+      options: { held?: boolean; member?: string } = {},
+    ) {
+      const { req, assignment } = await visit(inOctober, {
+        org,
+        ...(options.member ? { member: options.member } : {}),
+      });
+      await db.query(
+        `INSERT INTO time_credit_ledger(wallet_id,amount,balance_after,held,tx_type,originating_org_id,
+         frozen_delta,service_request_id,volunteer_assignment_id,minutes,created_at)
+         VALUES($1,$2,0,$3,'SERVICE_EARNED',$4,$5,$6,$7,60,$8)`,
+        [
+          wallet,
+          amount,
+          options.held ?? false,
+          org,
+          options.held ? amount : 0,
+          req,
+          assignment,
+          inOctober,
+        ],
+      );
+    }
+
+    beforeEach(() => {
+      reports = new ReportsService(db, audit);
+    });
+
+    it('counts a visit in the month it was confirmed, in India time, using confirmed minutes', async () => {
+      await visit('2029-10-31T18:00:00Z', { minutes: 90 }); // 23:30 on 31 October in India.
+      await visit('2029-10-31T19:00:00Z', { minutes: 30 }); // 00:30 on 1 November in India.
+      const result = await figures(orgA);
+      expect(result.help.visitsCompleted).toBe(1);
+      expect(result.help.hoursConfirmed).toBe(1.5);
+      expect((await figures(orgA, monthPeriod('2029-11'))).help.hoursConfirmed).toBe(0.5);
+    });
+
+    it('counts each person once per community, and once across all of them', async () => {
+      await visit(inOctober);
+      await visit(inOctober);
+      await visit(inOctober, { org: orgB });
+      const a = await figures(orgA);
+      expect(a.help.visitsCompleted).toBe(2);
+      expect(a.help.peopleHelped).toBe(1);
+      expect(a.help.volunteersHelped).toBe(1);
+      expect((await figures(orgB)).help.peopleHelped).toBe(1);
+      const all = await summaryFigures(db.manager, october);
+      expect(all.help.visitsCompleted).toBe(3);
+      expect(all.help.peopleHelped).toBe(1);
+      expect(all.communities.map((row) => row.code)).toEqual(['A', 'B']);
+    });
+
+    it('counts request outcomes and the typical wait, hiding a wait too few requests would expose', async () => {
+      for (let i = 0; i < 4; i += 1) {
+        const req = await request('2030-01-01T10:00:00Z');
+        await db.query('UPDATE service_requests SET created_at=$2 WHERE id=$1', [req, inOctober]);
+        const assignment = await offer(req);
+        await db.query('UPDATE volunteer_assignments SET accepted_at=$2 WHERE id=$1', [
+          assignment,
+          new Date(new Date(inOctober).getTime() + (i + 1) * 10 * 60_000),
+        ]);
+      }
+      expect((await figures(orgA)).speed.typicalMinutesToVolunteer).toBeNull();
+      const fifth = await request('2030-01-01T10:00:00Z');
+      await db.query('UPDATE service_requests SET created_at=$2 WHERE id=$1', [fifth, inOctober]);
+      await db.query('UPDATE volunteer_assignments SET accepted_at=$2 WHERE id=$1', [
+        await offer(fifth),
+        new Date(new Date(inOctober).getTime() + 50 * 60_000),
+      ]);
+      const result = await figures(orgA);
+      expect(result.help.requestsMade).toBe(5);
+      expect(result.speed.typicalMinutesToVolunteer).toBe(30);
+
+      const unmatched = await request('2030-01-01T10:00:00Z');
+      await db.query(
+        "UPDATE service_requests SET status='EXPIRED_UNMATCHED',updated_at=$2 WHERE id=$1",
+        [unmatched, inOctober],
+      );
+      expect((await figures(orgA)).help.requestsUnmatched).toBe(1);
+    });
+
+    it('keeps credits under the community they came from, and does not count a nominee as earning', async () => {
+      const wallet = await walletOf(volunteer);
+      await earned(wallet, 2, orgA);
+      await earned(wallet, 3, orgB);
+      await earned(wallet, 1.5, orgA, { held: true });
+      const donation = await id(
+        `INSERT INTO credit_donations(donor_user_id,originating_org_id,recipient_user_id,recipient_membership_id,amount,idempotency_key)
+         VALUES($1,$2,$3,$4,0.5,'report-test') RETURNING id`,
+        [volunteer, orgA, otherVolunteer, otherMember],
+      );
+      await db.query(
+        `INSERT INTO time_credit_ledger(wallet_id,amount,balance_after,held,tx_type,originating_org_id,
+         donation_id,created_at) VALUES($1,-0.5,0,false,'DONATION_SENT',$2,$3,$4)`,
+        [wallet, orgA, donation, inOctober],
+      );
+      const closure = await id(
+        `INSERT INTO account_closures(reference,kind,organization_id,subject_user_id,level,status,reason,
+         date_of_death,evidence_type,evidence_last4,reported_by_user_id,client_operation_id)
+         VALUES('CL-1','DECEASED',$1,$2,'MUNICIPALITY_ADMIN','REPORTED','Report test','2029-10-01',
+         'DEATH_CERTIFICATE','1234',$3,gen_random_uuid()) RETURNING id`,
+        [orgA, otherVolunteer, coordinator],
+      );
+      for (const [type, amount] of [
+        ['ESTATE_SENT', -9],
+        ['ESTATE_RECEIVED', 9],
+      ] as const) {
+        await db.query(
+          `INSERT INTO time_credit_ledger(wallet_id,amount,balance_after,held,tx_type,originating_org_id,
+           closure_id,created_at) VALUES($1,$2,0,false,$3,$4,$5,$6)`,
+          [wallet, amount, type, orgA, closure, inOctober],
+        );
+      }
+      const a = (await figures(orgA)).credits;
+      expect(a.earned).toBe(3.5);
+      expect(a.donated).toBe(0.5);
+      expect(a.held).toBe(1.5);
+      expect((await figures(orgB)).credits.earned).toBe(3);
+      expect((await summaryFigures(db.manager, october)).credits.earned).toBe(6.5);
+    });
+
+    it('leaves out retired test accounts', async () => {
+      const wallet = await walletOf(otherVolunteer);
+      await earned(wallet, 4, orgA, { member: otherMember });
+      await visit(inOctober);
+      await db.query("UPDATE users SET status='TEST_ACCOUNT_RETIRED' WHERE id=$1", [
+        otherVolunteer,
+      ]);
+      const result = await figures(orgA);
+      expect(result.help.visitsCompleted).toBe(1);
+      expect(result.credits.earned).toBe(0);
+      expect(result.people.volunteers).toBe(1);
+    });
+
+    it('hides small counts in a breakdown, plus the next smallest, and groups unclear wards', async () => {
+      for (let i = 0; i < 7; i += 1) await visit(inOctober, { ward: '1' });
+      for (let i = 0; i < 6; i += 1) await visit(inOctober, { ward: ' ward no. 02 ' });
+      for (let i = 0; i < 2; i += 1) await visit(inOctober, { ward: "Near Fathima's house" });
+      const { byWard, help, byService } = await figures(orgA);
+      expect(byWard).toEqual([
+        { label: 'Ward 1', visits: 7, hours: 7 },
+        { label: 'Ward 2', visits: 'hidden', hours: 'hidden' },
+        { label: 'Other', visits: '<5', hours: 'hidden' },
+      ]);
+      expect(help.visitsCompleted).toBe(15);
+      expect(byService).toEqual([{ label: 'Test', visits: 15, hours: 15 }]);
+    });
+
+    it('saves each month once a month, keeps every version unchanged, and leaves out safety', async () => {
+      await visit('2029-11-10T10:00:00Z');
+      expect(await reports.saveMonthlyReports()).toBe(2);
+      expect(await reports.saveMonthlyReports()).toBe(0);
+
+      const [first] = await reports.listSponsorReports(orgA, admin());
+      expect(first).toMatchObject({ month: '2029-11', version: 1, source: 'MONTHLY_JOB' });
+      expect(first?.figures).toMatchObject({
+        hoursOfHelp: 1,
+        visitsCompleted: 1,
+        peopleHelped: '<5',
+        activeVolunteers: '<5',
+        topServices: [{ label: 'Test', visits: '<5', hours: 'hidden' }],
+      });
+      for (const word of ['safety', 'complaint', 'restriction', 'closure', 'budget']) {
+        expect(JSON.stringify(first?.figures).toLowerCase()).not.toContain(word);
+      }
+
+      // Later help counted in a past month only reaches a new version.
+      await visit('2029-11-20T10:00:00Z');
+      await reports.generateSponsorReport(orgA, admin(), { month: '2029-11' });
+      const list = await reports.listSponsorReports(orgA, admin());
+      expect(list.map((row) => [row.version, row.figures.visitsCompleted, row.source])).toEqual([
+        [2, 2, 'STAFF'],
+        [1, 1, 'MONTHLY_JOB'],
+      ]);
+      await expect(
+        db.query("UPDATE sponsor_reports SET figures='{}'::jsonb WHERE id=$1", [first?.id]),
+      ).rejects.toThrow('append-only');
+      await expect(
+        db.query('DELETE FROM sponsor_reports WHERE id=$1', [first?.id]),
+      ).rejects.toThrow('append-only');
+      await expect(
+        reports.generateSponsorReport(orgA, admin(), { month: '2029-12' }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('lets two servers run the monthly job without saving a month twice', async () => {
+      await Promise.all([reports.saveMonthlyReports(), reports.saveMonthlyReports()]);
+      const [row] = await db.query(
+        'SELECT count(*)::int AS saved,max(version) AS latest FROM sponsor_reports',
+      );
+      expect(row).toEqual({ saved: 2, latest: 1 });
+    });
+
+    it('saves one consistent snapshot when help is confirmed between aggregate queries', async () => {
+      for (let index = 0; index < 6; index += 1) await visit('2029-11-10T10:00:00Z');
+      let inserted = false;
+      const createRunner = db.createQueryRunner.bind(db);
+      jest.spyOn(db, 'createQueryRunner').mockImplementation((mode) => {
+        const runner = createRunner(mode);
+        const query = runner.query.bind(runner);
+        runner.query = async (sql: string, parameters?: any[], structured?: true): Promise<any> => {
+          const result = structured
+            ? await query(sql, parameters, true)
+            : await query(sql, parameters);
+          if (
+            !inserted &&
+            sql.includes('SELECT count(*) AS visits,COALESCE(sum(a.confirmed_minutes)')
+          ) {
+            inserted = true;
+            await visit('2029-11-20T10:00:00Z');
+          }
+          return result;
+        };
+        return runner;
+      });
+      await reports.generateSponsorReport(orgA, admin(), { month: '2029-11' });
+      expect(inserted).toBe(true);
+      const [saved] = await reports.listSponsorReports(orgA, admin());
+      expect(saved?.figures.visitsCompleted).toBe(6);
+      expect(saved?.figures.topServices).toEqual([{ label: 'Test', visits: 6, hours: 6 }]);
+      expect((await figures(orgA, monthPeriod('2029-11'))).help.visitsCompleted).toBe(7);
+    });
+
+    it('serializes concurrent staff versions without losing or duplicating a version', async () => {
+      await Promise.all(
+        Array.from({ length: 4 }, () =>
+          reports.generateSponsorReport(orgA, admin(), { month: '2029-11' }),
+        ),
+      );
+      expect((await reports.listSponsorReports(orgA, admin())).map((row) => row.version)).toEqual([
+        4, 3, 2, 1,
+      ]);
+    });
+
+    it('lets only Municipality Admins and Super Admins read, each within their reach', async () => {
+      const coordinatorContext = context(orgA, UserRole.COORDINATOR);
+      await expect(reports.staffReport(orgA, coordinatorContext, {})).rejects.toThrow(
+        ForbiddenException,
+      );
+      await expect(
+        reports.staffDownload(orgA, coordinatorContext, { format: 'csv' }),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(reports.listSponsorReports(orgA, coordinatorContext)).rejects.toThrow(
+        ForbiddenException,
+      );
+      await expect(
+        reports.generateSponsorReport(orgA, coordinatorContext, { month: '2029-11' }),
+      ).rejects.toThrow(ForbiddenException);
+      await expect(
+        reports.staffReport(orgA, { ...admin(), isSuperAdmin: true, roles: [] }, {}),
+      ).resolves.toBeDefined();
+
+      await reports.saveMonthlyReports();
+      const [fromA] = await reports.listSponsorReports(orgA, admin());
+      await expect(
+        reports.sponsorDownload(orgB, fromA?.id as string, admin(orgB), 'csv'),
+      ).rejects.toThrow(NotFoundException);
+    });
+
+    it('records every download, and its files hold counts and nothing private', async () => {
+      const { req } = await visit('2029-11-10T10:00:00Z', { ward: 'Rahman villa' });
+      const [row] = await db.query('SELECT request_number FROM service_requests WHERE id=$1', [
+        req,
+      ]);
+      await reports.saveMonthlyReports();
+      const [saved] = await reports.listSponsorReports(orgA, admin());
+      const files = [
+        await reports.staffDownload(orgA, admin(), { format: 'csv', month: '2029-11' }),
+        await reports.staffDownload(orgA, admin(), { format: 'xlsx', month: '2029-11' }),
+        await reports.staffDownload(orgA, admin(), { format: 'pdf', month: '2029-11' }),
+        await reports.sponsorDownload(orgA, saved?.id as string, admin(), 'csv'),
+        await reports.sponsorDownload(orgA, saved?.id as string, admin(), 'pdf'),
+        await reports.summaryDownload(coordinator, { format: 'csv', month: '2029-11' }),
+      ];
+      expect(files.map((file) => file.fileName)).toEqual([
+        'A-report-2029-11.csv',
+        'A-report-2029-11.xlsx',
+        'A-report-2029-11.pdf',
+        'A-impact-2029-11-v1.csv',
+        'A-impact-2029-11-v1.pdf',
+        'all-communities-report-2029-11.csv',
+      ]);
+      for (const csv of [files[0], files[3], files[5]]) {
+        const text = csv?.bytes.toString('utf8') ?? '';
+        for (const secret of [
+          '+91900',
+          row.request_number,
+          'Rahman',
+          'Test community centre',
+          '676503',
+        ]) {
+          expect(text).not.toContain(secret);
+        }
+      }
+      const logged = await db.query(
+        "SELECT payload FROM audit_events WHERE event_type='REPORT_DOWNLOADED' ORDER BY created_at",
+      );
+      expect(logged).toHaveLength(6);
+      expect(logged[0].payload).toEqual({ kind: 'STAFF', period: 'November 2029', format: 'csv' });
+      expect(logged[3].payload).toEqual({
+        kind: 'SPONSOR',
+        period: 'November 2029',
+        format: 'csv',
+        version: 1,
+      });
     });
   });
 
@@ -2964,16 +3344,14 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
     it('reviews a nominee named within 30 days of the death, but not one named long before', async () => {
       await nominate(receiverPhone, '2026-01-01');
       const late = await closedDeath();
-      expect(
-        (await closures.detail(orgA, late.id, asCoordinator())).nomineeUnderReview,
-      ).toBe(true);
+      expect((await closures.detail(orgA, late.id, asCoordinator())).nomineeUnderReview).toBe(true);
       await closures.reopen(orgA, late.id, asSuperAdmin(), notes);
 
       await db.query('UPDATE death_nominees SET created_at=$1', ['2025-01-01']);
       const early = await closedDeath();
-      expect(
-        (await closures.detail(orgA, early.id, asCoordinator())).nomineeUnderReview,
-      ).toBe(false);
+      expect((await closures.detail(orgA, early.id, asCoordinator())).nomineeUnderReview).toBe(
+        false,
+      );
     });
 
     it('will not close the last Super Admin', async () => {
@@ -3029,10 +3407,9 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         { role: 'COORDINATOR', status: 'REVOKED' },
         { role: 'VOLUNTEER', status: 'ACTIVE' },
       ]);
-      const [member] = await db.query(
-        'SELECT status FROM organization_memberships WHERE id=$1',
-        [staffMember],
-      );
+      const [member] = await db.query('SELECT status FROM organization_memberships WHERE id=$1', [
+        staffMember,
+      ]);
       expect(member.status).toBe('APPROVED');
     });
 
@@ -3053,9 +3430,10 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       });
       const fingerprint = async () =>
         (
-          await db.query('SELECT document_fingerprint AS value FROM verified_identities WHERE user_id=$1', [
-            otherVolunteer,
-          ])
+          await db.query(
+            'SELECT document_fingerprint AS value FROM verified_identities WHERE user_id=$1',
+            [otherVolunteer],
+          )
         )[0].value;
       expect(await fingerprint()).toBeNull();
       await closures.reopen(orgA, made.id, asSuperAdmin(), notes);

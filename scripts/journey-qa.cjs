@@ -1588,6 +1588,139 @@ const request = (token, minutes, notes) =>
     assert.equal(selfReport.status, 403, `reporting yourself, got ${selfReport.status}`);
   });
 
+  const REPORTS = `/organizations/${ORG}/reports`;
+  const download = async (path, token) => {
+    const res = await fetch(API + path, { headers: { authorization: `Bearer ${token}` } });
+    return {
+      status: res.status,
+      type: res.headers.get('content-type') ?? '',
+      disposition: res.headers.get('content-disposition') ?? '',
+      bytes: Buffer.from(await res.arrayBuffer()),
+    };
+  };
+  // Everything private this community holds. None of it may reach a report.
+  const privateDetails = async () => {
+    const people = await db(
+      `SELECT u.phone_e164 AS phone, m.membership_number AS number FROM organization_memberships m
+       JOIN users u ON u.id = m.user_id WHERE m.organization_id = $1`,
+      [ORG],
+    );
+    const asked = await db(
+      `SELECT request_number AS number, location_address_text AS address, location_landmark AS landmark,
+       beneficiary_notes AS notes FROM service_requests WHERE organization_id = $1`,
+      [ORG],
+    );
+    return [...people, ...asked]
+      .flatMap((row) => Object.values(row))
+      .filter((value) => typeof value === 'string' && value.length > 3);
+  };
+  const assertNothingPrivate = (text, secrets, what) => {
+    for (const secret of secrets) {
+      assert.ok(!text.includes(secret), `${what} holds a private detail`);
+    }
+    assert.ok(!/\+91\d{10}/.test(text), `${what} holds a phone number`);
+  };
+  const readXlsx = async (bytes) => {
+    const { createRequire } = require('node:module');
+    const { Workbook } = createRequire(require.resolve('../apps/api/package.json'))('exceljs');
+    const book = new Workbook();
+    await book.xlsx.load(bytes);
+    const cells = [];
+    book.eachSheet((sheet) => sheet.eachRow((row) => row.eachCell((cell) => cells.push(String(cell.value)))));
+    return cells.join('\n');
+  };
+  const downloadsLogged = async () =>
+    Number((await db(`SELECT count(*) FROM audit_events WHERE event_type = 'REPORT_DOWNLOADED'`))[0].count);
+
+  await step('A coordinator cannot read reports, and an admin reads only their own community', async () => {
+    assert.equal((await call('GET', REPORTS, t.coordinator)).status, 403, 'coordinator read a report');
+    assert.equal((await download(`${REPORTS}/download?format=csv`, t.coordinator)).status, 403);
+    assert.equal((await call('GET', `${REPORTS}/sponsor`, t.coordinator)).status, 403);
+    assert.equal((await call('GET', REPORTS, t.volunteer)).status, 403, 'volunteer read a report');
+    const [other] = await db('SELECT id FROM organizations WHERE id <> $1 ORDER BY created_at LIMIT 1', [ORG]);
+    const elsewhere = await call('GET', `/organizations/${other.id}/reports`, t.municipalityAdmin);
+    assert.equal(elsewhere.status, 403, `another community's report, got ${elsewhere.status}`);
+    assert.equal((await call('GET', '/admin/reports', t.municipalityAdmin)).status, 403);
+    assert.equal((await call('GET', '/admin/reports', t.coordinator)).status, 403);
+  });
+
+  await step('An admin sees and downloads the month, in counts only', async () => {
+    const figures = ok(await call('GET', REPORTS, t.municipalityAdmin), 'report');
+    assert.ok(figures.help.visitsCompleted > 0, 'no visits counted this month');
+    assert.ok(figures.help.hoursConfirmed > 0, 'no hours counted this month');
+    assert.ok(figures.safety.alertsRaised > 0, 'the safety alerts of this run were not counted');
+    assert.ok(figures.safety.complaintsReceived > 0, 'the complaints of this run were not counted');
+    assert.ok(figures.byService.length > 0, 'no services listed');
+
+    const secrets = await privateDetails();
+    assertNothingPrivate(JSON.stringify(figures), secrets, 'the figures');
+    const before = await downloadsLogged();
+    const types = { pdf: 'application/pdf', xlsx: 'spreadsheetml', csv: 'text/csv' };
+    for (const [format, type] of Object.entries(types)) {
+      const file = await download(`${REPORTS}/download?format=${format}`, t.municipalityAdmin);
+      assert.equal(file.status, 200, `${format} download, got ${file.status}`);
+      assert.ok(file.type.includes(type), `${format} came as ${file.type}`);
+      assert.ok(file.disposition.includes(`.${format}"`), `${format} named ${file.disposition}`);
+      assert.ok(file.bytes.length > 100, `${format} is empty`);
+      if (format === 'csv') assertNothingPrivate(file.bytes.toString('utf8'), secrets, 'the CSV');
+      if (format === 'xlsx') assertNothingPrivate(await readXlsx(file.bytes), secrets, 'the Excel file');
+      if (format === 'pdf') assert.equal(file.bytes.subarray(0, 5).toString(), '%PDF-');
+    }
+    assert.equal(await downloadsLogged(), before + 3, 'not every download was recorded');
+    const refused = await download(`${REPORTS}/download?format=exe`, t.municipalityAdmin);
+    assert.equal(refused.status, 400, `an unknown format, got ${refused.status}`);
+    const future = await call('GET', `${REPORTS}?month=2999-01`, t.municipalityAdmin);
+    assert.equal(future.status, 400, `a future month, got ${future.status}`);
+  });
+
+  await step('Sponsor reports are saved, versioned, and leave out safety matters', async () => {
+    const shift = new Date(Date.now() + 5.5 * 3600 * 1000);
+    const thisMonth = shift.toISOString().slice(0, 7);
+    const lastMonth = new Date(Date.UTC(shift.getUTCFullYear(), shift.getUTCMonth() - 1, 1))
+      .toISOString()
+      .slice(0, 7);
+    const SPONSOR = `${REPORTS}/sponsor`;
+    const early = await call('POST', SPONSOR, t.municipalityAdmin, { month: thisMonth });
+    assert.equal(early.status, 400, `a month still running, got ${early.status}`);
+    assert.equal((await call('POST', SPONSOR, t.coordinator, { month: lastMonth })).status, 403);
+
+    const first = ok(await call('POST', SPONSOR, t.municipalityAdmin, { month: lastMonth }), 'save');
+    const second = ok(await call('POST', SPONSOR, t.municipalityAdmin, { month: lastMonth }), 'save again');
+    assert.equal(second.version, first.version + 1, 'saving again did not make a new version');
+    const saved = ok(await call('GET', SPONSOR, t.municipalityAdmin), 'list');
+    assert.ok(saved.some((row) => row.id === first.id), 'the earlier version is gone');
+
+    const secrets = await privateDetails();
+    const csv = await download(`${SPONSOR}/${first.id}/download?format=csv`, t.municipalityAdmin);
+    assert.equal(csv.status, 200, `sponsor CSV, got ${csv.status}`);
+    const text = csv.bytes.toString('utf8');
+    assertNothingPrivate(text, secrets, 'the sponsor CSV');
+    assert.ok(text.includes('Hours of help'), 'the sponsor CSV lost its figures');
+    for (const word of ['Safety', 'Complaint', 'Restriction', 'Accounts closed', 'Appeal']) {
+      assert.ok(!text.includes(word), `the sponsor report mentions ${word}`);
+    }
+    const pdf = await download(`${SPONSOR}/${first.id}/download?format=pdf`, t.municipalityAdmin);
+    assert.equal(pdf.bytes.subarray(0, 5).toString(), '%PDF-');
+    const xlsx = await download(`${SPONSOR}/${first.id}/download?format=xlsx`, t.municipalityAdmin);
+    assert.equal(xlsx.status, 400, `sponsor Excel, got ${xlsx.status}`);
+    const changed = await db(`UPDATE sponsor_reports SET version = 99 WHERE id = $1 RETURNING id`, [first.id])
+      .then(() => true)
+      .catch(() => false);
+    assert.equal(changed, false, 'a saved report could be changed');
+  });
+
+  await step('A Super Admin reads any community and a summary of all', async () => {
+    ok(await call('GET', REPORTS, t.admin), 'a community, as Super Admin');
+    const all = ok(await call('GET', '/admin/reports', t.admin), 'summary');
+    assert.ok(all.communities.length >= 1, 'no communities in the summary');
+    assert.ok(all.communities.some((row) => row.code === ORG_CODE), 'this community is missing');
+    assert.equal(all.community, null);
+    const csv = await download('/admin/reports/download?format=csv', t.admin);
+    assert.equal(csv.status, 200, `summary CSV, got ${csv.status}`);
+    assert.ok(csv.bytes.toString('utf8').includes('counts once in the total'), 'the summary lost its note');
+    assertNothingPrivate(csv.bytes.toString('utf8'), await privateDetails(), 'the summary CSV');
+  });
+
   await step('People are told along the way (push queue)', async () => {
     const { createRequire } = require('node:module');
     const { Client } = createRequire(require.resolve('../apps/api/package.json'))('pg');

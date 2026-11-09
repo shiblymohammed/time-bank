@@ -3,8 +3,11 @@ import {
   checkOrigin,
   failure,
   GatewayError,
+  GatewayFile,
   respond,
+  respondFile,
   upstream,
+  upstreamFile,
   withSession,
 } from '@/lib/server-api';
 export const dynamic = 'force-dynamic';
@@ -21,6 +24,7 @@ const ROUTES: [methods: string, pattern: RegExp][] = [
   ['GET POST', new RegExp(`^${ORG}/complaints(?:/|$)`, 'i')],
   ['GET POST', new RegExp(`^${ORG}/restriction-cases(?:/|$)`, 'i')],
   ['GET POST', new RegExp(`^${ORG}/closures(?:/|$)`, 'i')],
+  ['GET POST', new RegExp(`^${ORG}/reports(?:/|$)`, 'i')],
   ['GET POST', new RegExp(`^${ORG}/appeals(?:/|$)`, 'i')],
   ['GET POST PATCH', /^\/catalogue\/categories(?:\/[a-f0-9-]+)?$/i],
   ['GET POST PATCH', /^\/catalogue\/global(?:\/[a-f0-9-]+)?$/i],
@@ -54,6 +58,8 @@ const allowed = (method: string, resource: string) =>
     ([methods, pattern]) =>
       (methods === '*' || methods.split(' ').includes(method)) && pattern.test(resource),
   );
+/** Report downloads are the one thing here that is not JSON. */
+const FILE_DOWNLOADS = /\/reports(?:\/sponsor\/[a-f0-9-]+)?\/download$/i;
 async function proxy(request: NextRequest, context: Context) {
   try {
     if (!['GET', 'POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method))
@@ -65,6 +71,12 @@ async function proxy(request: NextRequest, context: Context) {
     const resource = '/' + path.join('/');
     if (!allowed(request.method, resource))
       throw new GatewayError('This service is not available in the dashboard', 404);
+    if (request.method === 'GET' && FILE_DOWNLOADS.test(resource)) {
+      const file = await withSession(request, (token) =>
+        upstreamFile(resource + request.nextUrl.search, token),
+      );
+      return respondFile(file.body as GatewayFile, file.renewed);
+    }
     const body = request.method === 'GET' ? undefined : await request.json().catch(() => undefined);
     const result = await withSession(request, (token) =>
       upstream(resource + request.nextUrl.search, {

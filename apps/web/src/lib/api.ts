@@ -34,6 +34,29 @@ export async function api<T>(
 }
 export const backend = <T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal) =>
   api<T>('/api/backend' + path, method, body, signal);
+/** Fetches a file through the gateway and hands it to the browser to save. */
+export async function downloadFile(path: string): Promise<void> {
+  const response = await fetch('/api/backend' + path, {
+    credentials: 'same-origin',
+    cache: 'no-store',
+  });
+  if (!response.ok) {
+    const result = await response.json().catch(() => ({}));
+    throw new ApiError(
+      typeof result.message === 'string' ? result.message : 'Could not download the file',
+      response.status,
+    );
+  }
+  const name = /filename="([^"]+)"/.exec(response.headers.get('content-disposition') ?? '')?.[1];
+  const url = URL.createObjectURL(await response.blob());
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name ?? 'report';
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
 /** Fetch-style adapter for components written against `/api/...` paths; still goes through the gateway. */
 export function gatewayFetch<T>(
   path: string,

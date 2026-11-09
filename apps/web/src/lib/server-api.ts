@@ -68,18 +68,49 @@ export async function upstream(
     throw new GatewayError('The service is unavailable. Please try again.', 502);
   }
   const body: unknown = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const message = (body as Json)?.['message'];
-    throw new GatewayError(
-      Array.isArray(message)
-        ? message.join('; ')
-        : typeof message === 'string'
-          ? message
-          : 'The request could not be completed',
-      response.status,
-    );
-  }
+  if (!response.ok) throw refusal(body, response.status);
   return body;
+}
+function refusal(body: unknown, status: number) {
+  const message = (body as Json)?.['message'];
+  return new GatewayError(
+    Array.isArray(message)
+      ? message.join('; ')
+      : typeof message === 'string'
+        ? message
+        : 'The request could not be completed',
+    status,
+  );
+}
+/** Only report files pass through as files. Anything else stays behind the JSON gateway. */
+const FILE_TYPES = [
+  'application/pdf',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'text/csv',
+];
+export type GatewayFile = { bytes: ArrayBuffer; contentType: string; disposition: string };
+export async function upstreamFile(path: string, token: string): Promise<GatewayFile> {
+  let response: Response;
+  try {
+    response = await fetch(`${origin}/api${path}`, {
+      headers: { ...(await forwardedFor()), authorization: `Bearer ${token}` },
+      cache: 'no-store',
+      signal: AbortSignal.timeout(60000),
+      redirect: 'error',
+    });
+  } catch {
+    throw new GatewayError('The service is unavailable. Please try again.', 502);
+  }
+  if (!response.ok) throw refusal(await response.json().catch(() => ({})), response.status);
+  const contentType = response.headers.get('content-type') ?? '';
+  const disposition = response.headers.get('content-disposition') ?? '';
+  if (
+    !FILE_TYPES.some((type) => contentType.startsWith(type)) ||
+    !disposition.startsWith('attachment')
+  ) {
+    throw new GatewayError('The service returned an unexpected file', 502);
+  }
+  return { bytes: await response.arrayBuffer(), contentType, disposition };
 }
 export async function withSession(
   request: NextRequest,
@@ -104,7 +135,25 @@ export async function withSession(
   return { body: await action(session['accessToken']), renewed: session };
 }
 export function respond(body: unknown, renewed?: Json) {
-  const response = NextResponse.json(body, { headers: { 'Cache-Control': 'no-store' } });
+  return renewCookies(
+    NextResponse.json(body, { headers: { 'Cache-Control': 'no-store' } }),
+    renewed,
+  );
+}
+export function respondFile(file: GatewayFile, renewed?: Json) {
+  return renewCookies(
+    new NextResponse(file.bytes, {
+      headers: {
+        'Cache-Control': 'no-store',
+        'Content-Type': file.contentType,
+        'Content-Disposition': file.disposition,
+        'X-Content-Type-Options': 'nosniff',
+      },
+    }),
+    renewed,
+  );
+}
+function renewCookies(response: NextResponse, renewed?: Json) {
   const { accessToken, refreshToken } = renewed ?? {};
   if (typeof accessToken === 'string')
     response.cookies.set(ACCESS, accessToken, { ...cookieOptions, maxAge: 900 });

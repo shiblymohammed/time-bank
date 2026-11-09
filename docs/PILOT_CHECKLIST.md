@@ -3,8 +3,7 @@
 The gate between the test server and real people using the service. A pilot is a small, supervised run with one
 municipality. It is a decision for the project owner and the municipality, and nothing here is approved by finishing it.
 
-The pilot comes last, after every feature is built and the front end is polished. See
-[MILESTONES.md](MILESTONES.md).
+The pilot comes last, after every feature is built and the front end is polished. See [MILESTONES.md](MILESTONES.md).
 
 ## Before anyone real signs up
 
@@ -19,7 +18,7 @@ The pilot comes last, after every feature is built and the front end is polished
 
 - [ ] [Every check in the test server guide](TEST_SERVER.md#checks-after-deploying) has passed on the deployed server.
 - [ ] A database backup has been restored successfully at least once, onto a separate database
-  (`scripts/backup-restore-drill.sh` printed `RESULT: PASS`), and nightly backups run and are copied off the server.
+      (`scripts/backup-restore-drill.sh` printed `RESULT: PASS`), and nightly backups run and are copied off the server.
 - [ ] All CI jobs pass on the deployed commit, including Matching Concurrency.
 - [ ] Android release build works on a real phone with Firebase sign-in, not test sign-in.
 - [ ] Real SMS delivery and quota are confirmed for the expected number of users.
@@ -29,8 +28,8 @@ The pilot comes last, after every feature is built and the front end is polished
 
 - [ ] The municipality, wards and operational zones are set up.
 - [ ] The enabled service list is reviewed by the coordinator.
-- [ ] No test or demo accounts remain on the pilot database. If everything on it is test data, recreate the
-      database. If real people are on it too, use `scripts/retire-test-accounts.sh`.
+- [ ] No test or demo accounts remain on the pilot database. If everything on it is test data, recreate the database. If
+      real people are on it too, use `scripts/retire-test-accounts.sh`.
 
 ## A safe first scope
 
@@ -59,8 +58,10 @@ Check these weekly with the coordinator:
 
 ## Known gaps to accept or close first
 
-- Reports (the rest of Milestone 7) are not built. [Safety alerts](SAFETY_ALERTS.md), [complaints](COMPLAINTS.md),
-  [restrictions and appeals](RESTRICTIONS.md) and [account closure](ACCOUNT_CLOSURE.md) are, within their stated limits.
+- Milestone 7 is built, within the limits stated in [safety alerts](SAFETY_ALERTS.md), [complaints](COMPLAINTS.md),
+  [restrictions and appeals](RESTRICTIONS.md), [account closure](ACCOUNT_CLOSURE.md) and [reports](REPORTS.md).
+- [Report](REPORTS.md) PDFs are in English only, and the hiding limit of 5 needs confirming, since the PRD cites a
+  privacy rule (NFR-14) it never defines.
 - Passing on a deceased member's credits needs legal advice first (D#44), and the nominee's phone code has not been
   tested on a real phone with real Firebase.
 - Lost phone or SIM recovery (FR-IDENT-05) is not built.

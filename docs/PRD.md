@@ -485,19 +485,19 @@ Each configuration file defines tenant identity and visual branding:
 The platform is delivered in testable milestones by a solo developer. [MILESTONES.md](MILESTONES.md) tracks scope and
 status; this table is the summary.
 
-| Step                           | Scope                                                                                                                           | Status (8 November 2026)                   |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| M1 Foundation                  | Monorepo, API, dashboard and Flutter shells, Docker, CI/CD, migrations, audit log                                               | Built                                      |
-| M2 Identity and administration | OTP and Firebase sign-in, sessions, organizations, memberships, roles, beneficiary eligibility, caregivers, restrictions        | Built; SIM-swap recovery and nominees open |
-| M3 Catalogue and matching      | Requests, automatic matching, offers, visits, rescheduling, cancellation, booking recovery, push queue                          | Built                                      |
-| M4 Time credits                | Universal wallet, ledger, verified earnings, donations, pools, freezes, disputes, corrections                                   | Built                                      |
-| Kottakkal pilot                | Deploy, real SMS and push, staff second factor, backup restore drill, pilot checklist                                           | Next                                       |
-| Second-organization readiness  | App locked to its organization (ITB-007), push per app, flavor builds per organization (ITB-003, ITB-011), dashboard subdomains | Before the second organization             |
-| M5 Teams and transfers         | Team headcount rules, separate timers, sequential transfers                                                                     | Planned                                    |
-| M6 Loyalty and merchants       | Coins, merchant offers, approvals, QR and code redemption, recognition                                                          | Planned                                    |
-| M7 Governance and reporting    | Safety alerts, complaints, appeals, account closure, reports and sponsor exports                                                | Planned                                    |
-| M8 Offline reliability         | Durable local queue, sync states, offline timers, field tests                                                                   | Planned                                    |
-| M9 Production hardening        | Load test (300 concurrent), PITR drill, monitoring, accessibility and Malayalam validation                                      | Partly done (security review)              |
+| Step                           | Scope                                                                                                                           | Status (9 November 2026)                      |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------- |
+| M1 Foundation                  | Monorepo, API, dashboard and Flutter shells, Docker, CI/CD, migrations, audit log                                               | Built                                         |
+| M2 Identity and administration | OTP and Firebase sign-in, sessions, organizations, memberships, roles, beneficiary eligibility, caregivers, restrictions        | Built; SIM-swap recovery open; nominees built |
+| M3 Catalogue and matching      | Requests, automatic matching, offers, visits, rescheduling, cancellation, booking recovery, push queue                          | Built                                         |
+| M4 Time credits                | Universal wallet, ledger, verified earnings, donations, pools, freezes, disputes, corrections                                   | Built                                         |
+| Kottakkal pilot                | Deploy, real SMS and push, staff second factor, backup restore drill, pilot checklist                                           | Last, after remaining milestones              |
+| Second-organization readiness  | App locked to its organization (ITB-007), push per app, flavor builds per organization (ITB-003, ITB-011), dashboard subdomains | Before the second organization                |
+| M5 Teams and transfers         | Team headcount rules, separate timers, sequential transfers                                                                     | Built; see TEAM_VISITS.md                     |
+| M6 Loyalty and merchants       | Coins, merchant offers, approvals, QR and code redemption, recognition                                                          | Planned                                       |
+| M7 Governance and reporting    | Safety alerts, complaints, appeals, account closure, reports and sponsor exports                                                | Built                                         |
+| M8 Offline reliability         | Durable local queue, sync states, offline timers, field tests                                                                   | Planned                                       |
+| M9 Production hardening        | Load test (300 concurrent), PITR drill, monitoring, accessibility and Malayalam validation                                      | Partly done (security review)                 |
 
 ---
 
