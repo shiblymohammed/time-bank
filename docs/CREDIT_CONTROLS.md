@@ -80,6 +80,10 @@ identical submissions are idempotent; changed findings or a conflicting final de
 
 ## Freeze and reinstatement
 
+When the last account restriction ends, automatic release includes earnings held throughout a continuous sequence of
+overlapping restrictions or closure. A gap in that sequence does not pull in older independent wallet holds. A wallet
+that remains frozen/closed and amounts reserved by credit reviews still prevent release.
+
 `POST wallets/:userId/status` is restricted to **Super Admin**, because the wallet is global. Supply `status` (`ACTIVE`
 or `FROZEN`), `reason`, and `idempotencyKey`. Changes preserve balances and produce immutable audit records. Keys are
 scoped to actor and wallet. An administrator cannot change their own wallet status. Closed wallets, banned/suspended

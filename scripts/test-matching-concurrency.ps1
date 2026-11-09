@@ -1,4 +1,4 @@
-param([string]$PostgresBin)
+param([string]$PostgresBin, [string]$TestNamePattern)
 
 $ErrorActionPreference = 'Stop'
 $workspace = Split-Path -Parent $PSScriptRoot
@@ -45,7 +45,9 @@ try {
   Write-Output "Running booking concurrency tests on isolated PostgreSQL port $port."
   Push-Location (Join-Path $workspace 'apps/api')
   try {
-    & node 'node_modules/jest/bin/jest.js' --config './test/jest-matching-concurrency.json' --runInBand --cacheDirectory='../../node_modules/.cache/matching-integration-jest'
+    $testArguments = @('node_modules/jest/bin/jest.js', '--config', './test/jest-matching-concurrency.json', '--runInBand', '--cacheDirectory=../../node_modules/.cache/matching-integration-jest')
+    if ($TestNamePattern) { $testArguments += @('--testNamePattern', $TestNamePattern) }
+    & node @testArguments
     $testExitCode = $LASTEXITCODE
   } finally {
     Pop-Location

@@ -7,6 +7,7 @@ import {
 import { DataSource, EntityManager, In, IsNull, Not } from 'typeorm';
 import {
   AssignmentReviewReason,
+  MatchingRoundStatus,
   SafetyAlertAction,
   SafetyAlertOutcome,
   SafetyAlertRaiserRole,
@@ -18,6 +19,7 @@ import { AuditService } from '../audit/audit.service';
 import { EvaluatedMembershipContext } from '../authorization/authorization.service';
 import { BeneficiariesService } from '../beneficiaries/beneficiaries.service';
 import { VolunteerAssignment } from '../matching/entities/volunteer-assignment.entity';
+import { MatchingRound } from '../matching/entities/matching-round.entity';
 import { pausedSecondsAt, workedMinutes } from '../matching/booking-recovery';
 import { MAX_SERVICE_MINUTES } from '../matching/matching.service';
 import { OrganizationMembership } from '../memberships/entities/organization-membership.entity';
@@ -304,6 +306,7 @@ export class SafetyService {
   ) {
     return this.handle(orgId, alertId, context, async (manager, { alert, request, visits }) => {
       if (visits.length > 0) throw new ConflictException('Restart or end the visit first');
+      await this.noteStaffingAfterDeparture(manager, request, [], now);
       await this.resolveAll(manager, request.id, context.userId, notes, now);
       await this.audit(manager, 'SAFETY_ALERT_CLOSED', context.userId, alert, ipAddress, { notes });
       return { id: alert.id, status: SafetyAlertStatus.RESOLVED };
@@ -462,6 +465,40 @@ export class SafetyService {
     remaining: VolunteerAssignment[],
     now: Date,
   ): Promise<void> {
+    if (remaining.length === 0) {
+      // A late teammate must not start after everyone else ended an unsafe visit.
+      // Keep completed work for credit review, but stop every unstarted commitment.
+      const pending = await manager.find(VolunteerAssignment, {
+        where: {
+          serviceRequestId: request.id,
+          status: In([VolunteerAssignmentStatus.OFFERED, VolunteerAssignmentStatus.ACCEPTED]),
+        },
+        lock: { mode: 'pessimistic_write' },
+      });
+      for (const visit of pending) {
+        visit.status = VolunteerAssignmentStatus.CANCELLED;
+        await manager.save(VolunteerAssignment, visit);
+      }
+      if (pending.length > 0) {
+        await this.notifications.notifyMemberships(
+          manager,
+          pending.map((visit) => visit.volunteerMembershipId),
+          {
+            organizationId: request.organizationId,
+            requestId: request.id,
+            ...ENDED_MESSAGE,
+          },
+        );
+      }
+      const rounds = await manager.find(MatchingRound, {
+        where: { serviceRequestId: request.id, status: MatchingRoundStatus.ACTIVE },
+        lock: { mode: 'pessimistic_write' },
+      });
+      for (const round of rounds) {
+        round.status = MatchingRoundStatus.COMPLETED;
+        await manager.save(MatchingRound, round);
+      }
+    }
     if (
       remaining.length > 0 &&
       remaining.length < request.minVolunteers &&

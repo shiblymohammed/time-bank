@@ -43,6 +43,9 @@ The member journey script also contains the M7 workflows; it is not a substitute
 
 ## Remaining release work
 
+The subsequent [integration review](M7_INTEGRATION_REVIEW_2026-11-09.md) records cross-module defects found after the
+initial sign-off, their fixes and the additional regression evidence. Use that review alongside this original record.
+
 These limits are carried into later release validation; they are not additional unfinished M7 implementations:
 
 - **Report privacy policy:** the current small-count threshold is 5. It needs product/privacy confirmation before real

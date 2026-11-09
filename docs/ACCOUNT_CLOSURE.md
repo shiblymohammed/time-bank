@@ -18,6 +18,9 @@ A coordinator reports. Someone above decides. Nothing changes until they do, so 
 - Whoever reported cannot approve. Whoever recommended a transfer cannot approve it, and neither can whoever receives
   it.
 - The last Super Admin cannot be closed.
+- Approval rechecks current roles and community memberships, since either can change while a report is waiting.
+- A duplicate decision locks both accounts before checking the survivor. Concurrent reciprocal decisions cannot close
+  both accounts.
 
 ## Nominee
 
@@ -73,6 +76,8 @@ On approval, the same stopping steps run, with these differences:
 | Wrong duplicate closure | Super Admin, on appeal or by reopening | The same, and the document if nobody else now holds it     |
 
 - Staff roles never return by themselves. Someone must grant them again.
+- A suspension ended while the account was closed stays ended on reopening. Still-active restrictions continue to apply.
+  The older global restriction route cannot replace a closed status with a ban; reopen the closure first.
 - Requests that were cancelled stay cancelled.
 - Credits already passed on are not reversed. Staff correct them by hand with the existing credit tools.
 - If another account now holds the document, the reopened account goes back to unverified and needs a new ID check.

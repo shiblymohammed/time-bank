@@ -158,7 +158,10 @@ export class AdminService {
       userId = rows[0]?.id;
     }
     if (!userId) throw new NotFoundException('Target user not found');
-    const user = await m.getRepository(User).findOne({ where: { id: userId } });
+    const user = await m.getRepository(User).findOne({
+      where: { id: userId },
+      lock: { mode: 'for_no_key_update' },
+    });
     if (!user) throw new NotFoundException('Target user not found');
     return user;
   }

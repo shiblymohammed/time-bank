@@ -375,6 +375,14 @@ export class AppealsService {
         lock: { mode: 'pessimistic_write' },
       });
       if (!appeal) throw new NotFoundException('Appeal not found');
+      if (appeal.restrictionCaseId) {
+        // Restriction reinstatement takes the person before its case row. Closure
+        // appeals keep closure's own case-first order, then lock the person.
+        await manager.findOne(User, {
+          where: { id: appeal.appellantUserId },
+          lock: { mode: 'for_no_key_update' },
+        });
+      }
       await this.loadTargets(manager, appeal);
       await this.assertCanHear(manager, appeal, context);
       if (appeal.status !== AppealStatus.OPEN) {

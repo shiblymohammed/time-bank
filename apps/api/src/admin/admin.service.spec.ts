@@ -202,6 +202,28 @@ describe('AdminService', () => {
   });
 
   describe('imposeRestriction', () => {
+    it.each([AccountStatus.DECEASED_CLOSED, AccountStatus.DUPLICATE_CLOSED])(
+      'does not replace a %s closure with a ban',
+      async (status) => {
+        const user = { id: 'target-1', status };
+        mockUserRepo.findOne.mockResolvedValueOnce(user);
+        mockRestrictionRepo.create.mockImplementation((dto) => ({ id: 'r-1', ...dto }));
+        mockRestrictionRepo.save.mockImplementation((restriction) => Promise.resolve(restriction));
+        await expect(
+          service.imposeRestriction(
+            {
+              userId: user.id,
+              restrictionType: GlobalRestrictionType.PERMANENT_BAN,
+              reasonCode: 'TEST',
+            },
+            'admin-1',
+          ),
+        ).rejects.toThrow('closed');
+        expect(user.status).toBe(status);
+        expect(mockRestrictionRepo.save).not.toHaveBeenCalled();
+      },
+    );
+
     it('should throw BadRequestException if admin restricts self', async () => {
       mockUserRepo.findOne.mockResolvedValueOnce({ id: 'admin-1', status: AccountStatus.ACTIVE });
       await expect(
@@ -284,7 +306,7 @@ describe('AdminService', () => {
         userId: 'user-1',
         status: GlobalRestrictionStatus.ACTIVE,
       };
-      mockRestrictionRepo.findOne.mockResolvedValueOnce(restriction);
+      mockRestrictionRepo.findOne.mockResolvedValue(restriction);
       mockRestrictionRepo.save.mockImplementation((r) => Promise.resolve(r));
       mockRestrictionRepo.count.mockResolvedValueOnce(0); // no other active
 

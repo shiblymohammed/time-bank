@@ -608,6 +608,17 @@ export class RestrictionsService {
     work: (manager: EntityManager, found: RestrictionCase) => Promise<T>,
   ): Promise<T> {
     return this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const target = await manager.findOne(RestrictionCase, {
+        where: { id: caseId, ...(orgId ? { organizationId: orgId } : {}) },
+      });
+      if (!target) throw new NotFoundException('Case not found');
+      this.assertCanRead(target, context);
+      // Closure and matching lock the person before changing their cases/bookings.
+      // Taking a case first can deadlock against closure cancelling that case.
+      await manager.findOne(User, {
+        where: { id: target.subjectUserId },
+        lock: { mode: 'for_no_key_update' },
+      });
       const found = await manager.findOne(RestrictionCase, {
         where: { id: caseId, ...(orgId ? { organizationId: orgId } : {}) },
         lock: { mode: 'pessimistic_write' },
@@ -631,6 +642,15 @@ export class RestrictionsService {
     found: RestrictionCase,
     context: EvaluatedMembershipContext,
   ): Promise<void> {
+    if (
+      !context.isSuperAdmin &&
+      levelForRoles(await this.activeRoles(manager, found.subjectUserId)) ===
+        ComplaintLevel.SUPER_ADMIN
+    ) {
+      throw new ForbiddenException(
+        'This member is now an administrator. A Super Admin must decide.',
+      );
+    }
     if (!this.hasDecidingRole(found, context)) {
       throw new ForbiddenException('A Municipality Admin must decide this');
     }

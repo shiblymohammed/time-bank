@@ -25,6 +25,9 @@ Part 1 of Milestone 7 (FR-SAFE-01, FR-SAFE-02, BR-10, D#70 to D#74).
 
 ## Time and credits
 
+When the whole visit ends, unstarted team assignments and offers are cancelled, and its active matching rounds stop. A
+late volunteer cannot start that ended visit. Work already done still waits for the usual independent credit review.
+
 - Paused time is left out of the time worked (`paused_seconds`), for the Finish default, the review check and any
   recorded minutes.
 - A visit ended by a coordinator is recorded as requested by whoever raised the alert, so that the same coordinator can

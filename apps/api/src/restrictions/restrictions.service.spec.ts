@@ -227,6 +227,19 @@ describe('Restrictions and appeals', () => {
   });
 
   describe('recommending', () => {
+    it('requires central authority if the member becomes an administrator before approval', async () => {
+      const made = await recommend();
+      roles['subject'] = [UserRole.MUNICIPALITY_ADMIN];
+      await expect(
+        service.approve(ORG, made.id, admin, {
+          scope: RestrictionScope.PLATFORM,
+          notes: 'Reviewed the recommendation',
+          memberMessage: MESSAGE,
+        }),
+      ).rejects.toThrow(ForbiddenException);
+      expect(subject()['status']).toBe(AccountStatus.ACTIVE);
+    });
+
     it('lets a coordinator recommend, and tells the administrators without naming anyone', async () => {
       const made = await recommend();
       expect(made.status).toBe(RestrictionCaseStatus.RECOMMENDED);

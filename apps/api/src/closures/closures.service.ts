@@ -14,6 +14,9 @@ import {
   ComplaintLevel,
   GlobalRestrictionStatus,
   IdentityVerificationStatus,
+  GlobalRestrictionType,
+  MembershipStatus,
+  RestrictionScope,
   RestrictionCaseEventType,
   RestrictionCaseStatus,
   UserRole,
@@ -279,11 +282,27 @@ export class ClosuresService {
       if (found.kind === ClosureKind.DUPLICATE && !dto.memberMessage?.trim()) {
         throw new BadRequestException('Write what the person is told when they sign in');
       }
-      const user = await manager.findOne(User, {
-        where: { id: found.subjectUserId },
-        lock: { mode: 'pessimistic_write' },
+      // A duplicate's surviving account must stay open through this decision.
+      // Lock both people in a stable order so reciprocal closures cannot close both.
+      const people = await manager.find(User, {
+        where: {
+          id: In([found.subjectUserId, ...(found.primaryUserId ? [found.primaryUserId] : [])]),
+        },
+        order: { id: 'ASC' },
+        lock: { mode: 'for_no_key_update' },
       });
+      const user = people.find((person) => person.id === found.subjectUserId);
       if (!user) throw new NotFoundException('Person not found');
+      // Memberships and staff roles can change while the report waits for a decision.
+      const level = levelForRoles(await this.restrictions.activeRoles(manager, user.id));
+      const [communities]: { count: string }[] = await manager.query(
+        `SELECT count(*) FROM organization_memberships
+         WHERE user_id = $1 AND status IN ('APPROVED', 'SUSPENDED')`,
+        [user.id],
+      );
+      if (Number(communities?.count ?? 0) > 1) found.needsSuperAdmin = true;
+      if (level === ComplaintLevel.SUPER_ADMIN) found.level = level;
+      this.assertCanDecide(found, context);
       if (found.primaryUserId) await this.assertPrimaryOpen(manager, found.primaryUserId);
       if (await holdsSuperAdmin(manager, user.id)) {
         await assertSuperAdminRemains(manager, { userId: user.id });
@@ -575,20 +594,63 @@ export class ClosuresService {
     const state = found.restoreState;
     const user = await manager.findOne(User, {
       where: { id: found.subjectUserId },
-      lock: { mode: 'pessimistic_write' },
+      lock: { mode: 'for_no_key_update' },
     });
     if (!user) throw new NotFoundException('Person not found');
-    user.status = state.userStatus as AccountStatus;
+    // A restriction may have ended while the account was closed. Restore its current
+    // effect, rather than bringing a resolved suspension back from the closure snapshot.
+    const restrictions = await manager.find(GlobalAccountRestriction, {
+      where: { userId: user.id },
+    });
+    const active = restrictions.filter((item) => item.status === GlobalRestrictionStatus.ACTIVE);
+    const wasRestricted = restrictions.some(
+      (item) =>
+        [GlobalRestrictionType.TEMPORARY_SUSPENSION, GlobalRestrictionType.PERMANENT_BAN].includes(
+          item.restrictionType,
+        ) &&
+        found.decidedAt &&
+        item.createdAt <= found.decidedAt &&
+        (!item.resolvedAt || item.resolvedAt >= found.decidedAt),
+    );
+    const priorBlocked = [AccountStatus.SUSPENDED, AccountStatus.PERMANENTLY_BANNED].includes(
+      state.userStatus as AccountStatus,
+    );
+    user.status = active.some(
+      (item) => item.restrictionType === GlobalRestrictionType.PERMANENT_BAN,
+    )
+      ? AccountStatus.PERMANENTLY_BANNED
+      : active.some((item) => item.restrictionType === GlobalRestrictionType.TEMPORARY_SUSPENSION)
+        ? AccountStatus.SUSPENDED
+        : priorBlocked && wasRestricted
+          ? AccountStatus.ACTIVE
+          : (state.userStatus as AccountStatus);
     await manager.save(User, user);
     await manager.query(
       'UPDATE universal_time_wallets SET status = $2, updated_at = now() WHERE user_id = $1',
       [user.id, state.walletStatus ?? 'ACTIVE'],
     );
+    const communityCases = await manager.find(RestrictionCase, {
+      where: { subjectUserId: user.id, scope: RestrictionScope.COMMUNITY },
+    });
     for (const membership of state.memberships) {
+      const cases = communityCases.filter((item) => item.subjectMembershipId === membership.id);
+      const wasSuspended = cases.some(
+        (item) =>
+          found.decidedAt &&
+          item.decidedAt &&
+          item.decidedAt <= found.decidedAt &&
+          (!item.endedAt || item.endedAt >= found.decidedAt),
+      );
+      const stillSuspended = cases.some((item) => item.status === RestrictionCaseStatus.ACTIVE);
+      const restoredStatus = stillSuspended
+        ? MembershipStatus.SUSPENDED
+        : membership.status === MembershipStatus.SUSPENDED && wasSuspended
+          ? MembershipStatus.APPROVED
+          : membership.status;
       await manager.query(
         `UPDATE organization_memberships SET status = $2, updated_at = now()
          WHERE id = $1 AND status = 'REVOKED'`,
-        [membership.id, membership.status],
+        [membership.id, restoredStatus],
       );
     }
     await this.restoreDocument(manager, user.id, state);

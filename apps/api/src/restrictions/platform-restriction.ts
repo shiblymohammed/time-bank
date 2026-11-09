@@ -79,6 +79,11 @@ export async function applyPlatformRestriction(
   },
 ): Promise<GlobalAccountRestriction> {
   const { user, restrictionType, reasonCode, actorId, ipAddress } = params;
+  if ([AccountStatus.DECEASED_CLOSED, AccountStatus.DUPLICATE_CLOSED].includes(user.status)) {
+    throw new ConflictException(
+      'This account is closed. Reopen the closure before restricting it.',
+    );
+  }
   // Every restriction type removes access, including a Super Admin's.
   if (await holdsSuperAdmin(m, user.id)) await assertSuperAdminRemains(m, { userId: user.id });
 
@@ -133,19 +138,32 @@ export async function liftPlatformRestriction(
     ipAddress?: string | undefined;
   },
 ): Promise<{ saved: GlobalAccountRestriction; accessRestored: boolean }> {
-  const { restriction, status, actorId, notes, ipAddress } = params;
+  const { restriction: requested, status, actorId, notes, ipAddress } = params;
+  const users = m.getRepository(User);
+  // Serialize reinstatement with closure/reopening, before changing restriction rows.
+  const user = await users.findOne({
+    where: { id: requested.userId },
+    lock: { mode: 'for_no_key_update' },
+  });
+  const restrictions = m.getRepository(GlobalAccountRestriction);
+  // Older callers may have read the row before entering this transaction. A
+  // concurrent resolution must not rerun its audit and frozen-credit release.
+  const restriction = await restrictions.findOne({
+    where: { id: requested.id },
+    lock: { mode: 'pessimistic_write' },
+  });
+  if (!restriction || restriction.status !== GlobalRestrictionStatus.ACTIVE) {
+    throw new ConflictException('This restriction is no longer active');
+  }
   restriction.status = status;
   restriction.resolvedAt = new Date();
   restriction.resolvedBy = actorId;
   restriction.resolutionNotes = notes;
-  const restrictions = m.getRepository(GlobalAccountRestriction);
   const saved = await restrictions.save(restriction);
 
   const remaining = await restrictions.count({
     where: { userId: restriction.userId, status: GlobalRestrictionStatus.ACTIVE },
   });
-  const users = m.getRepository(User);
-  const user = await users.findOne({ where: { id: restriction.userId } });
   if (user) {
     const blocked = [AccountStatus.SUSPENDED, AccountStatus.PERMANENTLY_BANNED].includes(
       user.status,

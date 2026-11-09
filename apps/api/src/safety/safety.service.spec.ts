@@ -51,6 +51,7 @@ describe('SafetyService', () => {
   const matches = (row: Record<string, unknown>, where: Record<string, unknown>) =>
     Object.entries(where).every(([key, wanted]) => {
       const operator = wanted as { _type?: string; _value?: unknown };
+      if (operator?._type === 'in') return (operator._value as unknown[]).includes(row[key]);
       if (operator?._type === 'not') {
         const inner = operator._value as { _type?: string } | unknown;
         return (inner as { _type?: string })?._type === 'isNull'

@@ -691,12 +691,31 @@ export class CreditControlsService {
     if (!wallet) return 0;
     const account = await this.account(m, wallet.id, null);
     if (account.status !== 'ACTIVE') return 0;
+    // Several restrictions, or a restriction followed by a closure, can keep access
+    // blocked continuously. The last decision must also release earnings from the
+    // earlier overlapping intervals; a separate earlier hold still stays with staff.
+    const [period]: { since: Date }[] = await m.query(
+      `WITH RECURSIVE blocked AS (
+         SELECT created_at AS starts_at, COALESCE(resolved_at, 'infinity'::timestamptz) AS ends_at
+         FROM global_account_restrictions WHERE user_id=$1
+         UNION ALL
+         SELECT decided_at, COALESCE(ended_at, 'infinity'::timestamptz)
+         FROM account_closures WHERE subject_user_id=$1 AND decided_at IS NOT NULL
+           AND status IN ('CLOSED','REOPENED','OVERTURNED')
+       ), connected(starts_at) AS (
+         SELECT $2::timestamptz
+         UNION
+         SELECT b.starts_at FROM blocked b JOIN connected c
+           ON b.starts_at<c.starts_at AND b.ends_at>=c.starts_at
+       ) SELECT min(starts_at) AS since FROM connected`,
+      [userId, since],
+    );
     const held: { org: string; amount: string }[] = await m.query(
       `SELECT originating_org_id AS org, sum(amount) AS amount FROM time_credit_ledger
        WHERE wallet_id=$1 AND tx_type='SERVICE_EARNED' AND held AND created_at>=$2
          AND originating_org_id IS NOT NULL
        GROUP BY originating_org_id`,
-      [account.id, since],
+      [account.id, period?.since ?? since],
     );
     let released = 0;
     for (const { org, amount } of held) {

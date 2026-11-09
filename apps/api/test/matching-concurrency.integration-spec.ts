@@ -1,6 +1,9 @@
 import { ClosuresService } from '../src/closures/closures.service';
+import { SafetyService } from '../src/safety/safety.service';
 import { NomineeService } from '../src/closures/nominee.service';
 import { RestrictionsService } from '../src/restrictions/restrictions.service';
+import { AppealsService } from '../src/restrictions/appeals.service';
+import { liftPlatformRestriction } from '../src/restrictions/platform-restriction';
 import { EvaluatedMembershipContext } from '../src/authorization/authorization.service';
 import { BeneficiariesService } from '../src/beneficiaries/beneficiaries.service';
 import { BeneficiaryEligibility } from '../src/beneficiaries/entities/beneficiary-eligibility.entity';
@@ -59,10 +62,14 @@ import { TimeCreditLedgerEntry } from '../src/time-ledger/entities/time-credit-l
 import { UniversalTimeWallet } from '../src/identity/entities/universal-time-wallet.entity';
 import {
   AccountStatus,
+  AppealOutcome,
   ClosureEvidenceType,
   ClosureKind,
   GlobalRestrictionType,
+  GlobalRestrictionStatus,
   MembershipStatus,
+  RestrictionScope,
+  SafetyAlertAction,
   UserRole,
   VolunteerAssignmentStatus,
 } from '@ktb/shared-types';
@@ -3126,6 +3133,87 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
     });
   });
 
+  describe('safety alerts across team bookings', () => {
+    it.each(['staff', 'beneficiary', 'last volunteer'])(
+      'stops a late volunteer joining after the visit is ended by %s',
+      async (ending) => {
+        const visit = await request('2030-01-01T10:00:00Z', orgA, 2);
+        const owner = (
+          await db.query('SELECT user_id FROM organization_memberships WHERE id=$1', [beneficiaryA])
+        )[0].user_id;
+        await db.query('UPDATE service_requests SET created_by_user_id=$2 WHERE id=$1', [
+          visit,
+          owner,
+        ]);
+        const first = await offer(visit, memberA);
+        const late = await id(
+          `INSERT INTO volunteer_assignments(organization_id,service_request_id,volunteer_membership_id,matching_round_id,offer_expires_at)
+           SELECT organization_id,service_request_id,$2,matching_round_id,offer_expires_at
+           FROM volunteer_assignments WHERE id=$1 RETURNING id`,
+          [first, otherMember],
+        );
+        await service.acceptOffer(orgA, first, memberA, {});
+        await service.acceptOffer(orgA, late, otherMember, {});
+        const started = new Date('2030-01-01T10:00:00Z');
+        await service.startAssignment(orgA, first, memberA, undefined, started);
+        const notifications = new NotificationsService(
+          db.getRepository(PushDevice),
+          db,
+          new PushSender(new ConfigService()),
+        );
+        const safety = new SafetyService(db, notifications, audit, {} as never);
+        const volunteerContext = await authorization.evaluateOrganizationAccess(volunteer, orgA);
+        const ownerContext = await authorization.evaluateOrganizationAccess(owner, orgA);
+        const actor = ending === 'beneficiary' ? owner : volunteer;
+        const receipt = await safety.raiseAlert(
+          orgA,
+          visit,
+          actor,
+          ending === 'beneficiary' ? ownerContext : volunteerContext,
+          {
+            action: ending === 'staff' ? SafetyAlertAction.PAUSE : SafetyAlertAction.END,
+            notes: 'Private safety note',
+          },
+          undefined,
+          new Date('2030-01-01T10:20:00Z'),
+        );
+        if (ending === 'staff') {
+          const context = await authorization.evaluateOrganizationAccess(coordinator, orgA);
+          await safety.endVisit(
+            orgA,
+            receipt.id,
+            context,
+            'Ended after contacting the people',
+            undefined,
+            new Date('2030-01-01T10:25:00Z'),
+          );
+        }
+        const pending = await db.getRepository(VolunteerAssignment).findOneByOrFail({ id: late });
+        expect(pending.status).toBe(VolunteerAssignmentStatus.CANCELLED);
+        await expect(
+          service.startAssignment(
+            orgA,
+            late,
+            otherMember,
+            undefined,
+            new Date('2030-01-01T10:26:00Z'),
+          ),
+        ).rejects.toThrow(ConflictException);
+        const completed = await db
+          .getRepository(VolunteerAssignment)
+          .findOneByOrFail({ id: first });
+        expect(completed.confirmedAt).toBeNull();
+        expect(completed.reviewReason).toBe('SAFETY_ALERT');
+        const notices = await db.query('SELECT body FROM notification_outbox WHERE user_id=$1', [
+          otherVolunteer,
+        ]);
+        expect(
+          notices.some((notice: { body: string }) => notice.body.includes('Private safety note')),
+        ).toBe(false);
+      },
+    );
+  });
+
   describe('account closures', () => {
     let controls: CreditControlsService;
     let closures: ClosuresService;
@@ -3254,6 +3342,441 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       const [refused] = outcomes.filter((o) => o.status === 'rejected') as PromiseRejectedResult[];
       expect(refused!.reason).toBeInstanceOf(ConflictException);
       expect(await db.query('SELECT id FROM account_closures')).toHaveLength(1);
+    });
+
+    it('rechecks community membership added while a closure waits for approval', async () => {
+      const made = await reportDeath();
+      await db.query(
+        "INSERT INTO organization_memberships(organization_id,user_id,status) VALUES($1,$2,'APPROVED')",
+        [orgB, otherVolunteer],
+      );
+      await expect(closures.approve(orgA, made.id, asAdmin(), notes)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(await statusOf(otherVolunteer)).toBe(AccountStatus.ACTIVE);
+      await closures.approve(orgA, made.id, asSuperAdmin(), notes);
+      expect(await statusOf(otherVolunteer)).toBe(AccountStatus.DECEASED_CLOSED);
+    });
+
+    it('rechecks staff roles granted while a closure waits for approval', async () => {
+      const made = await reportDeath();
+      await db.query(
+        "INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,'MUNICIPALITY_ADMIN',$2)",
+        [otherMember, superAdmin],
+      );
+      await expect(closures.approve(orgA, made.id, asAdmin(), notes)).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(await statusOf(otherVolunteer)).toBe(AccountStatus.ACTIVE);
+      await closures.approve(orgA, made.id, asSuperAdmin(), notes);
+    });
+
+    it.each([RestrictionScope.PLATFORM, RestrictionScope.COMMUNITY])(
+      'does not restore an ended %s suspension when reopening an account',
+      async (scope) => {
+        const recommendation = await restrictions.recommend(orgA, asCoordinator(), {
+          member: subjectPhone,
+          restrictionType: GlobalRestrictionType.TEMPORARY_SUSPENSION,
+          reason: 'Concern being reviewed',
+        });
+        await restrictions.approve(orgA, recommendation.id, asAdmin(), {
+          ...notes,
+          scope,
+          memberMessage: 'Contact the coordinator.',
+        });
+        const made = await closedDeath();
+        await restrictions.reinstate(orgA, recommendation.id, asSuperAdmin(), notes);
+        await closures.reopen(orgA, made.id, asSuperAdmin(), notes);
+        expect(await statusOf(otherVolunteer)).toBe(AccountStatus.ACTIVE);
+        const membership = await db
+          .getRepository(OrganizationMembership)
+          .findOneByOrFail({ id: otherMember });
+        expect(membership.status).toBe(MembershipStatus.APPROVED);
+        expect(await wallet(otherVolunteer)).toEqual({ balance: 1, frozen: 0, status: 'ACTIVE' });
+      },
+    );
+
+    it('releases earnings from the whole overlapping restriction period', async () => {
+      const first = await restrictions.recommend(orgA, asCoordinator(), {
+        member: subjectPhone,
+        restrictionType: GlobalRestrictionType.TEMPORARY_SUSPENSION,
+        reason: 'First concern being reviewed',
+      });
+      await restrictions.approve(orgA, first.id, asAdmin(), {
+        ...notes,
+        scope: RestrictionScope.PLATFORM,
+        memberMessage: 'Contact the coordinator.',
+      });
+      await earn();
+      const second = await restrictions.recommend(orgA, asCoordinator(), {
+        member: subjectPhone,
+        restrictionType: GlobalRestrictionType.PERMANENT_BAN,
+        reason: 'Second concern being reviewed',
+      });
+      await restrictions.approve(orgA, second.id, asAdmin(), {
+        ...notes,
+        scope: RestrictionScope.PLATFORM,
+        memberMessage: 'Contact the coordinator.',
+      });
+      await restrictions.reinstate(orgA, first.id, asSuperAdmin(), notes);
+      expect(await wallet(otherVolunteer)).toEqual({ balance: 1, frozen: 1, status: 'ACTIVE' });
+      await restrictions.reinstate(orgA, second.id, asSuperAdmin(), notes);
+      expect(await wallet(otherVolunteer)).toEqual({ balance: 2, frozen: 0, status: 'ACTIVE' });
+    });
+
+    it.each([RestrictionScope.PLATFORM, RestrictionScope.COMMUNITY])(
+      'preserves a still-active %s suspension when reopening an account',
+      async (scope) => {
+        const recommendation = await restrictions.recommend(orgA, asCoordinator(), {
+          member: subjectPhone,
+          restrictionType: GlobalRestrictionType.TEMPORARY_SUSPENSION,
+          reason: 'Concern remains under review',
+        });
+        await restrictions.approve(orgA, recommendation.id, asAdmin(), {
+          ...notes,
+          scope,
+          memberMessage: 'Contact the coordinator.',
+        });
+        const made = await closedDeath();
+        await closures.reopen(orgA, made.id, asSuperAdmin(), notes);
+        expect(await statusOf(otherVolunteer)).toBe(
+          scope === RestrictionScope.PLATFORM ? AccountStatus.SUSPENDED : AccountStatus.ACTIVE,
+        );
+        const member = await db
+          .getRepository(OrganizationMembership)
+          .findOneByOrFail({ id: otherMember });
+        expect(member.status).toBe(
+          scope === RestrictionScope.COMMUNITY
+            ? MembershipStatus.SUSPENDED
+            : MembershipStatus.APPROVED,
+        );
+      },
+    );
+
+    it('keeps an independent earlier wallet hold when a later restriction ends', async () => {
+      await controls.changeWalletStatus(orgA, superAdmin, otherVolunteer, {
+        status: 'FROZEN',
+        reason: 'Separate wallet investigation',
+        idempotencyKey: randomUUID(),
+      });
+      await earn();
+      await controls.changeWalletStatus(orgA, superAdmin, otherVolunteer, {
+        status: 'ACTIVE',
+        reason: 'Account access restored; earnings still need review',
+        idempotencyKey: randomUUID(),
+      });
+      const recommendation = await restrictions.recommend(orgA, asCoordinator(), {
+        member: subjectPhone,
+        restrictionType: GlobalRestrictionType.TEMPORARY_SUSPENSION,
+        reason: 'Later independent concern',
+      });
+      await restrictions.approve(orgA, recommendation.id, asAdmin(), {
+        ...notes,
+        scope: RestrictionScope.PLATFORM,
+        memberMessage: 'Contact the coordinator.',
+      });
+      await earn();
+      await restrictions.reinstate(orgA, recommendation.id, asSuperAdmin(), notes);
+      expect(await wallet(otherVolunteer)).toEqual({ balance: 2, frozen: 1, status: 'ACTIVE' });
+    });
+
+    it('resolves a restriction only once when two older admin-route requests read it as active', async () => {
+      await controls.changeWalletStatus(orgA, superAdmin, otherVolunteer, {
+        status: 'FROZEN',
+        reason: 'Independent hold',
+        idempotencyKey: randomUUID(),
+      });
+      await earn();
+      await controls.changeWalletStatus(orgA, superAdmin, otherVolunteer, {
+        status: 'ACTIVE',
+        reason: 'Access restored; hold needs separate release',
+        idempotencyKey: randomUUID(),
+      });
+      const recommendation = await restrictions.recommend(orgA, asCoordinator(), {
+        member: subjectPhone,
+        restrictionType: GlobalRestrictionType.TEMPORARY_SUSPENSION,
+        reason: 'Later concern',
+      });
+      await restrictions.approve(orgA, recommendation.id, asAdmin(), {
+        ...notes,
+        scope: RestrictionScope.PLATFORM,
+        memberMessage: 'Contact the coordinator.',
+      });
+      await earn();
+      const repository = db.getRepository(GlobalAccountRestriction);
+      const snapshots = await Promise.all([
+        repository.findOneByOrFail({
+          userId: otherVolunteer,
+          status: GlobalRestrictionStatus.ACTIVE,
+        }),
+        repository.findOneByOrFail({
+          userId: otherVolunteer,
+          status: GlobalRestrictionStatus.ACTIVE,
+        }),
+      ]);
+      const outcomes = await Promise.allSettled(
+        snapshots.map((restriction) =>
+          db.transaction(async (manager) => {
+            const result = await liftPlatformRestriction(manager, audit, {
+              restriction,
+              status: GlobalRestrictionStatus.RESOLVED,
+              actorId: superAdmin,
+              notes: 'Review complete',
+            });
+            await restrictions.afterDirectLift(
+              manager,
+              result.saved,
+              result.accessRestored,
+              superAdmin,
+              'Review complete',
+            );
+            return result.saved;
+          }),
+        ),
+      );
+      expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+      const failed = outcomes.find(
+        (outcome) => outcome.status === 'rejected',
+      ) as PromiseRejectedResult;
+      expect(failed.reason).toBeInstanceOf(ConflictException);
+      expect(await wallet(otherVolunteer)).toEqual({ balance: 2, frozen: 1, status: 'ACTIVE' });
+    });
+
+    it('releases pre-closure earnings when an overlapping restriction ended while closed', async () => {
+      const recommendation = await restrictions.recommend(orgA, asCoordinator(), {
+        member: subjectPhone,
+        restrictionType: GlobalRestrictionType.TEMPORARY_SUSPENSION,
+        reason: 'Concern being reviewed',
+      });
+      await restrictions.approve(orgA, recommendation.id, asAdmin(), {
+        ...notes,
+        scope: RestrictionScope.PLATFORM,
+        memberMessage: 'Contact the coordinator.',
+      });
+      await earn();
+      const made = await closedDeath();
+      await restrictions.reinstate(orgA, recommendation.id, asSuperAdmin(), notes);
+      await closures.reopen(orgA, made.id, asSuperAdmin(), notes);
+      expect(await wallet(otherVolunteer)).toEqual({ balance: 2, frozen: 0, status: 'ACTIVE' });
+    });
+
+    it('does not deadlock a closure against approval of a waiting restriction', async () => {
+      const recommendation = await restrictions.recommend(orgA, asCoordinator(), {
+        member: subjectPhone,
+        restrictionType: GlobalRestrictionType.TEMPORARY_SUSPENSION,
+        reason: 'Concern being reviewed',
+      });
+      const made = await reportDeath();
+      const createRunner = db.createQueryRunner.bind(db);
+      let paused = false;
+      jest.spyOn(db, 'createQueryRunner').mockImplementation((mode) => {
+        const runner = createRunner(mode);
+        const query = runner.query.bind(runner);
+        runner.query = async (sql: string, parameters?: any[], structured?: true): Promise<any> => {
+          const result = structured
+            ? await query(sql, parameters, true)
+            : await query(sql, parameters);
+          if (
+            !paused &&
+            sql.includes('FROM "restriction_cases"') &&
+            sql.includes('FOR UPDATE') &&
+            parameters?.includes(recommendation.id)
+          ) {
+            paused = true;
+            // Let the closure advance while the approval holds its case lock.
+            await new Promise((resolve) => setTimeout(resolve, 250));
+          }
+          return result;
+        };
+        return runner;
+      });
+      const outcomes = await Promise.allSettled([
+        restrictions.approve(orgA, recommendation.id, asAdmin(), {
+          ...notes,
+          scope: RestrictionScope.PLATFORM,
+          memberMessage: 'Contact the coordinator.',
+        }),
+        closures.approve(orgA, made.id, asAdmin(), notes),
+      ]);
+      expect(paused).toBe(true);
+      for (const outcome of outcomes) {
+        if (outcome.status === 'rejected') expect(outcome.reason).toBeInstanceOf(ConflictException);
+      }
+      expect(await statusOf(otherVolunteer)).toBe(AccountStatus.DECEASED_CLOSED);
+    });
+
+    it('keeps one primary account open when reciprocal duplicate closures are approved together', async () => {
+      const report = (member: string, primaryMember: string) =>
+        closures.report(orgA, asCoordinator(), {
+          kind: ClosureKind.DUPLICATE,
+          member,
+          primaryMember,
+          reason: 'The same person has two accounts',
+        });
+      const first = await report(subjectPhone, receiverPhone);
+      const second = await report(receiverPhone, subjectPhone);
+      const createRunner = db.createQueryRunner.bind(db);
+      let paused = false;
+      jest.spyOn(db, 'createQueryRunner').mockImplementation((mode) => {
+        const runner = createRunner(mode);
+        const query = runner.query.bind(runner);
+        runner.query = async (sql: string, parameters?: any[], structured?: true): Promise<any> => {
+          const result = structured
+            ? await query(sql, parameters, true)
+            : await query(sql, parameters);
+          if (!paused && sql === 'SELECT status FROM users WHERE id = $1') {
+            paused = true;
+            await new Promise((resolve) => setTimeout(resolve, 250));
+          }
+          return result;
+        };
+        return runner;
+      });
+      const decision = { ...notes, memberMessage: 'Use the account that stays open.' };
+      const outcomes = await Promise.allSettled([
+        closures.approve(orgA, first.id, asAdmin(), decision),
+        closures.approve(orgA, second.id, asAdmin(), decision),
+      ]);
+      expect(outcomes.filter((outcome) => outcome.status === 'fulfilled')).toHaveLength(1);
+      const failed = outcomes.find(
+        (outcome) => outcome.status === 'rejected',
+      ) as PromiseRejectedResult;
+      expect(failed.reason).toBeInstanceOf(ConflictException);
+      const accounts = await db.query('SELECT status FROM users WHERE id=ANY($1)', [
+        [otherVolunteer, receiver],
+      ]);
+      expect(accounts.map((account: { status: string }) => account.status).sort()).toEqual([
+        'ACTIVE',
+        'DUPLICATE_CLOSED',
+      ]);
+    });
+
+    it('serializes an appeal decision against reinstatement without deadlocking', async () => {
+      const recommendation = await restrictions.recommend(orgA, asCoordinator(), {
+        member: subjectPhone,
+        restrictionType: GlobalRestrictionType.TEMPORARY_SUSPENSION,
+        reason: 'Concern being reviewed',
+      });
+      await restrictions.approve(orgA, recommendation.id, asAdmin(), {
+        ...notes,
+        scope: RestrictionScope.PLATFORM,
+        memberMessage: 'Contact the coordinator.',
+      });
+      const notifications = new NotificationsService(
+        db.getRepository(PushDevice),
+        db,
+        new PushSender(new ConfigService()),
+      );
+      const appeals = new AppealsService(
+        db,
+        restrictions,
+        closures,
+        {} as never,
+        notifications,
+        audit,
+      );
+      const appeal = await appeals.fileMine(otherVolunteer, recommendation.id, {
+        grounds: 'Please review the decision',
+      });
+      const createRunner = db.createQueryRunner.bind(db);
+      let paused = false;
+      jest.spyOn(db, 'createQueryRunner').mockImplementation((mode) => {
+        const runner = createRunner(mode);
+        const query = runner.query.bind(runner);
+        runner.query = async (sql: string, parameters?: any[], structured?: true): Promise<any> => {
+          const result = structured
+            ? await query(sql, parameters, true)
+            : await query(sql, parameters);
+          if (
+            !paused &&
+            sql.includes('FROM "restriction_cases"') &&
+            sql.includes('FOR UPDATE') &&
+            parameters?.includes(recommendation.id)
+          ) {
+            paused = true;
+            await new Promise((resolve) => setTimeout(resolve, 250));
+          }
+          return result;
+        };
+        return runner;
+      });
+      const outcomes = await Promise.allSettled([
+        appeals.decide(orgA, appeal.id, asSuperAdmin(), {
+          outcome: AppealOutcome.OVERTURNED,
+          notes: 'Checked the evidence',
+          memberMessage: 'Access is restored.',
+        }),
+        restrictions.reinstate(orgA, recommendation.id, asSuperAdmin(), notes),
+      ]);
+      expect(paused).toBe(true);
+      for (const outcome of outcomes) {
+        if (outcome.status === 'rejected') expect(outcome.reason).toBeInstanceOf(ConflictException);
+      }
+      expect(await statusOf(otherVolunteer)).toBe(AccountStatus.ACTIVE);
+    });
+
+    it('serializes a duplicate closure appeal against reopening without deadlocking', async () => {
+      const made = await closures.report(orgA, asCoordinator(), {
+        kind: ClosureKind.DUPLICATE,
+        member: subjectPhone,
+        primaryMember: receiverPhone,
+        reason: 'Duplicate account reported',
+      });
+      await closures.approve(orgA, made.id, asAdmin(), {
+        ...notes,
+        memberMessage: 'Use the other account.',
+      });
+      const notifications = new NotificationsService(
+        db.getRepository(PushDevice),
+        db,
+        new PushSender(new ConfigService()),
+      );
+      const appeals = new AppealsService(
+        db,
+        restrictions,
+        closures,
+        {} as never,
+        notifications,
+        audit,
+      );
+      const appeal = await appeals.fileMine(otherVolunteer, made.id, {
+        grounds: 'These are different people',
+      });
+      const createRunner = db.createQueryRunner.bind(db);
+      let paused = false;
+      jest.spyOn(db, 'createQueryRunner').mockImplementation((mode) => {
+        const runner = createRunner(mode);
+        const query = runner.query.bind(runner);
+        runner.query = async (sql: string, parameters?: any[], structured?: true): Promise<any> => {
+          const result = structured
+            ? await query(sql, parameters, true)
+            : await query(sql, parameters);
+          if (
+            !paused &&
+            sql.includes('FROM "account_closures"') &&
+            sql.includes('FOR UPDATE') &&
+            parameters?.includes(made.id)
+          ) {
+            paused = true;
+            await new Promise((resolve) => setTimeout(resolve, 250));
+          }
+          return result;
+        };
+        return runner;
+      });
+      const outcomes = await Promise.allSettled([
+        appeals.decide(orgA, appeal.id, asSuperAdmin(), {
+          outcome: AppealOutcome.OVERTURNED,
+          notes: 'Checked the identity evidence',
+          memberMessage: 'Your account is reopened.',
+        }),
+        closures.reopen(orgA, made.id, asSuperAdmin(), notes),
+      ]);
+      expect(paused).toBe(true);
+      for (const outcome of outcomes) {
+        if (outcome.status === 'rejected') expect(outcome.reason).toBeInstanceOf(ConflictException);
+      }
+      expect(await statusOf(otherVolunteer)).toBe(AccountStatus.ACTIVE);
     });
 
     it('pays once when two administrators approve the same transfer together', async () => {
