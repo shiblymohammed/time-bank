@@ -125,6 +125,16 @@ export class VolunteerAssignment {
   @Column({ name: 'finish_reminded_at', type: 'timestamptz', nullable: true })
   finishRemindedAt?: Date | null;
 
+  // Safety pause: the visit stays IN_PROGRESS, and paused time is not counted as time worked.
+  @Column({ name: 'paused_at', type: 'timestamptz', nullable: true })
+  pausedAt?: Date | null;
+
+  @Column({ name: 'paused_seconds', type: 'int', default: 0 })
+  pausedSeconds!: number;
+
+  @Column({ name: 'restart_allowed_at', type: 'timestamptz', nullable: true })
+  restartAllowedAt?: Date | null;
+
   // A coordinator decides these visits; no credits are paid until they do.
   @Column({ name: 'review_reason', type: 'varchar', length: 40, nullable: true })
   reviewReason?: AssignmentReviewReason | null;

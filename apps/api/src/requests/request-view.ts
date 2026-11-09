@@ -1,4 +1,8 @@
-import { ServiceRequestStatus, VolunteerAssignmentStatus } from '@ktb/shared-types';
+import {
+  AssignmentReviewReason,
+  ServiceRequestStatus,
+  VolunteerAssignmentStatus,
+} from '@ktb/shared-types';
 import type { VolunteerAssignment } from '../matching/entities/volunteer-assignment.entity';
 import type { ServiceRequest } from './entities/service-request.entity';
 
@@ -15,7 +19,21 @@ const HELP_DELIVERY_STATUSES = [
 ];
 
 /** Where a started visit stands once the volunteer has stopped working. */
-export type VisitStage = 'AWAITING_CONFIRMATION' | 'UNDER_REVIEW';
+export type VisitStage = 'SAFETY_PAUSED' | 'AWAITING_CONFIRMATION' | 'UNDER_REVIEW';
+
+/**
+ * What the two people on a visit may know about a safety alert: that the visit is paused, may
+ * restart, or ended early. Never who raised it, or why.
+ */
+export function safetyState(
+  assignment: Pick<VolunteerAssignment, 'pausedAt' | 'restartAllowedAt' | 'reviewReason'>,
+) {
+  return {
+    safetyPaused: Boolean(assignment.pausedAt),
+    restartAllowed: Boolean(assignment.restartAllowedAt),
+    endedEarly: assignment.reviewReason === AssignmentReviewReason.SAFETY_ALERT,
+  };
+}
 
 /**
  * A request stays IN_PROGRESS until the help is confirmed. Once no volunteer is still
@@ -25,10 +43,13 @@ export function visitStage(
   status: ServiceRequestStatus,
   assignments: Pick<
     VolunteerAssignment,
-    'status' | 'confirmedAt' | 'reviewRequestedAt' | 'reviewResolvedAt'
+    'status' | 'confirmedAt' | 'reviewRequestedAt' | 'reviewResolvedAt' | 'pausedAt'
   >[] = [],
 ): VisitStage | null {
   if (status !== ServiceRequestStatus.IN_PROGRESS) return null;
+  if (assignments.some((a) => a.status === VolunteerAssignmentStatus.IN_PROGRESS && a.pausedAt)) {
+    return 'SAFETY_PAUSED';
+  }
   if (assignments.some((a) => a.status === VolunteerAssignmentStatus.IN_PROGRESS)) return null;
   const finished = assignments.filter(
     (a) => a.status === VolunteerAssignmentStatus.COMPLETED && !a.confirmedAt,
@@ -83,7 +104,12 @@ export function toRequestView(
         completionNotes: assignment.completionNotes ?? null,
         confirmedAt: assignment.confirmedAt ?? null,
         confirmedMinutes: assignment.confirmedMinutes ?? null,
-        reviewReason: assignment.reviewReason ?? null,
+        // Members are told a visit ended early, not that a safety alert ended it.
+        reviewReason:
+          !isStaff && assignment.reviewReason === AssignmentReviewReason.SAFETY_ALERT
+            ? null
+            : (assignment.reviewReason ?? null),
+        ...safetyState(assignment),
         reviewRequestedAt: assignment.reviewRequestedAt ?? null,
         reviewResolvedAt: assignment.reviewResolvedAt ?? null,
         reviewOutcome: assignment.reviewOutcome ?? null,

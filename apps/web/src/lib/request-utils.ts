@@ -42,6 +42,7 @@ export function dispatchMessage(result: unknown): string {
 }
 const REVIEW_REASONS: Record<string, string> = {
   BENEFICIARY_DISPUTE: 'Reported as a problem by the beneficiary',
+  SAFETY_ALERT: 'Ended through a safety alert',
   MINUTES_OVER_TIMED_WORK: 'More minutes claimed than were timed',
   MINUTES_OVER_EXPECTED: 'Well over the expected time',
   PAIR_MONTHLY_LIMIT: 'This pair passed its monthly limit',

@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import type { Action } from '@/lib/admin-types';
 import { CoordinatorRequests } from '@/components/coordinator-requests';
 import { ServiceCatalogue } from '@/components/service-catalogue';
+import { SafetyAlerts, useOpenSafetyAlerts } from '@/components/safety-alerts';
 import { ServiceOperations } from '@/components/service-operations';
 import { TimeCredits } from '@/components/time-credits';
 import { ApiManagement } from '@/components/api-management';
@@ -16,6 +17,7 @@ type Tab =
   | 'organizations'
   | 'memberships'
   | 'requests'
+  | 'safety'
   | 'catalogue'
   | 'operations'
   | 'credits'
@@ -95,7 +97,7 @@ type Organization = {
 type Restriction = {
   id: string;
   userId: string;
-  user?: { phoneE164: string };
+  user?: { phoneE164: string; fullName?: string | null };
   restrictionType: string;
   reasonCode: string;
   status: string;
@@ -175,6 +177,13 @@ const PAGES: {
     icon: 'requests',
     group: 'Community',
     description: 'Help requests and volunteer matching',
+  },
+  {
+    id: 'safety',
+    text: 'Safety alerts',
+    icon: 'safety',
+    group: 'Community',
+    description: 'Visits paused or ended by a safety alert',
   },
   {
     id: 'catalogue',
@@ -635,6 +644,8 @@ export default function AdminDashboard(): React.JSX.Element {
     [view, setView] = useState<View>(empty);
   const [offset, setOffset] = useState(0),
     [status, setStatus] = useState(''),
+    [search, setSearch] = useState(''),
+    [searchText, setSearchText] = useState(''),
     [eventType, setEventType] = useState(''),
     [revision, setRevision] = useState(0),
     [managed, setManaged] = useState<string | null>(null);
@@ -650,6 +661,10 @@ export default function AdminDashboard(): React.JSX.Element {
     ? (approved(profile).find((member) => member.organizationId === tenant)?.roles ?? [])
     : [];
   const canManageRoles = isGlobal || localRoles.includes('MUNICIPALITY_ADMIN');
+  const openSafetyAlerts = useOpenSafetyAlerts(
+    profile && tenant !== 'GLOBAL' ? tenant : null,
+    revision,
+  );
   const initialRoles = [
     ...OPERATIONS,
     ...(canManageRoles ? ['COORDINATOR'] : []),
@@ -676,9 +691,15 @@ export default function AdminDashboard(): React.JSX.Element {
     );
     if (!central)
       setTab((current) =>
-        ['organizations', 'memberships', 'requests', 'catalogue', 'operations', 'credits'].includes(
-          current,
-        )
+        [
+          'organizations',
+          'memberships',
+          'requests',
+          'safety',
+          'catalogue',
+          'operations',
+          'credits',
+        ].includes(current)
           ? current
           : 'requests',
       );
@@ -740,6 +761,7 @@ export default function AdminDashboard(): React.JSX.Element {
         );
       if (tab === 'memberships' && tenant !== 'GLOBAL') {
         if (status) query.set('status', status);
+        if (search) query.set('search', search);
         next = {
           ...next,
           ...(await backend<{ memberships: Membership[]; total: number }>(
@@ -782,9 +804,19 @@ export default function AdminDashboard(): React.JSX.Element {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [profile, tab, tenant, offset, status, eventType, revision, isGlobal]);
+  }, [profile, tab, tenant, offset, status, search, eventType, revision, isGlobal]);
+  // Search once typing pauses, not on every letter.
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSearch(searchText.trim());
+      setOffset(0);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchText]);
   function changeScope(value: string) {
     setTenant(value);
+    setSearch('');
+    setSearchText('');
     setOffset(0);
     setDetail(null);
     setView(empty());
@@ -793,6 +825,8 @@ export default function AdminDashboard(): React.JSX.Element {
   function changeTab(value: Tab) {
     setTab(value);
     setStatus('');
+    setSearch('');
+    setSearchText('');
     setOffset(0);
     setDetail(null);
     setView(empty());
@@ -880,6 +914,12 @@ export default function AdminDashboard(): React.JSX.Element {
               >
                 <Icon name={item.icon} />
                 {item.text}
+                {item.id === 'safety' && openSafetyAlerts > 0 && (
+                  <span className="nav-alert-count" role="status">
+                    {openSafetyAlerts}
+                    <span className="sr-only"> open</span>
+                  </span>
+                )}
               </button>
             </React.Fragment>
           ))}
@@ -1064,6 +1104,21 @@ export default function AdminDashboard(): React.JSX.Element {
               </p>
             ) : (
               <CoordinatorRequests
+                key={tenant}
+                organizationId={tenant}
+                revision={revision}
+                pending={pending}
+                openAction={openAction}
+                onExpired={expired}
+              />
+            ))}
+          {tab === 'safety' &&
+            (tenant === 'GLOBAL' ? (
+              <p className="glass-panel empty-state">
+                Choose an organization above to see its safety alerts.
+              </p>
+            ) : (
+              <SafetyAlerts
                 key={tenant}
                 organizationId={tenant}
                 revision={revision}
@@ -1348,6 +1403,16 @@ export default function AdminDashboard(): React.JSX.Element {
                           ),
                         )}
                       </select>
+                    </label>
+                    <label>
+                      Search
+                      <input
+                        className="form-input"
+                        type="search"
+                        placeholder="Name, membership number or phone"
+                        value={searchText}
+                        onChange={(event) => setSearchText(event.target.value)}
+                      />
                     </label>
                   </div>
                   <div className="table-container glass-panel">
@@ -1945,8 +2010,14 @@ export default function AdminDashboard(): React.JSX.Element {
                     {view.restrictions.map((restriction) => (
                       <tr key={restriction.id}>
                         <td>
-                          {phone(restriction.user?.phoneE164) ?? 'Unknown number'}
-                          <div className="mono">{restriction.userId}</div>
+                          {restriction.user?.fullName ??
+                            phone(restriction.user?.phoneE164) ??
+                            'Unknown number'}
+                          <div className="mono">
+                            {restriction.user?.fullName
+                              ? phone(restriction.user.phoneE164)
+                              : restriction.userId}
+                          </div>
                         </td>
                         <td>{label(restriction.restrictionType)}</td>
                         <td>{restriction.reasonCode}</td>

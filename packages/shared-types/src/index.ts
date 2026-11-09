@@ -274,6 +274,30 @@ export enum AssignmentReviewReason {
   MINUTES_OVER_TIMED_WORK = 'MINUTES_OVER_TIMED_WORK',
   MINUTES_OVER_EXPECTED = 'MINUTES_OVER_EXPECTED',
   PAIR_MONTHLY_LIMIT = 'PAIR_MONTHLY_LIMIT',
+  /** The visit ended through a safety alert. Members are not shown this reason. */
+  SAFETY_ALERT = 'SAFETY_ALERT',
+}
+
+export enum SafetyAlertAction {
+  PAUSE = 'PAUSE',
+  END = 'END',
+}
+
+export enum SafetyAlertStatus {
+  OPEN = 'OPEN',
+  ACKNOWLEDGED = 'ACKNOWLEDGED',
+  RESOLVED = 'RESOLVED',
+}
+
+export enum SafetyAlertOutcome {
+  RESTARTED = 'RESTARTED',
+  ENDED = 'ENDED',
+}
+
+export enum SafetyAlertRaiserRole {
+  VOLUNTEER = 'VOLUNTEER',
+  BENEFICIARY = 'BENEFICIARY',
+  CAREGIVER = 'CAREGIVER',
 }
 
 export enum AssignmentReviewDecision {

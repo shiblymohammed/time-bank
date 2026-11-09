@@ -16,7 +16,8 @@ tests and documented limitations.
 | M4 Time credits                | Built                                                                                                               |
 | Kottakkal pilot                | Staff second factor and restore drill built. Next: deploy, real SMS and push, [pilot checklist](PILOT_CHECKLIST.md) |
 | Second-organization readiness  | See below; needed before a second organization goes live                                                            |
-| M5 to M8                       | Planned                                                                                                             |
+| M7 Governance and reporting    | Safety alerts built; complaints, appeals, restrictions, closure and reports planned                                 |
+| M5, M6, M8                     | Planned                                                                                                             |
 | M9 Production hardening        | Security review done; the rest planned                                                                              |
 
 ## Second-organization readiness
@@ -190,7 +191,7 @@ implementation does not imply overall production readiness.
 
 **Planned scope:**
 
-- SafetyModule: alerts, pause/resume (FR-SAFE)
+- [x] SafetyModule: alerts, pause/resume (FR-SAFE). See [SAFETY_ALERTS.md](SAFETY_ALERTS.md).
 - ComplaintsModule: escalation hierarchy (FR-SAFE-04, D#75, D#76)
 - AppealModule: appeals to Super Admin (D#77, D#78, BR-11)
 - RestrictionsModule: suspension, ban, reinstatement (FR-SAFE-06, FR-SAFE-07)

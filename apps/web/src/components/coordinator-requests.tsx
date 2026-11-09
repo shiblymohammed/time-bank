@@ -14,8 +14,9 @@ import {
 type Person = {
   id: string;
   membershipNumber?: string;
+  fullName?: string | null;
   phone?: string;
-  user?: { phoneE164: string };
+  user?: { phoneE164: string; fullName?: string | null };
 };
 type RequestRow = {
   id: string;
@@ -28,6 +29,7 @@ type Snapshot = {
   request: RequestRow & {
     serviceName: string;
     beneficiaryMembershipNumber: string;
+    beneficiaryName: string | null;
     expectedDurationMinutes: number;
     minVolunteers: number;
     preferredVolunteers: number;
@@ -45,6 +47,7 @@ type Snapshot = {
   assignments: {
     id: string;
     membershipNumber: string;
+    fullName: string | null;
     phone: string;
     status: string;
     offeredAt: string;
@@ -62,6 +65,7 @@ type Snapshot = {
     reviewMinutes: number | null;
     reviewRequestedAt: string | null;
     reviewResolvedAt: string | null;
+    pausedAt: string | null;
   }[];
   rounds: {
     id: string;
@@ -88,8 +92,11 @@ type Catalogue = {
   globalService: { nameEn: string };
 };
 const title = (value: string) => value.replaceAll('_', ' ').toLowerCase();
+const personName = (p: Person) => p.fullName || p.user?.fullName || '';
 const personLabel = (p: Person) =>
-  `${p.membershipNumber || 'Membership'} · ${p.phone || p.user?.phoneE164 || ''}`;
+  [personName(p), p.membershipNumber || 'Membership', p.phone || p.user?.phoneE164 || '']
+    .filter(Boolean)
+    .join(' · ');
 
 function People({
   path,
@@ -137,7 +144,7 @@ function People({
     <section className="detail-panel glass-panel">
       <h3>{kind === 'beneficiary' ? 'Choose a beneficiary' : 'Choose an eligible volunteer'}</h3>
       <label>
-        Search by membership number or phone
+        Search by name, membership number or phone
         <input
           className="form-input"
           value={search}
@@ -157,7 +164,7 @@ function People({
         <div className="document-row" key={person.id}>
           <span>{personLabel(person)}</span>
           <button className="btn btn-secondary" onClick={() => onSelect(person)}>
-            Select {person.membershipNumber || 'member'}
+            Select {personName(person) || person.membershipNumber || 'member'}
           </button>
         </div>
       ))}
@@ -522,7 +529,10 @@ export function CoordinatorRequests({
             </button>
           </div>
           <p>
-            Status: {title(request.status)} · Beneficiary: {request.beneficiaryMembershipNumber}
+            Status: {title(request.status)} · Beneficiary:{' '}
+            {[request.beneficiaryName, request.beneficiaryMembershipNumber]
+              .filter(Boolean)
+              .join(' · ')}
           </p>
           <p>
             Start: {indiaTime(request.scheduledStartTime)} · {request.expectedDurationMinutes}{' '}
@@ -674,7 +684,8 @@ export function CoordinatorRequests({
           {detail.assignments.map((a) => (
             <div className="document-row" key={a.id}>
               <div>
-                <strong>{a.membershipNumber}</strong> · {a.phone} · {title(a.status)}
+                <strong>{a.fullName || a.membershipNumber}</strong>
+                {a.fullName && ` · ${a.membershipNumber}`} · {a.phone} · {title(a.status)}
                 <p className="help-text">
                   Offered {indiaTime(a.offeredAt)} · Accepted {indiaTime(a.acceptedAt)}
                   {a.status === 'OFFERED' ? ` · Expires ${indiaTime(a.offerExpiresAt)}` : ''}
@@ -697,8 +708,14 @@ export function CoordinatorRequests({
                   </p>
                 )}
               </div>
-              {(a.status === 'IN_PROGRESS' ||
-                (a.status === 'COMPLETED' && a.reviewRequestedAt && !a.reviewResolvedAt)) && (
+              {a.pausedAt && (
+                <p className="help-text">
+                  <strong>Paused by a safety alert.</strong> Handle it in Safety alerts first.
+                </p>
+              )}
+              {!a.pausedAt &&
+                (a.status === 'IN_PROGRESS' ||
+                  (a.status === 'COMPLETED' && a.reviewRequestedAt && !a.reviewResolvedAt)) && (
                 <div className="action-row">
                   <button
                     className="btn btn-secondary"

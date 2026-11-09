@@ -22,5 +22,26 @@ export function openHelpCount(manager: EntityManager, requestId: string): Promis
     .getCount();
 }
 
+/** All the time this visit has spent paused, including a pause still running. */
+export function pausedSecondsAt(
+  visit: Pick<VolunteerAssignment, 'pausedAt' | 'pausedSeconds'>,
+  now: Date,
+): number {
+  const running = visit.pausedAt
+    ? Math.round((now.getTime() - new Date(visit.pausedAt).getTime()) / 1000)
+    : 0;
+  return (visit.pausedSeconds ?? 0) + Math.max(0, running);
+}
+
+/** Whole minutes on the clock up to [end], at least one, leaving out any safety pause. */
+export function workedMinutes(
+  visit: Pick<VolunteerAssignment, 'startedAt' | 'pausedAt' | 'pausedSeconds'>,
+  end: Date,
+): number {
+  const seconds =
+    (end.getTime() - new Date(visit.startedAt!).getTime()) / 1000 - pausedSecondsAt(visit, end);
+  return Math.max(1, Math.ceil(seconds / 60));
+}
+
 export const awaitingReview = (assignment: VolunteerAssignment): boolean =>
   Boolean(assignment.reviewRequestedAt) && !assignment.reviewResolvedAt;

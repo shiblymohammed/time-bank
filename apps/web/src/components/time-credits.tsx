@@ -35,7 +35,7 @@ type Member = {
   id: string;
   userId: string;
   membershipNumber?: string | null;
-  user?: { phoneE164: string };
+  user?: { phoneE164: string; fullName?: string | null };
 };
 type Wallet = {
   status: string;
@@ -130,7 +130,9 @@ const amountField = (maximum: number): Field => ({
   step: '0.01',
 });
 const memberLabel = (member: Member) =>
-  member.membershipNumber || member.user?.phoneE164 || 'Member';
+  [member.user?.fullName, member.membershipNumber || member.user?.phoneE164 || 'Member']
+    .filter(Boolean)
+    .join(' · ');
 
 function Feedback({ error, loading }: { error: string; loading: boolean }) {
   return (
@@ -700,7 +702,7 @@ export function TimeCredits({
             <input
               className="form-input"
               type="search"
-              placeholder="Membership number or phone"
+              placeholder="Name, membership number or phone"
               value={search}
               disabled={pending}
               onChange={(event) => {

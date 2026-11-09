@@ -123,11 +123,14 @@ CREATE TEMP TABLE ending ON COMMIT DROP AS
   JOIN organization_memberships m ON m.id = r.beneficiary_membership_id
   WHERE m.user_id IN (SELECT id FROM targets)
      OR r.created_by_user_id IN (SELECT id FROM targets);
-UPDATE volunteer_assignments SET status = 'CANCELLED', updated_at = now()
+UPDATE volunteer_assignments SET status = 'CANCELLED', paused_at = NULL, updated_at = now()
   WHERE service_request_id IN (SELECT id FROM ending)
     AND status IN ('OFFERED', 'ACCEPTED', 'IN_PROGRESS');
 UPDATE service_requests SET status = 'CANCELLED', updated_at = now()
   WHERE id IN (SELECT id FROM ending);
+UPDATE safety_alerts SET status = 'RESOLVED', outcome = 'ENDED', resolved_at = now(),
+    staff_notes = 'Test account retired', updated_at = now()
+  WHERE status <> 'RESOLVED' AND service_request_id IN (SELECT id FROM ending);
 
 -- Offers to a listed volunteer on someone else's request; matching moves on to others.
 UPDATE volunteer_assignments SET status = 'CANCELLED', updated_at = now()

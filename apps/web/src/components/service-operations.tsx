@@ -34,7 +34,7 @@ interface Member {
   id: string;
   membershipNumber?: string;
   status: string;
-  user?: { phoneE164: string };
+  user?: { phoneE164: string; fullName?: string | null };
 }
 interface Caregiver {
   id: string;
@@ -247,7 +247,9 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
     });
   const memberOptions = members.map((member) => (
     <option key={member.id} value={member.id}>
-      {member.user?.phoneE164 ?? member.membershipNumber ?? member.id}
+      {[member.user?.fullName, member.user?.phoneE164 ?? member.membershipNumber ?? member.id]
+        .filter(Boolean)
+        .join(' · ')}
     </option>
   ));
   const serviceOptions = services

@@ -295,6 +295,21 @@ const request = (token, minutes, notes) =>
     return `${who.fullName}, phone shown`;
   });
 
+  await step('The coordinator sees names on the request and can search by name', async () => {
+    const m = ok(await call('GET', `/organizations/${ORG}/requests/${ids.request}/matching`, t.coordinator), 'matching');
+    assert.equal(m.request.beneficiaryName, NAMES.beneficiary);
+    const a = m.assignments.find((x) => x.id === main.offer.id);
+    if (main.who === 'new volunteer') assert.equal(a?.fullName, NAMES.volunteer);
+    const found = list(
+      ok(
+        await call('GET', `/organizations/${ORG}/memberships?search=${encodeURIComponent(NAMES.beneficiary)}`, t.coordinator),
+        'search',
+      ),
+    );
+    assert.deepEqual(found.map((x) => x.id), [ids.beneficiary]);
+    return `${m.request.beneficiaryName}, ${a?.fullName ?? 'unnamed volunteer'}`;
+  });
+
   await step('The volunteer starts the visit', async () => {
     ok(await call('POST', `/organizations/${ORG}/assignments/${main.offer.id}/start`, main.token, {}), 'start');
     await visitLasted(main.offer.id, 60);
@@ -465,6 +480,127 @@ const request = (token, minutes, notes) =>
     );
     const req = ok(await call('GET', `/organizations/${ORG}/requests/${r.id}`, t.coordinator), 'get');
     return `request ${req.status}`;
+  });
+
+  await step('Safety: a paused visit stops, stays confidential, and restarts only when allowed', async () => {
+    const NOTE = 'Private safety note for staff';
+    const r = ok(await request(t.beneficiary, 3, 'Journey safety pause'), 'create');
+    const o = await offerFor(r.id);
+    const visit = `/organizations/${ORG}/assignments/${o.offer.id}`;
+    ok(await call('POST', `${visit}/accept`, o.token, { clientOperationId: randomUUID() }), 'accept');
+    const safety = `/organizations/${ORG}/requests/${r.id}`;
+    const early = await call('POST', `${safety}/safety-alerts`, t.beneficiary, { action: 'PAUSE' });
+    assert.equal(early.status, 409, `an alert before the visit starts should be refused, got ${early.status}`);
+    ok(await call('POST', `${visit}/start`, o.token, {}), 'start');
+    await visitLasted(o.offer.id, 30);
+
+    const operation = randomUUID();
+    const raised = ok(
+      await call('POST', `${safety}/safety-alerts`, t.beneficiary, { action: 'PAUSE', notes: NOTE, clientOperationId: operation }),
+      'raise',
+    );
+    const retried = ok(
+      await call('POST', `${safety}/safety-alerts`, t.beneficiary, { action: 'PAUSE', notes: NOTE, clientOperationId: operation }),
+      'retry',
+    );
+    assert.equal(retried.id, raised.id, 'a retry raised a second alert');
+
+    const blocked = await call('POST', `${visit}/finish`, o.token, { minutes: 30 });
+    assert.equal(blocked.status, 409, `a paused visit should not finish, got ${blocked.status}`);
+    const tooSoon = await call('POST', `${safety}/safety-restart`, o.token, { restart: true });
+    assert.equal(tooSoon.status, 409, `restart before a coordinator allows it, got ${tooSoon.status}`);
+    const payPaused = await call('POST', `${safety}/assignments/${o.offer.id}/resolve`, t.coordinator, {
+      decision: 'PAY',
+      minutes: 30,
+      notes: 'Should be refused',
+    });
+    assert.equal(payPaused.status, 409, `paying a paused visit, got ${payPaused.status}`);
+
+    // What each person is shown.
+    const seen = ok(await call('GET', safety, t.beneficiary), 'member view');
+    assert.equal(seen.stage, 'SAFETY_PAUSED');
+    const volunteerView = list(ok(await call('GET', `/organizations/${ORG}/assignments/mine`, o.token), 'mine')).find(
+      (a) => a.id === o.offer.id,
+    );
+    assert.equal(volunteerView.safetyPaused, true);
+    assert.ok(!JSON.stringify(volunteerView).includes(NOTE), 'the volunteer can read the note');
+    assert.ok(!JSON.stringify(volunteerView).includes('BENEFICIARY'), 'the volunteer can see who raised it');
+    const denied = await call('GET', `/organizations/${ORG}/safety-alerts`, o.token);
+    assert.equal(denied.status, 403, `a member reading alerts, got ${denied.status}`);
+    const outsider = await call('POST', `/organizations/${ORG}/safety-alerts/${raised.id}/allow-restart`, t.beneficiary, {
+      notes: 'Allowing myself',
+    });
+    assert.equal(outsider.status, 403, `a member allowing a restart, got ${outsider.status}`);
+
+    const alerts = ok(await call('GET', `/organizations/${ORG}/safety-alerts`, t.coordinator), 'alert list');
+    const alert = alerts.find((a) => a.id === raised.id);
+    assert.equal(alert.notes, NOTE);
+    assert.equal(alert.raisedByRole, 'BENEFICIARY');
+    assert.equal(alert.request.beneficiaryName, NAMES.beneficiary);
+    assert.ok(alert.visits[0].volunteerPhone, 'staff need the volunteer phone');
+
+    ok(await call('POST', `/organizations/${ORG}/safety-alerts/${raised.id}/acknowledge`, t.coordinator, {}), 'acknowledge');
+    ok(
+      await call('POST', `/organizations/${ORG}/safety-alerts/${raised.id}/allow-restart`, t.coordinator, { notes: 'Spoke to both' }),
+      'allow',
+    );
+    const notVolunteer = await call('POST', `${safety}/safety-restart`, t.beneficiary, { restart: true });
+    assert.equal(notVolunteer.status, 403, `the beneficiary restarting, got ${notVolunteer.status}`);
+
+    // Ten minutes in the pause must not count as time worked.
+    await db(`UPDATE volunteer_assignments SET paused_at = now() - interval '10 minutes' WHERE id = $1`, [o.offer.id]);
+    await db(`UPDATE volunteer_assignments SET started_at = now() - interval '40 minutes' WHERE id = $1`, [o.offer.id]);
+    ok(await call('POST', `${safety}/safety-restart`, o.token, { restart: true }), 'restart');
+    const after = ok(await call('GET', safety, t.beneficiary), 'after restart');
+    assert.equal(after.stage, null);
+    const closed = ok(await call('GET', `/organizations/${ORG}/safety-alerts`, t.coordinator), 'open alerts');
+    assert.ok(!closed.some((a) => a.id === raised.id), 'a restarted visit left its alert open');
+
+    const done = ok(await call('POST', `${visit}/finish`, o.token, {}), 'finish');
+    assert.ok(done.reportedMinutes >= 30 && done.reportedMinutes <= 32, `paused time was counted: ${done.reportedMinutes}`);
+    return `${done.reportedMinutes} minutes counted of 40 on the clock`;
+  });
+
+  await step('Safety: ending a visit pays nothing until a coordinator decides', async () => {
+    const r = ok(await request(t.beneficiary, 3, 'Journey safety end'), 'create');
+    const o = await offerFor(r.id);
+    const visit = `/organizations/${ORG}/assignments/${o.offer.id}`;
+    ok(await call('POST', `${visit}/accept`, o.token, { clientOperationId: randomUUID() }), 'accept');
+    ok(await call('POST', `${visit}/start`, o.token, {}), 'start');
+    await visitLasted(o.offer.id, 25);
+    const safety = `/organizations/${ORG}/requests/${r.id}`;
+    const raised = ok(await call('POST', `${safety}/safety-alerts`, o.token, { action: 'END', notes: 'Leaving now' }), 'raise');
+
+    const member = ok(await call('GET', safety, t.beneficiary), 'member view');
+    const seen = member.assignments.find((a) => a.id === o.offer.id);
+    assert.equal(seen.status, 'COMPLETED');
+    assert.equal(seen.endedEarly, true);
+    assert.equal(seen.reviewReason, null, 'members must not see the safety reason');
+    assert.ok(!JSON.stringify(member).includes('Leaving now'), 'the beneficiary can read the note');
+
+    const confirm = await call('POST', `${safety}/assignments/${o.offer.id}/confirm`, t.beneficiary, { minutes: 25 });
+    assert.equal(confirm.status, 409, `confirming a visit under review, got ${confirm.status}`);
+    const dispute = await call('POST', `${safety}/assignments/${o.offer.id}/dispute`, t.beneficiary, { reason: 'Overwriting' });
+    assert.equal(dispute.status, 409, `disputing a visit under review, got ${dispute.status}`);
+
+    const staffView = ok(await call('GET', `${safety}/matching`, t.coordinator), 'staff view');
+    assert.equal(staffView.assignments.find((a) => a.id === o.offer.id).reviewReason, 'SAFETY_ALERT');
+    const review = ok(await call('GET', `/organizations/${ORG}/requests?needsReview=true&limit=50`, t.coordinator), 'review list');
+    assert.ok(list(review).some((x) => x.id === r.id), 'the ended visit is not in the review list');
+
+    ok(
+      await call('POST', `${safety}/assignments/${o.offer.id}/resolve`, t.coordinator, {
+        decision: 'PAY',
+        minutes: 20,
+        notes: 'Spoke to both; paying the time given',
+      }),
+      'decide',
+    );
+    ok(await call('POST', `/organizations/${ORG}/safety-alerts/${raised.id}/close`, t.coordinator, { notes: 'Spoke to both' }), 'close');
+    const history = ok(await call('GET', `/organizations/${ORG}/safety-alerts?open=false`, t.coordinator), 'history');
+    const alert = history.find((a) => a.id === raised.id);
+    assert.equal(alert.status, 'RESOLVED');
+    assert.equal(alert.outcome, 'ENDED');
   });
 
   await step('People are told along the way (push queue)', async () => {

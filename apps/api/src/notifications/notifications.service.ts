@@ -99,7 +99,11 @@ export class NotificationsService {
     );
   }
 
-  async notifyCoordinators(manager: EntityManager, notice: BookingNotice): Promise<void> {
+  async notifyCoordinators(
+    manager: EntityManager,
+    notice: BookingNotice,
+    exceptUserIds: string[] = [],
+  ): Promise<void> {
     const staff: { user_id: string }[] = await manager.query(
       `SELECT DISTINCT m.user_id FROM organization_memberships m
        JOIN membership_role_grants g ON g.membership_id = m.id
@@ -109,7 +113,7 @@ export class NotificationsService {
     );
     await this.notifyUsers(
       manager,
-      staff.map((member) => member.user_id),
+      staff.map((member) => member.user_id).filter((id) => !exceptUserIds.includes(id)),
       notice,
     );
   }

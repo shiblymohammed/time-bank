@@ -20,6 +20,7 @@ import { MatchingModule } from './matching/matching.module';
 import { TimeLedgerModule } from './time-ledger/time-ledger.module';
 import { DonationsModule } from './donations/donations.module';
 import { NotificationsModule } from './notifications/notifications.module';
+import { SafetyModule } from './safety/safety.module';
 
 /**
  * Root application module.
@@ -99,6 +100,7 @@ import { NotificationsModule } from './notifications/notifications.module';
     TimeLedgerModule,
     DonationsModule,
     NotificationsModule,
+    SafetyModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

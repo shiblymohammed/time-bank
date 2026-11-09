@@ -191,6 +191,17 @@ pre {
   color: var(--text-main);
   background: var(--bg-hover);
 }
+.nav-alert-count {
+  margin-left: auto;
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--danger);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: center;
+}
 .nav-item.active {
   color: var(--primary);
   background: var(--primary-tint);

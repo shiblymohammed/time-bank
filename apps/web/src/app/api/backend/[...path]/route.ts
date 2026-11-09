@@ -17,6 +17,7 @@ const ROUTES: [methods: string, pattern: RegExp][] = [
   ['*', /^\/v1\/organizations(?:\/|$)/],
   ['*', new RegExp(`^${ORG}/memberships(?:/|$)`, 'i')],
   ['*', new RegExp(`^${ORG}/requests(?:/|$)`, 'i')],
+  ['GET POST', new RegExp(`^${ORG}/safety-alerts(?:/|$)`, 'i')],
   ['GET POST PATCH', /^\/catalogue\/categories(?:\/[a-f0-9-]+)?$/i],
   ['GET POST PATCH', /^\/catalogue\/global(?:\/[a-f0-9-]+)?$/i],
   ['GET', /^\/catalogue\/proposals$/],

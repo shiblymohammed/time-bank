@@ -44,7 +44,9 @@ import {
   NO_SHOW_GRACE_MINUTES,
   UNFILLED_GRACE_MINUTES,
   openHelpCount,
+  workedMinutes,
 } from './booking-recovery';
+import { safetyState } from '../requests/request-view';
 import {
   CANDIDATE_RANKING_STRATEGY,
   CandidateRankingStrategy,
@@ -484,6 +486,7 @@ export class MatchingService {
       reportedMinutes: assignment.reportedMinutes ?? null,
       confirmedAt: assignment.confirmedAt ?? null,
       confirmedMinutes: assignment.confirmedMinutes ?? null,
+      ...safetyState(assignment),
       scheduledStartTime: assignmentSchedule(assignment),
       reschedule: assignment.reschedule
         ? {
@@ -1492,10 +1495,10 @@ export class MatchingService {
           `Only a started assignment can be finished (current: ${assignment.status})`,
         );
       }
-      const elapsed = Math.max(
-        1,
-        Math.ceil((now.getTime() - new Date(assignment.startedAt).getTime()) / 60_000),
-      );
+      if (assignment.pausedAt) {
+        throw new ConflictException('This visit is paused. A coordinator will contact you.');
+      }
+      const elapsed = workedMinutes(assignment, now);
       // A volunteer who pressed Start late may report up to the expected duration.
       const allowed = Math.min(
         MAX_SERVICE_MINUTES,
@@ -1553,7 +1556,12 @@ export class MatchingService {
     return this.dataSource.transaction('REPEATABLE READ', async (manager) => {
       const request = await manager.getRepository(ServiceRequest).findOne({
         where: { id: requestId, organizationId: orgId },
-        relations: ['serviceCatalog', 'serviceCatalog.globalService', 'beneficiaryMembership'],
+        relations: [
+          'serviceCatalog',
+          'serviceCatalog.globalService',
+          'beneficiaryMembership',
+          'beneficiaryMembership.user',
+        ],
       });
       if (!request) throw new NotFoundException('Service request not found in this organization');
       const assignments = await manager.getRepository(VolunteerAssignment).find({
@@ -1586,6 +1594,7 @@ export class MatchingService {
           locationPostalCode: request.locationPostalCode,
           beneficiaryNotes: request.beneficiaryNotes,
           beneficiaryMembershipNumber: request.beneficiaryMembership?.membershipNumber ?? null,
+          beneficiaryName: request.beneficiaryMembership?.user?.fullName ?? null,
           serviceName:
             request.serviceCatalog?.customLabelEn ??
             request.serviceCatalog?.globalService?.nameEn ??
@@ -1607,6 +1616,7 @@ export class MatchingService {
           id: assignment.id,
           volunteerMembershipId: assignment.volunteerMembershipId,
           membershipNumber: assignment.volunteerMembership?.membershipNumber ?? null,
+          fullName: assignment.volunteerMembership?.user?.fullName ?? null,
           phone: assignment.volunteerMembership?.user?.phoneE164 ?? null,
           status: assignment.status,
           offeredAt: assignment.offeredAt,
@@ -1623,6 +1633,8 @@ export class MatchingService {
           reviewRequestedAt: assignment.reviewRequestedAt ?? null,
           reviewResolvedAt: assignment.reviewResolvedAt ?? null,
           reviewOutcome: assignment.reviewOutcome ?? null,
+          pausedAt: assignment.pausedAt ?? null,
+          restartAllowedAt: assignment.restartAllowedAt ?? null,
           scheduledStartTime: assignmentSchedule(
             { ...assignment, serviceRequest: request },
             reschedules,
@@ -1713,7 +1725,7 @@ export class MatchingService {
         .leftJoin('u.restrictions', 'restriction', 'restriction.status = :activeRestriction', {
           activeRestriction: GlobalRestrictionStatus.ACTIVE,
         })
-        .select(['m.id', 'm.membershipNumber', 'u.id', 'u.phoneE164'])
+        .select(['m.id', 'm.membershipNumber', 'u.id', 'u.phoneE164', 'u.fullName'])
         .where(
           'm.organizationId = :orgId AND m.status = :approved AND u.status = :activeUser AND restriction.id IS NULL',
           { orgId, approved: MembershipStatus.APPROVED, activeUser: AccountStatus.ACTIVE },
@@ -1735,9 +1747,10 @@ export class MatchingService {
           { skills, verified: SkillVerificationStatus.VERIFIED },
         );
       if (options.search?.trim())
-        query.andWhere('(m.membershipNumber ILIKE :search OR u.phoneE164 ILIKE :search)', {
-          search: `%${options.search.trim()}%`,
-        });
+        query.andWhere(
+          '(m.membershipNumber ILIKE :search OR u.phoneE164 ILIKE :search OR u.fullName ILIKE :search)',
+          { search: `%${options.search.trim()}%` },
+        );
       const page = options.page ?? 1,
         limit = options.limit ?? 20;
       const [memberships, total] = await query
@@ -1750,6 +1763,7 @@ export class MatchingService {
         volunteers: memberships.map((member) => ({
           id: member.id,
           membershipNumber: member.membershipNumber ?? null,
+          fullName: member.user.fullName ?? null,
           phone: member.user.phoneE164,
         })),
         total,
@@ -2059,16 +2073,18 @@ export class MatchingService {
     );
     await attempt(
       await assignments(
-        `a.status = 'IN_PROGRESS'
-         AND a.started_at + interval '${MAX_SERVICE_MINUTES} minutes' < $1`,
+        `a.status = 'IN_PROGRESS' AND a.paused_at IS NULL
+         AND a.started_at + a.paused_seconds * interval '1 second'
+           + interval '${MAX_SERVICE_MINUTES} minutes' < $1`,
       ),
       'close an unfinished visit',
       (id, at) => this.closeUnfinishedVisit(id, at),
     );
     await attempt(
       await assignments(
-        `a.status = 'IN_PROGRESS' AND a.finish_reminded_at IS NULL
-         AND a.started_at + (r.expected_duration_minutes + ${FINISH_REMINDER_GRACE_MINUTES})
+        `a.status = 'IN_PROGRESS' AND a.finish_reminded_at IS NULL AND a.paused_at IS NULL
+         AND a.started_at + a.paused_seconds * interval '1 second'
+           + (r.expected_duration_minutes + ${FINISH_REMINDER_GRACE_MINUTES})
            * interval '1 minute' < $1`,
       ),
       'send a finish reminder',
@@ -2250,7 +2266,7 @@ export class MatchingService {
         assignmentId,
         VolunteerAssignmentStatus.IN_PROGRESS,
       );
-      if (!locked) return;
+      if (!locked || locked.assignment.pausedAt) return;
       const { assignment, request } = locked;
       assignment.finishRemindedAt = now;
       await manager.save(VolunteerAssignment, assignment);
@@ -2272,7 +2288,7 @@ export class MatchingService {
         assignmentId,
         VolunteerAssignmentStatus.IN_PROGRESS,
       );
-      if (!locked) return;
+      if (!locked || locked.assignment.pausedAt) return;
       const { assignment, request } = locked;
       assignment.status = VolunteerAssignmentStatus.COMPLETED;
       assignment.finishedAt = now;

@@ -32,7 +32,7 @@ import { OrganizationMembership } from '../memberships/entities/organization-mem
 import { Organization } from '../organizations/entities/organization.entity';
 import { BeneficiariesService } from '../beneficiaries/beneficiaries.service';
 import { MatchingService } from '../matching/matching.service';
-import { awaitingReview, openHelpCount } from '../matching/booking-recovery';
+import { awaitingReview, openHelpCount, workedMinutes } from '../matching/booking-recovery';
 import { NotificationsService } from '../notifications/notifications.service';
 import { VolunteerAssignment } from '../matching/entities/volunteer-assignment.entity';
 import { AuditService } from '../audit/audit.service';
@@ -908,6 +908,9 @@ export class RequestsService {
       if (assignment.reviewResolvedAt) {
         throw new ConflictException('A coordinator has already decided this service');
       }
+      if (assignment.reviewReason === AssignmentReviewReason.SAFETY_ALERT) {
+        throw new ConflictException('A coordinator is reviewing this service');
+      }
       return this.sendForReview(manager, request, assignment, {
         reason: AssignmentReviewReason.BENEFICIARY_DISPUTE,
         minutes: null,
@@ -947,6 +950,9 @@ export class RequestsService {
         throw new ForbiddenException('Another coordinator must decide this visit');
       }
       const inProgress = assignment.status === VolunteerAssignmentStatus.IN_PROGRESS;
+      if (assignment.pausedAt) {
+        throw new ConflictException('Handle the safety alert on this visit first');
+      }
       if (!inProgress && !awaitingReview(assignment)) {
         throw new ConflictException('This service is not waiting for a decision');
       }
@@ -1088,10 +1094,7 @@ export class RequestsService {
     minutes: number,
     now: Date,
   ): Promise<AssignmentReviewReason | null> {
-    const timed = Math.ceil(
-      (new Date(assignment.finishedAt!).getTime() - new Date(assignment.startedAt!).getTime()) /
-        60_000,
-    );
+    const timed = workedMinutes(assignment, new Date(assignment.finishedAt!));
     if (minutes > timed + TIMED_WORK_TOLERANCE_MINUTES) {
       return AssignmentReviewReason.MINUTES_OVER_TIMED_WORK;
     }

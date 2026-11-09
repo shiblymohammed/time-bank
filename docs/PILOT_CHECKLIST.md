@@ -44,6 +44,7 @@ Check these weekly with the coordinator:
 - Volunteers who never respond, or who received no push message.
 - Sign-in failures and SMS costs.
 - Any credit correction or review, and why it was needed.
+- Every safety alert, how quickly someone responded, and how it ended.
 - Complaints. There is no complaints workflow yet, so log them by hand and act on them the same day.
 
 ## Stop the pilot if
@@ -55,7 +56,8 @@ Check these weekly with the coordinator:
 
 ## Known gaps to accept or close first
 
-- Safety alerts, complaints, appeals and reports (Milestone 7) are not built.
+- Complaints, appeals and reports (the rest of Milestone 7) are not built. [Safety alerts](SAFETY_ALERTS.md) are, within
+  their stated limits.
 - Offline use (Milestone 8) is not built, so volunteers need a connection.
 - Load, security and accessibility reviews and Malayalam validation (Milestone 9) have not been done.
 - Team services and transfers (Milestone 5) are not built, so start with services for one volunteer.
