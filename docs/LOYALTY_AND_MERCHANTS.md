@@ -2,9 +2,9 @@
 
 Status: built in development; deployment and device review remain open.
 
-Both repositories use the local branch `codex/m6-loyalty-merchants`. The Flutter change is commit `a6859a3` in the
-separate repository at `apps/mobile/time_bank_flutter`; the root repository intentionally does not track that checkout.
-Neither feature branch has been pushed as part of this work.
+The implementation was prepared on `codex/m6-loyalty-merchants` in both repositories. The Flutter change is commit
+`a6859a3` in the separate repository at `apps/mobile/time_bank_flutter`; the root repository intentionally does not
+track that checkout.
 
 ## Delivery plan
 
