@@ -55,7 +55,13 @@ export class VerifiedIdentity {
   documentLast4?: string | null;
 
   /** Keyed one-way fingerprint of the full number; never shown, only compared. */
-  @Column({ name: 'document_fingerprint', type: 'varchar', length: 64, nullable: true, select: false })
+  @Column({
+    name: 'document_fingerprint',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+    select: false,
+  })
   documentFingerprint?: string | null;
 
   @Column({ name: 'verification_notes', type: 'varchar', length: 500, nullable: true })

@@ -136,10 +136,7 @@ export class AdminService {
   }
 
   /** By id, or by the phone or member number staff actually have to hand. */
-  private async findRestrictionTarget(
-    m: EntityManager,
-    dto: ImposeRestrictionDto,
-  ): Promise<User> {
+  private async findRestrictionTarget(m: EntityManager, dto: ImposeRestrictionDto): Promise<User> {
     let userId = dto.userId;
     if (!userId && dto.member) {
       const value = dto.member.trim();

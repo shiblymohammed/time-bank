@@ -457,7 +457,9 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
                 />
                 <Select name="hazardous" label="Heavy or risky physical work">
                   <option value="false">No</option>
-                  <option value="true">Yes: stop this work if a team falls below its minimum</option>
+                  <option value="true">
+                    Yes: stop this work if a team falls below its minimum
+                  </option>
                 </Select>
               </ActionForm>
             )}

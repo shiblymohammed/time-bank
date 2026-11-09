@@ -45,7 +45,10 @@ describe('staff powers wait for the email code', () => {
     switchOff?: boolean;
   }): Promise<{ verified: boolean | undefined; query: jest.Mock }> {
     const jwt = new JwtService({ secret });
-    const token = await jwt.signAsync({ sub: 'user-1', ...(options.sid ? { sid: options.sid } : {}) });
+    const token = await jwt.signAsync({
+      sub: 'user-1',
+      ...(options.sid ? { sid: options.sid } : {}),
+    });
     const query = jest.fn().mockResolvedValue(options.rows);
     const guard = new AuthGuard(
       jwt,

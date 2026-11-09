@@ -17,7 +17,9 @@ export class RaiseComplaintDto {
   @IsUUID()
   serviceRequestId?: string;
 
-  @ApiPropertyOptional({ description: 'The same value on a retry finds the complaint already made' })
+  @ApiPropertyOptional({
+    description: 'The same value on a retry finds the complaint already made',
+  })
   @IsOptional()
   @IsString()
   @Length(8, 100)

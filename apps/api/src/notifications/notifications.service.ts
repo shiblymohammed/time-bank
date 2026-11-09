@@ -180,8 +180,7 @@ export class NotificationsService {
               where: { userId: notification.userId },
             })
           ).filter(
-            (device) =>
-              !community || !device.organizationId || device.organizationId === community,
+            (device) => !community || !device.organizationId || device.organizationId === community,
           );
     if (devices.length === 0) {
       notification.status = NotificationStatus.NO_DEVICE;

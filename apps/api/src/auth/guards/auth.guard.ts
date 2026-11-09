@@ -151,7 +151,7 @@ export class AuthGuard implements CanActivate {
     if (typeof payload.appOrg === 'string') {
       const appOrg = payload.appOrg.toLowerCase();
       if (organizationsNamedBy(request).some((orgId) => orgId !== appOrg)) {
-        throw new ForbiddenException("This app only works for its own community");
+        throw new ForbiddenException('This app only works for its own community');
       }
     }
     await this.markStaffVerification(request.user.id, request.user.sessionId);

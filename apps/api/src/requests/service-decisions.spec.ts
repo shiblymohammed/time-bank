@@ -67,10 +67,7 @@ describe('Service decisions', () => {
     caregiverAccess = jest.fn().mockResolvedValue({ id: 'authorization' });
 
     const repositories = new Map<unknown, unknown>([
-      [
-        ServiceRequest,
-        { findOne: async () => request, save: async (row: unknown) => row },
-      ],
+      [ServiceRequest, { findOne: async () => request, save: async (row: unknown) => row }],
       [
         VolunteerAssignment,
         {

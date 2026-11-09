@@ -311,8 +311,9 @@ export class AuthService {
     }
 
     // 4. Check user status. A restricted person may still sign in, but only to read and appeal.
-    const restricted = await this.isRestricted(user, () =>
-      new ForbiddenException('This account is closed. Contact your community coordinator.'),
+    const restricted = await this.isRestricted(
+      user,
+      () => new ForbiddenException('This account is closed. Contact your community coordinator.'),
     );
 
     // 5. Resolve organization context (if provided)

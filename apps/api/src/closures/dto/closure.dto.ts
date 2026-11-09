@@ -1,12 +1,5 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import {
-  IsDateString,
-  IsEnum,
-  IsOptional,
-  IsString,
-  Length,
-  Matches,
-} from 'class-validator';
+import { IsDateString, IsEnum, IsOptional, IsString, Length, Matches } from 'class-validator';
 import { ClosureEvidenceType, ClosureKind } from '@ktb/shared-types';
 
 export class ReportClosureDto {
@@ -34,12 +27,16 @@ export class ReportClosureDto {
   @IsEnum(ClosureEvidenceType)
   evidenceType?: ClosureEvidenceType;
 
-  @ApiPropertyOptional({ description: 'For a death: last 4 characters of its number. No document is kept.' })
+  @ApiPropertyOptional({
+    description: 'For a death: last 4 characters of its number. No document is kept.',
+  })
   @IsOptional()
   @Matches(/^[A-Za-z0-9]{4}$/, { message: 'Enter the last 4 characters of the document number' })
   evidenceLast4?: string;
 
-  @ApiPropertyOptional({ description: 'For a duplicate: the phone or member number of the account that stays' })
+  @ApiPropertyOptional({
+    description: 'For a duplicate: the phone or member number of the account that stays',
+  })
   @IsOptional()
   @IsString()
   @Length(3, 50)
@@ -58,7 +55,9 @@ export class ApproveClosureDto {
   @Length(3, 2000)
   notes!: string;
 
-  @ApiPropertyOptional({ description: 'For a duplicate: what the person is told when they sign in' })
+  @ApiPropertyOptional({
+    description: 'For a duplicate: what the person is told when they sign in',
+  })
   @IsOptional()
   @IsString()
   @Length(10, 1000)
@@ -66,7 +65,9 @@ export class ApproveClosureDto {
 }
 
 export class RecommendTransferDto {
-  @ApiProperty({ description: 'The phone or member number of the account that receives the credits' })
+  @ApiProperty({
+    description: 'The phone or member number of the account that receives the credits',
+  })
   @IsString()
   @Length(3, 50)
   receiver!: string;

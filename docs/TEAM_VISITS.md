@@ -24,10 +24,10 @@ except that the only volunteer can now hand it over.
 
 ## When a team falls below its minimum
 
-| What happened                 | When the team counts as short                           |
-| ----------------------------- | ------------------------------------------------------- |
-| "I have to leave"             | Straight away                                           |
-| A teammate pressed Finish     | After 10 minutes, if the others have not finished too   |
+| What happened                   | When the team counts as short                           |
+| ------------------------------- | ------------------------------------------------------- |
+| "I have to leave"               | Straight away                                           |
+| A teammate pressed Finish       | After 10 minutes, if the others have not finished too   |
 | A volunteer left after an alert | After 10 minutes (staff are already handling the alert) |
 
 Once short, the coordinator is told, the people on site are told, and the open place goes on offer until enough people
@@ -46,14 +46,14 @@ way (FR-TEAM-06).
 "I cannot carry on" is for the last volunteer on site.
 
 - **Pay:** only the volunteer who finishes earns, for their own timed minutes (D#33, BR-06). The volunteer who handed
-  over earns nothing, even for time already given. The app says so before they confirm, and the server refuses a handover
-  without that acknowledgement. Their minutes stay on record. Their assignment becomes `REPLACED` and links to the
-  replacement through `replaced_by_assignment_id`.
+  over earns nothing, even for time already given. The app says so before they confirm, and the server refuses a
+  handover without that acknowledgement. Their minutes stay on record. Their assignment becomes `REPLACED` and links to
+  the replacement through `replaced_by_assignment_id`.
 - **Finding someone:** routine visits go back on offer. Sensitive services and immediate requests go only to a
   coordinator (D#32).
 - **Nobody takes it:** once no offer is left open, the coordinator is told. They can dispatch someone, or use **Stop
-  looking**. If nobody is left, the request closes: `COMPLETED` if help was delivered, otherwise `CANCELLED`, recorded as
-  `NO_REPLACEMENT_FOUND`. A request never reads as completed when only handovers are left.
+  looking**. If nobody is left, the request closes: `COMPLETED` if help was delivered, otherwise `CANCELLED`, recorded
+  as `NO_REPLACEMENT_FOUND`. A request never reads as completed when only handovers are left.
 
 A visit that is short appears in the panel's review filter until it is settled.
 
@@ -64,13 +64,13 @@ themselves, and only the beneficiary, their caregiver or staff can end the visit
 
 ## API
 
-| Call                                                        | Who                                |
-| ----------------------------------------------------------- | ---------------------------------- |
-| `POST /organizations/:id/assignments/:assignmentId/start`   | Volunteer; on a team, "I've arrived" |
-| `POST /organizations/:id/assignments/:assignmentId/leave`   | Volunteer with a teammate working  |
-| `POST /organizations/:id/assignments/:assignmentId/hand-over` | Last volunteer on site, with `acknowledgeNoCredits: true` |
-| `POST /organizations/:id/assignments/:assignmentId/invite`  | Booked volunteer                   |
-| `POST /organizations/:id/requests/:requestId/stop-replacement` | Staff                           |
+| Call                                                           | Who                                                       |
+| -------------------------------------------------------------- | --------------------------------------------------------- |
+| `POST /organizations/:id/assignments/:assignmentId/start`      | Volunteer; on a team, "I've arrived"                      |
+| `POST /organizations/:id/assignments/:assignmentId/leave`      | Volunteer with a teammate working                         |
+| `POST /organizations/:id/assignments/:assignmentId/hand-over`  | Last volunteer on site, with `acknowledgeNoCredits: true` |
+| `POST /organizations/:id/assignments/:assignmentId/invite`     | Booked volunteer                                          |
+| `POST /organizations/:id/requests/:requestId/stop-replacement` | Staff                                                     |
 
 `GET assignments/mine` returns a `team` object saying what is open to that volunteer (`canLeave`, `canHandOver`,
 `canInvite`). A request's `stage` is `AWAITING_REPLACEMENT` while nobody is working and someone must take over.

@@ -27,10 +27,7 @@ import { User } from '../identity/entities/user.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { Appeal } from '../restrictions/entities/appeal.entity';
 import { RestrictionCase } from '../restrictions/entities/restriction-case.entity';
-import {
-  assertSuperAdminRemains,
-  holdsSuperAdmin,
-} from '../restrictions/platform-restriction';
+import { assertSuperAdminRemains, holdsSuperAdmin } from '../restrictions/platform-restriction';
 import {
   levelForRoles,
   newRestrictionReference,
@@ -130,7 +127,8 @@ export class ClosuresService {
           needsSuperAdmin: Number(communities[0]?.count ?? 0) > 1,
           status: ClosureStatus.REPORTED,
           reason: dto.reason.trim(),
-          dateOfDeath: dto.kind === ClosureKind.DECEASED ? (dto.dateOfDeath as string).slice(0, 10) : null,
+          dateOfDeath:
+            dto.kind === ClosureKind.DECEASED ? (dto.dateOfDeath as string).slice(0, 10) : null,
           evidenceType: dto.kind === ClosureKind.DECEASED ? (dto.evidenceType ?? null) : null,
           evidenceLast4:
             dto.kind === ClosureKind.DECEASED ? (dto.evidenceLast4?.toUpperCase() ?? null) : null,
@@ -291,7 +289,13 @@ export class ClosuresService {
         await assertSuperAdminRemains(manager, { userId: user.id });
       }
 
-      found.restoreState = await this.closeEverything(manager, found, user, context.userId, ipAddress);
+      found.restoreState = await this.closeEverything(
+        manager,
+        found,
+        user,
+        context.userId,
+        ipAddress,
+      );
       found.status = ClosureStatus.CLOSED;
       found.memberMessage = dto.memberMessage?.trim() || null;
       found.decidedByUserId = context.userId;
@@ -431,7 +435,14 @@ export class ClosuresService {
         },
         [context.userId],
       );
-      await this.audit(manager, 'CLOSURE_TRANSFER_RECOMMENDED', context.userId, found, ipAddress, {});
+      await this.audit(
+        manager,
+        'CLOSURE_TRANSFER_RECOMMENDED',
+        context.userId,
+        found,
+        ipAddress,
+        {},
+      );
       return summary(found);
     });
   }
@@ -503,7 +514,13 @@ export class ClosuresService {
       found.lastTransferredAt = now;
       clearRecommendation(found);
       await manager.save(AccountClosure, found);
-      await this.addEvent(manager, found.id, context.userId, ClosureEventType.TRANSFERRED, dto.notes);
+      await this.addEvent(
+        manager,
+        found.id,
+        context.userId,
+        ClosureEventType.TRANSFERRED,
+        dto.notes,
+      );
       await this.notifications.notifyUsers(manager, [receiver.id], {
         organizationId: found.organizationId ?? null,
         type: 'CLOSURE_CREDITS_RECEIVED',
@@ -656,7 +673,9 @@ export class ClosuresService {
   private assertCanDecide(found: AccountClosure, context: EvaluatedMembershipContext): void {
     if (context.isSuperAdmin) return;
     if (found.needsSuperAdmin) {
-      throw new ForbiddenException('This person belongs to several communities. A Super Admin must decide.');
+      throw new ForbiddenException(
+        'This person belongs to several communities. A Super Admin must decide.',
+      );
     }
     if (
       found.level === ComplaintLevel.SUPER_ADMIN ||
@@ -670,7 +689,8 @@ export class ClosuresService {
     if (found.kind !== ClosureKind.DECEASED) {
       throw new ConflictException('A duplicate keeps its credits: nothing is passed on');
     }
-    if (found.status !== ClosureStatus.CLOSED) throw new ConflictException('This account is not closed');
+    if (found.status !== ClosureStatus.CLOSED)
+      throw new ConflictException('This account is not closed');
   }
 
   private assertNomineeClear(found: AccountClosure): void {
@@ -857,9 +877,10 @@ export class ClosuresService {
   }
 
   private async assertPrimaryOpen(manager: EntityManager, userId: string): Promise<void> {
-    const [row]: { status: string }[] = await manager.query('SELECT status FROM users WHERE id = $1', [
-      userId,
-    ]);
+    const [row]: { status: string }[] = await manager.query(
+      'SELECT status FROM users WHERE id = $1',
+      [userId],
+    );
     if (
       row?.status === AccountStatus.DECEASED_CLOSED ||
       row?.status === AccountStatus.DUPLICATE_CLOSED ||
@@ -876,7 +897,8 @@ export class ClosuresService {
   ): Promise<User> {
     const userId = await this.findUserId(manager, found.organizationId ?? null, value);
     const receiver = userId && (await manager.findOne(User, { where: { id: userId } }));
-    if (!receiver) throw new NotFoundException('No account has that number. They need to join first.');
+    if (!receiver)
+      throw new NotFoundException('No account has that number. They need to join first.');
     return receiver;
   }
 

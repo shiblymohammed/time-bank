@@ -325,7 +325,13 @@ export class ComplaintsService {
       complaint.decidedByUserId = context.userId;
       complaint.handledByUserId = context.userId;
       await manager.save(Complaint, complaint);
-      await this.addEvent(manager, complaint, context.userId, ComplaintEventType.DECIDED, dto.notes);
+      await this.addEvent(
+        manager,
+        complaint,
+        context.userId,
+        ComplaintEventType.DECIDED,
+        dto.notes,
+      );
       await this.notifications.notifyUsers(manager, [complaint.raisedByUserId], {
         organizationId: complaint.organizationId,
         type: 'COMPLAINT_DECIDED',
@@ -375,12 +381,7 @@ export class ComplaintsService {
     if (!reachable || involved) throw new NotFoundException('Complaint not found');
   }
 
-  private async summaries(
-    userId: string,
-    levels: ComplaintLevel[],
-    open: boolean,
-    orgId?: string,
-  ) {
+  private async summaries(userId: string, levels: ComplaintLevel[], open: boolean, orgId?: string) {
     const complaints = await this.dataSource.getRepository(Complaint).find({
       where: {
         level: In(levels),
@@ -477,7 +478,9 @@ export class ComplaintsService {
       scheduledStartTime: request.scheduledStartTime,
       beneficiaryName: request.beneficiaryMembership?.user?.fullName ?? null,
       volunteerNames: [
-        ...new Set(helpers.map((helper) => helper.volunteerMembership?.user?.fullName ?? 'No name')),
+        ...new Set(
+          helpers.map((helper) => helper.volunteerMembership?.user?.fullName ?? 'No name'),
+        ),
       ],
     };
   }

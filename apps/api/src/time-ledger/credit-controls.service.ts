@@ -97,7 +97,11 @@ export class CreditControlsService {
       [actor, org],
     );
     // Staff roles wait until this sign-in passes the emailed staff code.
-    const staffRoles: string[] = [UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN, UserRole.SUPER_ADMIN];
+    const staffRoles: string[] = [
+      UserRole.COORDINATOR,
+      UserRole.MUNICIPALITY_ADMIN,
+      UserRole.SUPER_ADMIN,
+    ];
     const grants = staffPowersAllowed()
       ? lockedGrants
       : lockedGrants.filter((g) => !staffRoles.includes(g.role));
@@ -424,7 +428,8 @@ export class CreditControlsService {
       const released = dto.decision === 'RELEASE';
       // A resolved fraud case must not make banned/suspended credits spendable. A closed wallet
       // cannot spend anything, and its review still has to end so the credits can be accounted for.
-      if (released && !(await this.isClosedAccount(m, account))) await this.assertActive(m, account);
+      if (released && !(await this.isClosedAccount(m, account)))
+        await this.assertActive(m, account);
       const amount = cents(review.held_amount);
       await this.move(m, account, !!review.pool_id, released ? amount : 0, -amount);
       if (amount > 0)
@@ -796,7 +801,16 @@ export class CreditControlsService {
         reason: `Passing on to a nominee (${reference})`,
       } as CreditAmountDto;
       await this.move(m, from, false, releasable, -releasable);
-      const operation = await this.operation(m, org, actor, dto, 'FROZEN_RELEASED', from.id, null, null);
+      const operation = await this.operation(
+        m,
+        org,
+        actor,
+        dto,
+        'FROZEN_RELEASED',
+        from.id,
+        null,
+        null,
+      );
       await this.post(m, org, from, false, 'FROZEN_RELEASED', releasable, -releasable, {
         operationId: operation.id,
       });

@@ -54,7 +54,9 @@ export class EmailService {
       signal: AbortSignal.timeout(10_000),
     }).catch(() => null);
     if (!response?.ok) {
-      this.logger.warn(`Staff email code could not be sent (status ${response?.status ?? 'none'}).`);
+      this.logger.warn(
+        `Staff email code could not be sent (status ${response?.status ?? 'none'}).`,
+      );
       throw new ServiceUnavailableException('The code email could not be sent. Try again shortly.');
     }
   }

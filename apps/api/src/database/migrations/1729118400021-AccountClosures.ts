@@ -25,7 +25,9 @@ export class AccountClosures1729118400021 implements MigrationInterface {
       CREATE UNIQUE INDEX uq_death_nominee_current ON death_nominees (user_id)
         WHERE replaced_at IS NULL;
     `);
-    await q.query(`CREATE INDEX idx_death_nominees_user ON death_nominees (user_id, created_at DESC);`);
+    await q.query(
+      `CREATE INDEX idx_death_nominees_user ON death_nominees (user_id, created_at DESC);`,
+    );
 
     await q.query(`
       CREATE TABLE account_closures (
@@ -112,7 +114,9 @@ export class AccountClosures1729118400021 implements MigrationInterface {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
     `);
-    await q.query(`CREATE INDEX idx_account_closure_events ON account_closure_events (closure_id, created_at);`);
+    await q.query(
+      `CREATE INDEX idx_account_closure_events ON account_closure_events (closure_id, created_at);`,
+    );
     await q.query(`
       CREATE FUNCTION reject_account_closure_event_change() RETURNS trigger AS $$
       BEGIN

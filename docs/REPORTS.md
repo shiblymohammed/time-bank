@@ -93,5 +93,7 @@ Left out: safety alerts, complaints, restrictions, appeals, closures, budgets an
 - API and standalone dashboard builds passed. API lint passed. Dashboard lint has no errors; five existing
   unused-disable warnings remain in the request and catalogue components outside this change.
 
-Docker image builds, a production dependency audit and the documented Malayalam/privacy product decisions remain release
-checks. This development validation does not replace them.
+Both production Docker images also passed in
+[GitHub CI](https://github.com/shiblymohammed/time-bank/actions/runs/42621694065). The subsequent official-registry
+dependency audit and security patch are recorded in [M7_SIGNOFF.md](M7_SIGNOFF.md). Malayalam/privacy product decisions
+remain release checks. Development validation does not replace them.

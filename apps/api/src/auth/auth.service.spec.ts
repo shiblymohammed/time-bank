@@ -406,9 +406,9 @@ describe('AuthService', () => {
         }),
       });
 
-      await expect(service.verifyOtp({ phone: '9876543210', code: '123456' })).resolves.toMatchObject(
-        { accountRestricted: true },
-      );
+      await expect(
+        service.verifyOtp({ phone: '9876543210', code: '123456' }),
+      ).resolves.toMatchObject({ accountRestricted: true });
     });
   });
 

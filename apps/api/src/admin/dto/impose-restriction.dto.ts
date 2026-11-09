@@ -55,7 +55,9 @@ export class ImposeRestrictionDto {
   @Length(10, 1000)
   memberMessage?: string;
 
-  @ApiPropertyOptional({ description: 'Staff are reminded then. Access does not return by itself.' })
+  @ApiPropertyOptional({
+    description: 'Staff are reminded then. Access does not return by itself.',
+  })
   @IsOptional()
   @IsDateString()
   reviewOn?: string;

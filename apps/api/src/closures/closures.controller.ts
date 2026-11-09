@@ -140,7 +140,9 @@ export class CommunityClosuresController {
   }
 
   @Post(':closureId/recommend-transfer')
-  @ApiOperation({ summary: 'A coordinator has verified the nominee and recommends passing on the credits' })
+  @ApiOperation({
+    summary: 'A coordinator has verified the nominee and recommends passing on the credits',
+  })
   recommendTransfer(
     @Param('id', ParseUUIDPipe) orgId: string,
     @Param('closureId', ParseUUIDPipe) closureId: string,

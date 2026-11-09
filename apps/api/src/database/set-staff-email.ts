@@ -10,7 +10,12 @@ import { AppDataSource } from './data-source';
 async function main(): Promise<void> {
   const [phone, rawEmail] = process.argv.slice(2);
   const email = rawEmail?.trim().toLowerCase();
-  if (!phone || !email || !/^\+\d{8,15}$/.test(phone) || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+  if (
+    !phone ||
+    !email ||
+    !/^\+\d{8,15}$/.test(phone) ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)
+  ) {
     throw new Error('Usage: set-staff-email.js <phone in +91... form> <email>');
   }
   await AppDataSource.initialize();

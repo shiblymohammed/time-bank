@@ -7,12 +7,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
-import {
-  ClosureEvidenceType,
-  ClosureKind,
-  ClosureStatus,
-  ComplaintLevel,
-} from '@ktb/shared-types';
+import { ClosureEvidenceType, ClosureKind, ClosureStatus, ComplaintLevel } from '@ktb/shared-types';
 import { User } from '../../identity/entities/user.entity';
 import { OrganizationMembership } from '../../memberships/entities/organization-membership.entity';
 import { Organization } from '../../organizations/entities/organization.entity';

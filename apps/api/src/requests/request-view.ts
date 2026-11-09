@@ -20,10 +20,7 @@ const HELP_DELIVERY_STATUSES = [
 
 /** Where a started visit stands once the volunteer has stopped working. */
 export type VisitStage =
-  | 'SAFETY_PAUSED'
-  | 'AWAITING_REPLACEMENT'
-  | 'AWAITING_CONFIRMATION'
-  | 'UNDER_REVIEW';
+  'SAFETY_PAUSED' | 'AWAITING_REPLACEMENT' | 'AWAITING_CONFIRMATION' | 'UNDER_REVIEW';
 
 /**
  * What the two people on a visit may know about a safety alert: that the visit is paused, may

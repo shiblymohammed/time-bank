@@ -17,8 +17,8 @@ Part 1 of Milestone 7 (FR-SAFE-01, FR-SAFE-02, BR-10, D#70 to D#74).
 ## Teams
 
 - An alert pauses every volunteer on the request, whoever raises it.
-- Each volunteer then restarts or leaves for themselves. A coordinator's **Allow restart** clears everyone who is paused,
-  and each still chooses.
+- Each volunteer then restarts or leaves for themselves. A coordinator's **Allow restart** clears everyone who is
+  paused, and each still chooses.
 - A volunteer who chooses to end leaves on their own. The beneficiary, their caregiver or staff can end it for everyone.
 - The alert closes itself once everyone still on the visit is working again.
 - If someone leaving puts the team below its minimum, [the usual steps](TEAM_VISITS.md) follow after 10 minutes.
@@ -41,15 +41,15 @@ Part 1 of Milestone 7 (FR-SAFE-01, FR-SAFE-02, BR-10, D#70 to D#74).
 
 ## API
 
-| Call                                                         | Who                                 |
-| ------------------------------------------------------------ | ----------------------------------- |
-| `POST /organizations/:id/requests/:requestId/safety-alerts`  | Someone on the visit                |
-| `POST /organizations/:id/requests/:requestId/safety-restart` | `restart: true` volunteer; `false` either person |
-| `GET /organizations/:id/safety-alerts?open=false`            | Staff; closed alerts are left out unless `open=false` |
-| `POST /organizations/:id/safety-alerts/:alertId/acknowledge` | Staff                               |
-| `POST /organizations/:id/safety-alerts/:alertId/allow-restart` | Staff                             |
-| `POST /organizations/:id/safety-alerts/:alertId/end-visit`   | Staff                               |
-| `POST /organizations/:id/safety-alerts/:alertId/close`       | Staff, once the visit has ended     |
+| Call                                                           | Who                                                   |
+| -------------------------------------------------------------- | ----------------------------------------------------- |
+| `POST /organizations/:id/requests/:requestId/safety-alerts`    | Someone on the visit                                  |
+| `POST /organizations/:id/requests/:requestId/safety-restart`   | `restart: true` volunteer; `false` either person      |
+| `GET /organizations/:id/safety-alerts?open=false`              | Staff; closed alerts are left out unless `open=false` |
+| `POST /organizations/:id/safety-alerts/:alertId/acknowledge`   | Staff                                                 |
+| `POST /organizations/:id/safety-alerts/:alertId/allow-restart` | Staff                                                 |
+| `POST /organizations/:id/safety-alerts/:alertId/end-visit`     | Staff                                                 |
+| `POST /organizations/:id/safety-alerts/:alertId/close`         | Staff, once the visit has ended                       |
 
 A `clientOperationId` on a new alert makes a retry find the alert already raised.
 

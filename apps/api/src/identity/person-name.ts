@@ -6,7 +6,12 @@ import { BadRequestException } from '@nestjs/common';
  */
 export function cleanPersonName(raw: unknown): string {
   const name = typeof raw === 'string' ? raw.normalize('NFC').trim().replace(/\s+/g, ' ') : '';
-  if (name.length < 2 || name.length > 100 || !/\p{L}/u.test(name) || /[\p{Cc}<>{}\d@]/u.test(name)) {
+  if (
+    name.length < 2 ||
+    name.length > 100 ||
+    !/\p{L}/u.test(name) ||
+    /[\p{Cc}<>{}\d@]/u.test(name)
+  ) {
     throw new BadRequestException('Enter your full name, as on your ID (2 to 100 letters)');
   }
   return name;

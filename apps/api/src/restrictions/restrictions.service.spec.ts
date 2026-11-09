@@ -1,4 +1,9 @@
-import { BadRequestException, ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import {
   AccountStatus,
   AppealOutcome,
@@ -401,7 +406,10 @@ describe('Restrictions and appeals', () => {
 
     it('keeps the words out of the audit trail and push text', async () => {
       await inForce();
-      const sent = JSON.stringify([audit.logEvent.mock.calls, notifications.notifyUsers.mock.calls]);
+      const sent = JSON.stringify([
+        audit.logEvent.mock.calls,
+        notifications.notifyUsers.mock.calls,
+      ]);
       expect(sent).not.toContain(REASON);
       expect(sent).not.toContain(MESSAGE);
     });
@@ -599,7 +607,7 @@ describe('Restrictions and appeals', () => {
       const filed = await appeals.fileMine('subject', id, grounds);
       await expect(appeals.detail(ORG, filed.id, admin)).rejects.toThrow(NotFoundException);
       await expect(appeals.decide(ORG, filed.id, admin, stands)).rejects.toThrow(NotFoundException);
-      expect((await appeals.list(ORG, otherAdmin, true))).toEqual([]);
+      expect(await appeals.list(ORG, otherAdmin, true)).toEqual([]);
     });
 
     it('cannot be heard by someone who took part in the decision', async () => {
@@ -719,7 +727,9 @@ describe('Restrictions and appeals', () => {
     it('cannot be heard by whoever decided it', async () => {
       closed(ComplaintLevel.COORDINATOR, { decidedByUserId: 'admin' });
       const filed = await appeals.fileOnComplaint(ORG, 'c1', 'subject', grounds);
-      await expect(appeals.decide(ORG, filed.id, admin, stands)).rejects.toThrow(ForbiddenException);
+      await expect(appeals.decide(ORG, filed.id, admin, stands)).rejects.toThrow(
+        ForbiddenException,
+      );
       await appeals.decide(ORG, filed.id, otherAdmin, stands);
       expect(rows(Complaint)[0]!['outcome']).toBe(ComplaintOutcome.NOT_UPHELD);
     });
@@ -731,5 +741,4 @@ describe('Restrictions and appeals', () => {
       await expect(appeals.detail(ORG, filed.id, admin)).rejects.toThrow(NotFoundException);
     });
   });
-
 });

@@ -258,7 +258,12 @@ export function Closures({
           value: 'DEATH_CERTIFICATE',
           choices: Object.entries(EVIDENCE).map(([value, label]) => ({ value, label })),
         },
-        { key: 'evidenceLast4', label: 'Last 4 characters of its number', minLength: 4, maxLength: 4 },
+        {
+          key: 'evidenceLast4',
+          label: 'Last 4 characters of its number',
+          minLength: 4,
+          maxLength: 4,
+        },
         { key: 'reason', label: 'Notes (staff only)', minLength: 10, maxLength: 4000 },
       ],
       submit: (values) =>
@@ -279,8 +284,18 @@ export function Closures({
         'For one person with two accounts. A Municipality Admin decides. Nothing is merged: the credits in the closed account stay frozen there for good.',
       submitLabel: 'Send report',
       fields: [
-        { key: 'member', label: 'The account to close: member number or phone', minLength: 3, maxLength: 50 },
-        { key: 'primaryMember', label: 'The account that stays: member number or phone', minLength: 3, maxLength: 50 },
+        {
+          key: 'member',
+          label: 'The account to close: member number or phone',
+          minLength: 3,
+          maxLength: 50,
+        },
+        {
+          key: 'primaryMember',
+          label: 'The account that stays: member number or phone',
+          minLength: 3,
+          maxLength: 50,
+        },
         { key: 'reason', label: 'How you know (staff only)', minLength: 10, maxLength: 4000 },
       ],
       submit: (values) =>
@@ -327,7 +342,12 @@ export function Closures({
       submitLabel: 'Recommend',
       fields: [
         { key: 'receiver', label: 'Nominee’s phone or member number', minLength: 3, maxLength: 50 },
-        { key: 'notes', label: 'How you verified them (staff only)', minLength: 3, maxLength: 2000 },
+        {
+          key: 'notes',
+          label: 'How you verified them (staff only)',
+          minLength: 3,
+          maxLength: 2000,
+        },
       ],
       submit: (values) =>
         backend(`${base}/closures/${row.id}/recommend-transfer`, 'POST', {
@@ -339,7 +359,8 @@ export function Closures({
   const fileForMember = (row: ClosureDetail) =>
     openAction({
       title: 'File an appeal for this person',
-      description: 'For someone who does not use the app. Write what they told you. A Super Admin hears it.',
+      description:
+        'For someone who does not use the app. Write what they told you. A Super Admin hears it.',
       submitLabel: 'File appeal',
       fields: [{ key: 'grounds', label: 'Their reasons', minLength: 10, maxLength: 2000 }],
       submit: (values) =>
@@ -538,8 +559,8 @@ export function Closures({
               )}
               {detail.earlierNominees.map((earlier) => (
                 <p key={earlier.since} className="help-text">
-                  Before: {earlier.name} · {earlier.phone} · named {indiaTime(earlier.since)}, changed{' '}
-                  {indiaTime(earlier.replacedAt ?? earlier.since)}
+                  Before: {earlier.name} · {earlier.phone} · named {indiaTime(earlier.since)},
+                  changed {indiaTime(earlier.replacedAt ?? earlier.since)}
                 </p>
               ))}
               {detail.status === 'CLOSED' && (
@@ -550,8 +571,8 @@ export function Closures({
               )}
               {detail.transferWaiting && (
                 <p>
-                  <strong>Waiting for a decision:</strong> to {detail.transfer.receiverName || 'No name'}{' '}
-                  · {detail.transfer.receiverPhone}
+                  <strong>Waiting for a decision:</strong> to{' '}
+                  {detail.transfer.receiverName || 'No name'} · {detail.transfer.receiverPhone}
                   {detail.transfer.receiverMatchesNominee === false
                     ? ' · this is not the phone the member named, so a Super Admin must decide'
                     : ''}

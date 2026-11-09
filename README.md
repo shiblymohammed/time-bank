@@ -1,13 +1,13 @@
 # Kottakkal Time Bank
 
-> Centrally governed, multi-municipality volunteer assistance platform.
-> Eligible people request practical help; verified volunteers provide assistance and accumulate **lifetime universal
-> time credits**. A separate **loyalty-coin** system provides merchant-funded offers.
+> Centrally governed, multi-municipality volunteer assistance platform. Eligible people request practical help; verified
+> volunteers provide assistance and accumulate **lifetime universal time credits**. A separate **loyalty-coin** system
+> provides merchant-funded offers.
 
 **Status:** Milestone 4 backend implemented — verification and human release review pending
 
-**PRD:** `Kottakkal_Time_Bank_PRD_107_Decisions.md` — 107 confirmed product decisions
-**Team:** Solo developer · AI-assisted coding (D#107) · Quality-first, milestone-driven (D#106)
+**PRD:** `Kottakkal_Time_Bank_PRD_107_Decisions.md` — 107 confirmed product decisions **Team:** Solo developer ·
+AI-assisted coding (D#107) · Quality-first, milestone-driven (D#106)
 
 ---
 
@@ -169,5 +169,5 @@ This is a solo-developer project. All changes require:
 
 ---
 
-_Kottakkal Time Bank — connecting verified volunteers with eligible beneficiaries._
-_PRD version 1.0 · 107 confirmed product decisions · Built with quality-first milestone approach._ # time-bank
+_Kottakkal Time Bank — connecting verified volunteers with eligible beneficiaries._ _PRD version 1.0 · 107 confirmed
+product decisions · Built with quality-first milestone approach._ # time-bank

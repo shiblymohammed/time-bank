@@ -8,8 +8,7 @@ tests and documented limitations.
 
 ## Status on 9 November 2026
 
-The pilot runs after every feature is built. Order of work: finish M7 sign-off, M6, M8, front-end polish, M9, then
-deploy and pilot.
+The pilot runs after every feature is built. Order of work: M6, M8, front-end polish, M9, then deploy and pilot.
 
 | Step                           | Status                                                                                                         |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------- |
@@ -19,7 +18,7 @@ deploy and pilot.
 | M4 Time credits                | Built                                                                                                          |
 | M5 Team and transfer workflows | Built. See [TEAM_VISITS.md](TEAM_VISITS.md)                                                                    |
 | Second-organization readiness  | See below; needed before a second organization goes live                                                       |
-| M7 Governance and reporting    | Built. See [REPORTS.md](REPORTS.md) and the documents linked under Milestone 7                                 |
+| M7 Governance and reporting    | Development complete. See [M7 sign-off](M7_SIGNOFF.md) and [reports](REPORTS.md)                               |
 | M6, M8                         | Planned                                                                                                        |
 | M9 Production hardening        | Security review done; the rest planned                                                                         |
 | Kottakkal pilot                | Last, after all of the above. Staff second factor and restore drill built; see [checklist](PILOT_CHECKLIST.md) |
@@ -194,6 +193,8 @@ Rules, API and limits: [TEAM_VISITS.md](TEAM_VISITS.md).
 ---
 
 ## Milestone 7: Governance and reporting
+
+Development complete; validation and remaining release limits are recorded in [M7_SIGNOFF.md](M7_SIGNOFF.md).
 
 **Goal:** Alerts, complaints, suspensions, bans, appeals, account closure, analytics/exports, external sponsor reports.
 

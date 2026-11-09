@@ -110,7 +110,11 @@ describe('MembershipsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
-    mockUserRepo.findOne.mockResolvedValue({ id: 'u-1', fullName: 'Test Person', primaryOrgId: 'org-1' });
+    mockUserRepo.findOne.mockResolvedValue({
+      id: 'u-1',
+      fullName: 'Test Person',
+      primaryOrgId: 'org-1',
+    });
     mockRoleHierarchyService.assertValidMembershipRole.mockReset();
     mockRoleHierarchyService.assertCanGrantRole.mockReset();
     mockAuthorizationService.assertNoSelfEscalation.mockReset();
@@ -227,7 +231,9 @@ describe('MembershipsService', () => {
     it('asks for a full name the first time someone joins', async () => {
       mockOrgRepo.findOne.mockResolvedValueOnce({ id: 'org-1', status: OrganizationStatus.ACTIVE });
       mockUserRepo.findOne.mockResolvedValueOnce({ id: 'u-1', fullName: null });
-      await expect(service.apply('org-1', 'u-1', {})).rejects.toThrow('Enter your full name to join');
+      await expect(service.apply('org-1', 'u-1', {})).rejects.toThrow(
+        'Enter your full name to join',
+      );
     });
 
     it('saves the full name given when joining', async () => {
@@ -246,7 +252,11 @@ describe('MembershipsService', () => {
       mockMembershipRepo.findOne.mockResolvedValueOnce(null);
       mockMembershipRepo.create.mockImplementation((dto) => ({ id: 'm-new', ...dto }));
       mockMembershipRepo.save.mockImplementation((m) => Promise.resolve(m));
-      mockUserRepo.findOne.mockResolvedValueOnce({ id: 'u-1', fullName: 'Test Person', primaryOrgId: 'org-1' });
+      mockUserRepo.findOne.mockResolvedValueOnce({
+        id: 'u-1',
+        fullName: 'Test Person',
+        primaryOrgId: 'org-1',
+      });
     };
 
     it('stores the requested role and volunteer answers with known skills', async () => {

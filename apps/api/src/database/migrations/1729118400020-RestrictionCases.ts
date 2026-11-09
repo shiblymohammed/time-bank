@@ -150,7 +150,9 @@ export class RestrictionCases1729118400020 implements MigrationInterface {
       );
     `);
     await q.query(`CREATE INDEX idx_appeals_status ON appeals (status, level, created_at DESC);`);
-    await q.query(`CREATE INDEX idx_appeals_org ON appeals (organization_id, status, created_at DESC);`);
+    await q.query(
+      `CREATE INDEX idx_appeals_org ON appeals (organization_id, status, created_at DESC);`,
+    );
     // One appeal per decision: a restriction has one, and a complaint one at each level above it.
     await q.query(`
       CREATE UNIQUE INDEX uq_appeal_restriction ON appeals (restriction_case_id)

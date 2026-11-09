@@ -47,15 +47,15 @@ describe('PeopleService.decideIdentity', () => {
       verificationStatus: 'VERIFIED',
       documentLast4: '9012',
     });
-    const params = manager.query.mock.calls.flatMap((call) => (call as unknown[])[1] as unknown[] ?? []);
+    const params = manager.query.mock.calls.flatMap(
+      (call) => ((call as unknown[])[1] as unknown[]) ?? [],
+    );
     expect(params).not.toContain('123456789012');
   });
 
   it('refuses a document that already verifies another account', async () => {
     const { service, audit } = setup({ user_id: 'u-2', membership_number: 'KTB-9' });
-    await expect(service.decideIdentity('org', 'm-1', 'staff', verify)).rejects.toThrow(
-      /KTB-9/,
-    );
+    await expect(service.decideIdentity('org', 'm-1', 'staff', verify)).rejects.toThrow(/KTB-9/);
     expect(audit.logEvent).toHaveBeenCalledWith(
       expect.objectContaining({ eventType: 'IDENTITY_DUPLICATE_DOCUMENT' }),
     );

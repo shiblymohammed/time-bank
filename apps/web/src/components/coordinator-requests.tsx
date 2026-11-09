@@ -792,23 +792,23 @@ export function CoordinatorRequests({
               {!a.pausedAt &&
                 (a.status === 'IN_PROGRESS' ||
                   (a.status === 'COMPLETED' && a.reviewRequestedAt && !a.reviewResolvedAt)) && (
-                <div className="action-row">
-                  <button
-                    className="btn btn-secondary"
-                    disabled={pending}
-                    onClick={() => decideVisit(a, true)}
-                  >
-                    Pay for visit
-                  </button>
-                  <button
-                    className="btn btn-danger"
-                    disabled={pending}
-                    onClick={() => decideVisit(a, false)}
-                  >
-                    Not delivered
-                  </button>
-                </div>
-              )}
+                  <div className="action-row">
+                    <button
+                      className="btn btn-secondary"
+                      disabled={pending}
+                      onClick={() => decideVisit(a, true)}
+                    >
+                      Pay for visit
+                    </button>
+                    <button
+                      className="btn btn-danger"
+                      disabled={pending}
+                      onClick={() => decideVisit(a, false)}
+                    >
+                      Not delivered
+                    </button>
+                  </div>
+                )}
             </div>
           ))}
           <h3>Matching rounds</h3>

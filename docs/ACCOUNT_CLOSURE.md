@@ -7,15 +7,16 @@ dies or one person holds two accounts, and who can receive a deceased member's t
 
 A coordinator reports. Someone above decides. Nothing changes until they do, so one wrong report cannot lock anyone out.
 
-| Case                                       | Decided by         |
-| ------------------------------------------ | ------------------ |
-| A member or coordinator in one community   | Municipality Admin |
-| A person in more than one community        | Super Admin        |
-| A Municipality Admin or Super Admin        | Super Admin        |
-| Reopening a closure made by mistake        | Super Admin        |
+| Case                                     | Decided by         |
+| ---------------------------------------- | ------------------ |
+| A member or coordinator in one community | Municipality Admin |
+| A person in more than one community      | Super Admin        |
+| A Municipality Admin or Super Admin      | Super Admin        |
+| Reopening a closure made by mistake      | Super Admin        |
 
 - Nobody acts on their own case, and the person concerned cannot read the staff record.
-- Whoever reported cannot approve. Whoever recommended a transfer cannot approve it, and neither can whoever receives it.
+- Whoever reported cannot approve. Whoever recommended a transfer cannot approve it, and neither can whoever receives
+  it.
 - The last Super Admin cannot be closed.
 
 ## Nominee
@@ -34,10 +35,11 @@ The coordinator records the date of death and the type of record seen, with its 
 On approval:
 
 - The person is signed out and cannot sign in. Waiting pushes are dropped and phones are unregistered.
-- Requests that have not started are cancelled with the same generic wording as a restriction. Offers and upcoming visits
-  are released, and coordinators are told about visits under way.
+- Requests that have not started are cancelled with the same generic wording as a restriction. Offers and upcoming
+  visits are released, and coordinators are told about visits under way.
 - Memberships are revoked, and so are staff roles. Open restriction recommendations end.
-- The wallet is closed and keeps its balance, so nothing can be spent. Credits from a visit that finishes later are held.
+- The wallet is closed and keeps its balance, so nothing can be spent. Credits from a visit that finishes later are
+  held.
 
 Records stay where they are, with no separate archive. Closed people drop out of working lists but stay visible to
 administrators.
@@ -54,8 +56,8 @@ administrators.
 
 ## When an account is a duplicate
 
-The coordinator names both accounts. Staff see each one's balance, ID check, visits and requests side by side. An ID check
-that refuses a repeated document points staff here.
+The coordinator names both accounts. Staff see each one's balance, ID check, visits and requests side by side. An ID
+check that refuses a repeated document points staff here.
 
 On approval, the same stopping steps run, with these differences:
 
@@ -65,10 +67,10 @@ On approval, the same stopping steps run, with these differences:
 
 ## Fixing a mistake
 
-| Mistake                 | Who         | What comes back                                                     |
-| ----------------------- | ----------- | ------------------------------------------------------------------- |
-| Wrong death report      | Super Admin | Sign-in, memberships, wallet and credits held while closed          |
-| Wrong duplicate closure | Super Admin, on appeal or by reopening | The same, and the document if nobody else now holds it |
+| Mistake                 | Who                                    | What comes back                                            |
+| ----------------------- | -------------------------------------- | ---------------------------------------------------------- |
+| Wrong death report      | Super Admin                            | Sign-in, memberships, wallet and credits held while closed |
+| Wrong duplicate closure | Super Admin, on appeal or by reopening | The same, and the document if nobody else now holds it     |
 
 - Staff roles never return by themselves. Someone must grant them again.
 - Requests that were cancelled stay cancelled.

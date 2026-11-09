@@ -9,8 +9,12 @@ const OTHER = '11111111-2222-3333-4444-555555555555';
 
 describe('organizationsNamedBy', () => {
   it('finds communities in the path, the orgId query and the header', () => {
-    expect(organizationsNamedBy({ originalUrl: `/api/organizations/${KOTTAKKAL}/requests?page=1` })).toEqual([KOTTAKKAL]);
-    expect(organizationsNamedBy({ originalUrl: `/api/v1/organizations/${OTHER.toUpperCase()}` })).toEqual([OTHER]);
+    expect(
+      organizationsNamedBy({ originalUrl: `/api/organizations/${KOTTAKKAL}/requests?page=1` }),
+    ).toEqual([KOTTAKKAL]);
+    expect(
+      organizationsNamedBy({ originalUrl: `/api/v1/organizations/${OTHER.toUpperCase()}` }),
+    ).toEqual([OTHER]);
     expect(
       organizationsNamedBy({
         originalUrl: '/api/x',
@@ -33,7 +37,9 @@ describe('AuthGuard keeps an app sign-in inside its community', () => {
     const token = await jwt.signAsync({ sub: 'user-1', ...claims });
     const config = new ConfigService();
     const values: Record<string, string> = { JWT_SECRET: secret, STAFF_SECOND_FACTOR: 'off' };
-    jest.spyOn(config, 'get').mockImplementation((key: string, fallback?: unknown) => values[key] ?? fallback);
+    jest
+      .spyOn(config, 'get')
+      .mockImplementation((key: string, fallback?: unknown) => values[key] ?? fallback);
     jest.spyOn(config, 'getOrThrow').mockImplementation((key: string) => values[key]);
     const guard = new AuthGuard(jwt, config);
     const request: any = { originalUrl: url, headers: { authorization: `Bearer ${token}` } };
@@ -43,14 +49,16 @@ describe('AuthGuard keeps an app sign-in inside its community', () => {
   }
 
   it('allows its own community and routes without one', async () => {
-    await expect(run(`/api/organizations/${KOTTAKKAL}/requests`, { appOrg: KOTTAKKAL })).resolves.toBe(true);
+    await expect(
+      run(`/api/organizations/${KOTTAKKAL}/requests`, { appOrg: KOTTAKKAL }),
+    ).resolves.toBe(true);
     await expect(run('/api/wallet/transactions', { appOrg: KOTTAKKAL })).resolves.toBe(true);
   });
 
   it('refuses another community', async () => {
-    await expect(run(`/api/organizations/${OTHER}/requests`, { appOrg: KOTTAKKAL })).rejects.toThrow(
-      ForbiddenException,
-    );
+    await expect(
+      run(`/api/organizations/${OTHER}/requests`, { appOrg: KOTTAKKAL }),
+    ).rejects.toThrow(ForbiddenException);
   });
 
   it('leaves sign-ins without an app community, like the panel, unchanged', async () => {

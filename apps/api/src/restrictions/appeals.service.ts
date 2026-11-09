@@ -108,24 +108,29 @@ export class AppealsService {
       accountStatus: user?.status ?? null,
       restricted: platform || user?.status === AccountStatus.DUPLICATE_CLOSED,
       appealWindowDays: APPEAL_WINDOW_DAYS,
-      items: [...closedItems, ...cases.map((found) => {
-        const appeal = byCase.get(found.id);
-        const deadline = appealDeadline(found.decidedAt);
-        return {
-          id: found.id,
-          reference: found.reference,
-          restrictionType: found.restrictionType,
-          scope: found.scope,
-          communityName:
-            found.scope === RestrictionScope.COMMUNITY ? (found.organization?.name ?? null) : null,
-          // Only this: never the reason, who recommended it, or any complaint behind it.
-          memberMessage: found.memberMessage,
-          since: found.decidedAt,
-          appealDeadline: deadline,
-          canAppeal: !appeal && deadline !== null && now <= deadline,
-          appeal: appeal ? memberAppealView(appeal) : null,
-        };
-      })],
+      items: [
+        ...closedItems,
+        ...cases.map((found) => {
+          const appeal = byCase.get(found.id);
+          const deadline = appealDeadline(found.decidedAt);
+          return {
+            id: found.id,
+            reference: found.reference,
+            restrictionType: found.restrictionType,
+            scope: found.scope,
+            communityName:
+              found.scope === RestrictionScope.COMMUNITY
+                ? (found.organization?.name ?? null)
+                : null,
+            // Only this: never the reason, who recommended it, or any complaint behind it.
+            memberMessage: found.memberMessage,
+            since: found.decidedAt,
+            appealDeadline: deadline,
+            canAppeal: !appeal && deadline !== null && now <= deadline,
+            appeal: appeal ? memberAppealView(appeal) : null,
+          };
+        }),
+      ],
     };
   }
 
@@ -145,9 +150,7 @@ export class AppealsService {
       }
       const found = await this.lockCase(manager, caseId);
       if (!found || found.subjectUserId !== userId) throw new NotFoundException('Case not found');
-      return memberAppealView(
-        await this.fileOnCase(manager, found, userId, dto, ipAddress, now),
-      );
+      return memberAppealView(await this.fileOnCase(manager, found, userId, dto, ipAddress, now));
     });
   }
 
@@ -242,7 +245,12 @@ export class AppealsService {
       // It leaves the hands of whoever decided it, with its history.
       complaint.level = level;
       await manager.save(Complaint, complaint);
-      await this.complaints.addAppealEvent(manager, complaint.id, userId, ComplaintEventType.APPEALED);
+      await this.complaints.addAppealEvent(
+        manager,
+        complaint.id,
+        userId,
+        ComplaintEventType.APPEALED,
+      );
       await this.complaints.notifyHandlers(
         manager,
         complaint,
@@ -377,7 +385,9 @@ export class AppealsService {
         appeal.restrictionCase?.recommendedByUserId === context.userId ||
         appeal.closure?.reportedByUserId === context.userId
       ) {
-        throw new ForbiddenException('You had a part in this decision, so someone else must hear it');
+        throw new ForbiddenException(
+          'You had a part in this decision, so someone else must hear it',
+        );
       }
 
       if (appeal.kind === AppealKind.RESTRICTION) {
@@ -496,7 +506,9 @@ export class AppealsService {
     const earlier = await this.findRetry(manager, filedBy, dto);
     if (earlier) return earlier;
     if (found.kind !== ClosureKind.DUPLICATE) {
-      throw new ConflictException('A Super Admin can reopen this account if it was closed by mistake');
+      throw new ConflictException(
+        'A Super Admin can reopen this account if it was closed by mistake',
+      );
     }
     if (found.status !== ClosureStatus.CLOSED) {
       throw new ConflictException('This account is not closed');
@@ -552,7 +564,13 @@ export class AppealsService {
       );
       return;
     }
-    await this.closures.addEvent(manager, found.id, actorId, ClosureEventType.APPEAL_STANDS, dto.notes);
+    await this.closures.addEvent(
+      manager,
+      found.id,
+      actorId,
+      ClosureEventType.APPEAL_STANDS,
+      dto.notes,
+    );
   }
 
   /** The appeal's level becomes the complaint's. A Super Admin's decision is final. */

@@ -24,7 +24,7 @@ export const STAFF_CODE_MAX_ATTEMPTS = 5;
 /** Shows enough of an address to recognise it: "a***@example.com". */
 export function maskEmail(email: string): string {
   const [local, domain] = email.split('@');
-  return `${(local ?? "").slice(0, 1)}***@${domain ?? ""}`;
+  return `${(local ?? '').slice(0, 1)}***@${domain ?? ''}`;
 }
 
 export function normalizeEmail(raw: string): string {
@@ -118,7 +118,13 @@ export class StaffCodeService {
          AND (staff_code_sent_at IS NULL
               OR staff_code_sent_at < now() - ($5 || ' seconds')::interval)
        RETURNING id`,
-      [sessionId, userId, this.hash(sessionId, code), String(STAFF_CODE_TTL_MS), String(STAFF_CODE_RESEND_SECONDS)],
+      [
+        sessionId,
+        userId,
+        this.hash(sessionId, code),
+        String(STAFF_CODE_TTL_MS),
+        String(STAFF_CODE_RESEND_SECONDS),
+      ],
     );
     // TypeORM returns [rows, count] for an UPDATE ... RETURNING on Postgres.
     const updatedRows = Array.isArray(updated[0]) ? (updated[0] as unknown[]) : updated;
@@ -130,7 +136,10 @@ export class StaffCodeService {
       );
       if (!session) throw new UnauthorizedException('Sign in again to continue');
       if (session.staff_verified_at) return { sent: false, verified: true };
-      throw new HttpException('Wait a minute before asking for another code', HttpStatus.TOO_MANY_REQUESTS);
+      throw new HttpException(
+        'Wait a minute before asking for another code',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
     }
 
     try {
@@ -223,9 +232,15 @@ export class StaffCodeService {
           targetType: 'AUTHENTICATION_SESSION',
           ipAddress,
         });
-        throw new HttpException('Too many wrong codes. Ask for a new one.', HttpStatus.TOO_MANY_REQUESTS);
+        throw new HttpException(
+          'Too many wrong codes. Ask for a new one.',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
       case 'LOCKED':
-        throw new HttpException('Too many wrong codes. Ask for a new one.', HttpStatus.TOO_MANY_REQUESTS);
+        throw new HttpException(
+          'Too many wrong codes. Ask for a new one.',
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
       default:
         // 400, not 401: a wrong code must not read as an expired sign-in.
         throw new BadRequestException('That code is not right');
@@ -235,9 +250,12 @@ export class StaffCodeService {
   /** Super Admin sets or clears a person's email for staff codes. */
   async setEmail(adminId: string, userId: string, rawEmail: string | null, ipAddress?: string) {
     const authority = await this.authorization.evaluateGlobalAccess(adminId);
-    if (!authority.isSuperAdmin) throw new ForbiddenException('Current Super Admin authority required');
+    if (!authority.isSuperAdmin)
+      throw new ForbiddenException('Current Super Admin authority required');
     const email = rawEmail ? normalizeEmail(rawEmail) : null;
-    const [user] = await this.dataSource.query('SELECT id, email FROM users WHERE id = $1', [userId]);
+    const [user] = await this.dataSource.query('SELECT id, email FROM users WHERE id = $1', [
+      userId,
+    ]);
     if (!user) throw new NotFoundException('User not found');
     if (email) {
       const [taken] = await this.dataSource.query(

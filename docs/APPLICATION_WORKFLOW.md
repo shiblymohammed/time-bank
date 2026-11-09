@@ -11,7 +11,8 @@ zones, verify volunteer skills and handle matching exceptions.
 
 ## 2. Sign in and join
 
-1. The Android member verifies a phone number through Firebase; the backend verifies the ID token and issues a Time Bank session. Legacy server OTP remains available for the dashboard and disposable QA.
+1. The Android member verifies a phone number through Firebase; the backend verifies the ID token and issues a Time Bank
+   session. Legacy server OTP remains available for the dashboard and disposable QA.
 2. The backend creates or finds their global account and universal time-credit wallet. Flutter loads their profile and
    available active organizations.
 3. The member selects an organization and applies as a volunteer, beneficiary or caregiver. Volunteers provide travel
@@ -111,15 +112,15 @@ implemented. After connection problems, refresh the affected screen before repea
 
 ## Known gaps and review findings
 
-| Priority           | Finding                                                                            | Current handling                                                                              |
-| ------------------ | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Fixed              | Confirmation used request-creation permission for caregivers                       | Separate confirmation/view checks; regression includes real PostgreSQL payment                |
-| Fixed              | A profile failure after OTP success forced reuse of a consumed OTP                 | Retry profile loading using the authenticated pending session                                 |
-| Fixed              | A failed wallet refresh could leave old wallet actions visible                     | Clear wallet/pool data before loading                                                         |
-| Production blocker | Production SMS gateway is unimplemented                                            | Android uses Firebase; the legacy dashboard OTP gateway still needs implementation                 |
-| Workflow gap       | No recurring matching progression worker                                           | Coordinator must evaluate progression/dispatch explicitly                                     |
-| Fixed              | Request creation previously persisted before matching/audit finish               | Creation, initial matching and audit now share one transaction; retries/quota serialize per community |
-| Unimplemented      | Binary uploads, offline sync, emergency alerts, merchant redemption, pool spending | Do not present these as live features                                                         |
+| Priority           | Finding                                                                            | Current handling                                                                                      |
+| ------------------ | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| Fixed              | Confirmation used request-creation permission for caregivers                       | Separate confirmation/view checks; regression includes real PostgreSQL payment                        |
+| Fixed              | A profile failure after OTP success forced reuse of a consumed OTP                 | Retry profile loading using the authenticated pending session                                         |
+| Fixed              | A failed wallet refresh could leave old wallet actions visible                     | Clear wallet/pool data before loading                                                                 |
+| Production blocker | Production SMS gateway is unimplemented                                            | Android uses Firebase; the legacy dashboard OTP gateway still needs implementation                    |
+| Workflow gap       | No recurring matching progression worker                                           | Coordinator must evaluate progression/dispatch explicitly                                             |
+| Fixed              | Request creation previously persisted before matching/audit finish                 | Creation, initial matching and audit now share one transaction; retries/quota serialize per community |
+| Unimplemented      | Binary uploads, offline sync, emergency alerts, merchant redemption, pool spending | Do not present these as live features                                                                 |
 
 The request-creation risk is identified from service ordering; failure injection for that path was not added in this
 review. It needs separate transactional and retry-recovery work. No claim is made that all possible bugs are eliminated.
@@ -146,8 +147,12 @@ PostgreSQL integration tests, 20 dashboard tests and 56 Flutter tests.
 
 ## Firebase phone login — 2 November 2026
 
-Android now uses Firebase phone verification and the backend ID-token exchange. Account restrictions, membership approval and permissions remain controlled by Time Bank. Deployment configuration, signing certificates, SMS quota and untested real-device steps are documented in [Firebase setup](FIREBASE_PHONE_AUTH.md).
+Android now uses Firebase phone verification and the backend ID-token exchange. Account restrictions, membership
+approval and permissions remain controlled by Time Bank. Deployment configuration, signing certificates, SMS quota and
+untested real-device steps are documented in [Firebase setup](FIREBASE_PHONE_AUTH.md).
 
 ## Full follow-up audit
 
-See [the full application audit](FULL_APPLICATION_AUDIT_2026-11-02.md) for confirmed fixes, remaining production login, matching progression, discovery privacy, retry/time-zone and session issues. The local QA OTP path now requires explicit opt-in and must stay private.
+See [the full application audit](FULL_APPLICATION_AUDIT_2026-11-02.md) for confirmed fixes, remaining production login,
+matching progression, discovery privacy, retry/time-zone and session issues. The local QA OTP path now requires explicit
+opt-in and must stay private.

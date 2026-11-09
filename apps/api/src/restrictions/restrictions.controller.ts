@@ -314,7 +314,10 @@ export class CentralRestrictionsController {
   }
 
   @Get('appeals/:appealId')
-  appealDetail(@Param('appealId', ParseUUIDPipe) appealId: string, @CurrentUserId() userId: string) {
+  appealDetail(
+    @Param('appealId', ParseUUIDPipe) appealId: string,
+    @CurrentUserId() userId: string,
+  ) {
     return this.appeals.detail(null, appealId, centralContext(userId));
   }
 
@@ -339,7 +342,7 @@ export class MyRestrictionController {
 
   @Get()
   @ApiOperation({
-    summary: "What restricts this person, what they are told, and whether they can appeal",
+    summary: 'What restricts this person, what they are told, and whether they can appeal',
   })
   mine(@CurrentUserId() userId: string) {
     return this.appeals.mine(userId);

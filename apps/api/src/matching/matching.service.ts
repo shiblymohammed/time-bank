@@ -533,7 +533,8 @@ export class MatchingService {
             beneficiary: needsAddress(assignment.status)
               ? {
                   fullName: assignment.serviceRequest.beneficiaryMembership?.user?.fullName ?? null,
-                  phoneE164: assignment.serviceRequest.beneficiaryMembership?.user?.phoneE164 ?? null,
+                  phoneE164:
+                    assignment.serviceRequest.beneficiaryMembership?.user?.phoneE164 ?? null,
                 }
               : null,
             locationWardNumber: assignment.serviceRequest.locationWardNumber,

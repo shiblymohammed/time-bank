@@ -14,7 +14,15 @@ import {
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { Request } from 'express';
-import { IsEmail, IsOptional, IsString, Length, Matches, MaxLength, ValidateIf } from 'class-validator';
+import {
+  IsEmail,
+  IsOptional,
+  IsString,
+  Length,
+  Matches,
+  MaxLength,
+  ValidateIf,
+} from 'class-validator';
 import { UserRole } from '@ktb/shared-types';
 import { AuthGuard, AuthenticatedUserPayload as AuthenticatedUser } from './guards/auth.guard';
 import { StaffCodeService } from './staff-code.service';
@@ -67,7 +75,9 @@ export class StaffCodeController {
   @UseGuards(AuthGuard)
   @Throttle(codeLimit)
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Check the emailed staff code and unlock staff powers for this sign-in' })
+  @ApiOperation({
+    summary: 'Check the emailed staff code and unlock staff powers for this sign-in',
+  })
   verify(@Req() req: AuthedRequest, @Body() dto: VerifyStaffCodeDto) {
     return this.staffCodes.verify(req.user!.id, req.user!.sessionId, dto.code, req.ip);
   }

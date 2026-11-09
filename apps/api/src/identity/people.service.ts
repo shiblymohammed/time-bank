@@ -61,10 +61,10 @@ export class PeopleService {
 
   async setOwnName(userId: string, rawName: unknown) {
     const fullName = cleanPersonName(rawName);
-    await this.dataSource.query('UPDATE users SET full_name = $2, updated_at = now() WHERE id = $1', [
-      userId,
-      fullName,
-    ]);
+    await this.dataSource.query(
+      'UPDATE users SET full_name = $2, updated_at = now() WHERE id = $1',
+      [userId, fullName],
+    );
     return { fullName };
   }
 
@@ -77,10 +77,21 @@ export class PeopleService {
       [membershipId, orgId],
     );
     if (!row) throw new NotFoundException('Member not found in this organization');
-    return row as { id: string; user_id: string; membership_number: string | null; full_name: string | null };
+    return row as {
+      id: string;
+      user_id: string;
+      membership_number: string | null;
+      full_name: string | null;
+    };
   }
 
-  async setMemberName(orgId: string, membershipId: string, actorId: string, rawName: unknown, ip?: string) {
+  async setMemberName(
+    orgId: string,
+    membershipId: string,
+    actorId: string,
+    rawName: unknown,
+    ip?: string,
+  ) {
     const fullName = cleanPersonName(rawName);
     const member = await this.member(orgId, membershipId);
     await this.dataSource.transaction(async (m) => {
@@ -108,7 +119,13 @@ export class PeopleService {
     orgId: string,
     membershipId: string,
     actorId: string,
-    input: { decision: IdentityDecision; documentType?: string; documentNumber?: string; notes?: string; reason?: string },
+    input: {
+      decision: IdentityDecision;
+      documentType?: string;
+      documentNumber?: string;
+      notes?: string;
+      reason?: string;
+    },
     ip?: string,
   ) {
     const member = await this.member(orgId, membershipId);
@@ -126,7 +143,13 @@ export class PeopleService {
                verified_at = NULL, verified_by = $5, document_type = NULL, document_last4 = NULL,
                document_fingerprint = NULL, verification_notes = NULL, updated_at = now()
            WHERE user_id = $1`,
-          [member.user_id, IdentityVerificationStatus.REJECTED, IdentityVerificationLevel.BASIC, reason, actorId],
+          [
+            member.user_id,
+            IdentityVerificationStatus.REJECTED,
+            IdentityVerificationLevel.BASIC,
+            reason,
+            actorId,
+          ],
         );
         await this.audit.logEvent(
           {

@@ -623,9 +623,12 @@ export class MembershipsService {
         { selectedRole: query.role, activeRole: RoleGrantStatus.ACTIVE },
       );
     if (query.search?.trim())
-      qb.andWhere('(m.membershipNumber ILIKE :search OR user.phoneE164 ILIKE :search OR user.fullName ILIKE :search)', {
-        search: `%${query.search.trim()}%`,
-      });
+      qb.andWhere(
+        '(m.membershipNumber ILIKE :search OR user.phoneE164 ILIKE :search OR user.fullName ILIKE :search)',
+        {
+          search: `%${query.search.trim()}%`,
+        },
+      );
 
     qb.orderBy('m.createdAt', 'DESC');
     qb.take(Math.min(query.limit ?? 50, 100));

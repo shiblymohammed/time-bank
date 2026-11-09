@@ -60,7 +60,9 @@ export class Complaints1729118400019 implements MigrationInterface {
         created_at TIMESTAMPTZ NOT NULL DEFAULT now()
       );
     `);
-    await q.query(`CREATE INDEX idx_complaint_events ON complaint_events (complaint_id, created_at);`);
+    await q.query(
+      `CREATE INDEX idx_complaint_events ON complaint_events (complaint_id, created_at);`,
+    );
     await q.query(`
       CREATE FUNCTION reject_complaint_event_change() RETURNS trigger AS $$
       BEGIN

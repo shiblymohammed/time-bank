@@ -159,7 +159,12 @@ export function useWaitingRestrictions(
     const controller = new AbortController();
     const check = () =>
       Promise.all([
-        backend<CaseSummary[]>(casesPath(organizationId, true), 'GET', undefined, controller.signal),
+        backend<CaseSummary[]>(
+          casesPath(organizationId, true),
+          'GET',
+          undefined,
+          controller.signal,
+        ),
         backend<AppealSummary[]>(
           appealsPath(organizationId, true),
           'GET',
@@ -171,9 +176,7 @@ export function useWaitingRestrictions(
           setCount(
             cases.filter(
               (row) =>
-                row.status === 'RECOMMENDED' ||
-                row.reinstatementRecommended ||
-                row.reviewDue,
+                row.status === 'RECOMMENDED' || row.reinstatementRecommended || row.reviewDue,
             ).length + appeals.length,
           ),
         )
@@ -258,7 +261,12 @@ export function RestrictionCases({
     setCaseDetail(null);
     if (!chosenCase) return;
     const controller = new AbortController();
-    backend<CaseDetail>(`${base}/restriction-cases/${chosenCase}`, 'GET', undefined, controller.signal)
+    backend<CaseDetail>(
+      `${base}/restriction-cases/${chosenCase}`,
+      'GET',
+      undefined,
+      controller.signal,
+    )
       .then(setCaseDetail)
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return;
@@ -314,7 +322,12 @@ export function RestrictionCases({
             { value: 'PERMANENT_BAN', label: 'Ban' },
           ],
         },
-        { key: 'reason', label: 'Reason and evidence (staff only)', minLength: 10, maxLength: 4000 },
+        {
+          key: 'reason',
+          label: 'Reason and evidence (staff only)',
+          minLength: 10,
+          maxLength: 4000,
+        },
         { key: 'complaintReference', label: 'Complaint reference', optional: true, maxLength: 30 },
       ],
       submit: (values) =>
@@ -395,15 +408,14 @@ export function RestrictionCases({
   const fileForMember = (row: CaseDetail) =>
     openAction({
       title: 'File an appeal for this person',
-      description: 'For someone who does not use the app. Write what they told you. A Super Admin hears it.',
+      description:
+        'For someone who does not use the app. Write what they told you. A Super Admin hears it.',
       submitLabel: 'File appeal',
       fields: [{ key: 'grounds', label: 'Their reasons', minLength: 10, maxLength: 2000 }],
       submit: (values) =>
-        backend(
-          `/organizations/${row.organizationId}/restriction-cases/${row.id}/appeal`,
-          'POST',
-          { grounds: values.grounds },
-        ),
+        backend(`/organizations/${row.organizationId}/restriction-cases/${row.id}/appeal`, 'POST', {
+          grounds: values.grounds,
+        }),
     });
 
   const hearAppeal = (row: AppealDetail) =>
@@ -414,7 +426,7 @@ export function RestrictionCases({
           ? 'If you overturn it, access and credits come back at once. Requests that were cancelled stay cancelled. Your decision is final.'
           : row.kind === 'CLOSURE'
             ? 'If you overturn it, the account and its credits come back at once, but staff roles must be granted again. Your decision is final.'
-          : 'If you overturn it, the complaint’s outcome changes. The member reads your message in the app.',
+            : 'If you overturn it, the complaint’s outcome changes. The member reads your message in the app.',
       submitLabel: 'Decide appeal',
       fields: [
         {
@@ -465,8 +477,8 @@ export function RestrictionCases({
         </div>
       </div>
       <p className="help-text">
-        A coordinator recommends and a Municipality Admin decides. Nobody acts on their own case, and
-        whoever recommended cannot also decide. You see only cases at your level.
+        A coordinator recommends and a Municipality Admin decides. Nobody acts on their own case,
+        and whoever recommended cannot also decide. You see only cases at your level.
       </p>
       {error && (
         <p role="alert" className="error-message">
@@ -558,7 +570,8 @@ export function RestrictionCases({
               </p>
               <p>
                 <strong>The account that stays:</strong>{' '}
-                {appealDetail.closure.primaryName || 'No name'} · {appealDetail.closure.primaryPhone}
+                {appealDetail.closure.primaryName || 'No name'} ·{' '}
+                {appealDetail.closure.primaryPhone}
               </p>
               <p>
                 <strong>Notes:</strong> {appealDetail.closure.reason}
@@ -761,25 +774,23 @@ export function RestrictionCases({
                   Recommend reinstatement
                 </button>
               )}
-            {caseDetail.status === 'ACTIVE' &&
-              canDecide &&
-              caseDetail.reinstatementRecommended && (
-                <button
-                  className="btn btn-secondary"
-                  disabled={pending}
-                  onClick={() =>
-                    notesAction(
-                      'Refuse reinstatement',
-                      'The restriction stays in force.',
-                      'Refuse',
-                      'Your reason (staff only)',
-                      `${caseBase}/refuse-reinstatement`,
-                    )
-                  }
-                >
-                  Refuse reinstatement
-                </button>
-              )}
+            {caseDetail.status === 'ACTIVE' && canDecide && caseDetail.reinstatementRecommended && (
+              <button
+                className="btn btn-secondary"
+                disabled={pending}
+                onClick={() =>
+                  notesAction(
+                    'Refuse reinstatement',
+                    'The restriction stays in force.',
+                    'Refuse',
+                    'Your reason (staff only)',
+                    `${caseBase}/refuse-reinstatement`,
+                  )
+                }
+              >
+                Refuse reinstatement
+              </button>
+            )}
             {caseDetail.status === 'ACTIVE' &&
               (isGlobal || (canDecide && caseDetail.reinstatementRecommended)) && (
                 <button

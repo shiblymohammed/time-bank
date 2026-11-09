@@ -1,0 +1,156 @@
+{
+  "date": "2026-11-09",
+  "command": "pnpm audit --prod --registry=https://registry.npmjs.org --json",
+  "counts": {
+    "info": 0,
+    "low": 0,
+    "moderate": 6,
+    "high": 0,
+    "critical": 0
+  },
+  "remediated": [
+    {
+      "package": "@grpc/grpc-js",
+      "from": "1.9.16",
+      "to": "1.14.7",
+      "scope": "@firebase/firestore",
+      "advisories": [
+        "https://github.com/advisories/GHSA-m9gg-hp2v-232j",
+        "https://github.com/advisories/GHSA-f596-whhp-79r4"
+      ]
+    }
+  ],
+  "remaining": [
+    {
+      "package": "file-type",
+      "severity": "moderate",
+      "versions": ["20.4.1"],
+      "patchedVersions": ">=21.3.1",
+      "advisory": "https://github.com/advisories/GHSA-5v7r-6r5c-r473",
+      "paths": [
+        "apps__api>@nestjs/common>file-type",
+        "apps__api>@nestjs/config>@nestjs/common>file-type",
+        "apps__api>@nestjs/core>@nestjs/common>file-type",
+        "apps__api>@nestjs/core>@nestjs/platform-express>@nestjs/common>file-type",
+        "apps__api>@nestjs/jwt>@nestjs/common>file-type",
+        "apps__api>@nestjs/platform-express>@nestjs/common>file-type",
+        "apps__api>@nestjs/platform-express>@nestjs/core>@nestjs/common>file-type",
+        "apps__api>@nestjs/swagger>@nestjs/common>file-type",
+        "apps__api>@nestjs/swagger>@nestjs/core>@nestjs/common>file-type",
+        "apps__api>@nestjs/swagger>@nestjs/core>@nestjs/platform-express>@nestjs/common>file-type",
+        "apps__api>@nestjs/swagger>@nestjs/mapped-types>@nestjs/common>file-type",
+        "apps__api>@nestjs/terminus>@nestjs/common>file-type",
+        "apps__api>@nestjs/terminus>@nestjs/core>@nestjs/common>file-type",
+        "apps__api>@nestjs/terminus>@nestjs/core>@nestjs/platform-express>@nestjs/common>file-type",
+        "apps__api>@nestjs/terminus>@nestjs/typeorm>@nestjs/common>file-type",
+        "apps__api>@nestjs/terminus>@nestjs/typeorm>@nestjs/core>@nestjs/common>file-type",
+        "apps__api>@nestjs/terminus>@nestjs/typeorm>@nestjs/core>@nestjs/platform-express>@nestjs/common>file-type",
+        "apps__api>@nestjs/throttler>@nestjs/common>file-type",
+        "apps__api>@nestjs/throttler>@nestjs/core>@nestjs/common>file-type",
+        "apps__api>@nestjs/throttler>@nestjs/core>@nestjs/platform-express>@nestjs/common>file-type",
+        "apps__api>@nestjs/typeorm>@nestjs/common>file-type",
+        "apps__api>@nestjs/typeorm>@nestjs/core>@nestjs/common>file-type",
+        "apps__api>@nestjs/typeorm>@nestjs/core>@nestjs/platform-express>@nestjs/common>file-type"
+      ]
+    },
+    {
+      "package": "file-type",
+      "severity": "moderate",
+      "versions": ["20.4.1"],
+      "patchedVersions": ">=21.3.2",
+      "advisory": "https://github.com/advisories/GHSA-j47w-4g3g-c36v",
+      "paths": [
+        "apps__api>@nestjs/common>file-type",
+        "apps__api>@nestjs/config>@nestjs/common>file-type",
+        "apps__api>@nestjs/core>@nestjs/common>file-type",
+        "apps__api>@nestjs/core>@nestjs/platform-express>@nestjs/common>file-type",
+        "apps__api>@nestjs/jwt>@nestjs/common>file-type",
+        "apps__api>@nestjs/platform-express>@nestjs/common>file-type",
+        "apps__api>@nestjs/platform-express>@nestjs/core>@nestjs/common>file-type",
+        "apps__api>@nestjs/swagger>@nestjs/common>file-type",
+        "apps__api>@nestjs/swagger>@nestjs/core>@nestjs/common>file-type",
+        "apps__api>@nestjs/swagger>@nestjs/core>@nestjs/platform-express>@nestjs/common>file-type",
+        "apps__api>@nestjs/swagger>@nestjs/mapped-types>@nestjs/common>file-type",
+        "apps__api>@nestjs/terminus>@nestjs/common>file-type",
+        "apps__api>@nestjs/terminus>@nestjs/core>@nestjs/common>file-type",
+        "apps__api>@nestjs/terminus>@nestjs/core>@nestjs/platform-express>@nestjs/common>file-type",
+        "apps__api>@nestjs/terminus>@nestjs/typeorm>@nestjs/common>file-type",
+        "apps__api>@nestjs/terminus>@nestjs/typeorm>@nestjs/core>@nestjs/common>file-type",
+        "apps__api>@nestjs/terminus>@nestjs/typeorm>@nestjs/core>@nestjs/platform-express>@nestjs/common>file-type",
+        "apps__api>@nestjs/throttler>@nestjs/common>file-type",
+        "apps__api>@nestjs/throttler>@nestjs/core>@nestjs/common>file-type",
+        "apps__api>@nestjs/throttler>@nestjs/core>@nestjs/platform-express>@nestjs/common>file-type",
+        "apps__api>@nestjs/typeorm>@nestjs/common>file-type",
+        "apps__api>@nestjs/typeorm>@nestjs/core>@nestjs/common>file-type",
+        "apps__api>@nestjs/typeorm>@nestjs/core>@nestjs/platform-express>@nestjs/common>file-type"
+      ]
+    },
+    {
+      "package": "@nestjs/core",
+      "severity": "moderate",
+      "versions": ["10.4.22"],
+      "patchedVersions": ">=11.1.18",
+      "advisory": "https://github.com/advisories/GHSA-36xv-jgw5-4q75",
+      "paths": [
+        "apps__api>@nestjs/core",
+        "apps__api>@nestjs/platform-express>@nestjs/core",
+        "apps__api>@nestjs/swagger>@nestjs/core",
+        "apps__api>@nestjs/terminus>@nestjs/core",
+        "apps__api>@nestjs/terminus>@nestjs/typeorm>@nestjs/core",
+        "apps__api>@nestjs/throttler>@nestjs/core",
+        "apps__api>@nestjs/typeorm>@nestjs/core"
+      ]
+    },
+    {
+      "package": "uuid",
+      "severity": "moderate",
+      "versions": ["9.0.1", "8.3.2"],
+      "patchedVersions": ">=11.1.1",
+      "advisory": "https://github.com/advisories/GHSA-w5hq-g745-h8pq",
+      "paths": [
+        "apps__api>@nestjs/terminus>@nestjs/typeorm>uuid",
+        "apps__api>@nestjs/typeorm>uuid",
+        "apps__api>exceljs>uuid"
+      ]
+    },
+    {
+      "package": "glob",
+      "severity": "moderate",
+      "versions": ["10.5.0", "13.0.6"],
+      "patchedVersions": ">=14.0.2",
+      "advisory": "https://github.com/advisories/GHSA-3g3m-2fjr-6pw4",
+      "paths": [
+        "apps__api>@nestjs/terminus>@nestjs/typeorm>typeorm>glob",
+        "apps__api>@nestjs/terminus>typeorm>glob",
+        "apps__api>@nestjs/typeorm>typeorm>glob",
+        "apps__api>firebase-admin>@google-cloud/firestore>@google-cloud/firestore-api>google-gax>google-auth-library>gcp-metadata>gaxios>rimraf>glob",
+        "apps__api>firebase-admin>@google-cloud/firestore>@google-cloud/firestore-api>google-gax>rimraf>glob",
+        "apps__api>typeorm>glob",
+        "apps__api>rimraf>glob"
+      ]
+    },
+    {
+      "package": "minimatch",
+      "severity": "moderate",
+      "versions": ["9.0.9", "10.2.6"],
+      "patchedVersions": ">=11.0.1",
+      "advisory": "https://github.com/advisories/GHSA-g3hv-75wg-m249",
+      "paths": [
+        "apps__api>@nestjs/terminus>@nestjs/typeorm>typeorm>glob>minimatch",
+        "apps__api>@nestjs/terminus>typeorm>glob>minimatch",
+        "apps__api>@nestjs/typeorm>typeorm>glob>minimatch",
+        "apps__api>firebase-admin>@google-cloud/firestore>@google-cloud/firestore-api>google-gax>google-auth-library>gcp-metadata>gaxios>rimraf>glob>minimatch",
+        "apps__api>firebase-admin>@google-cloud/firestore>@google-cloud/firestore-api>google-gax>rimraf>glob>minimatch",
+        "apps__api>typeorm>glob>minimatch",
+        "apps__api>rimraf>glob>minimatch",
+        "packages__eslint-config>@typescript-eslint/eslint-plugin>@typescript-eslint/parser>@typescript-eslint/typescript-estree>minimatch",
+        "packages__eslint-config>@typescript-eslint/eslint-plugin>@typescript-eslint/type-utils>@typescript-eslint/typescript-estree>minimatch",
+        "packages__eslint-config>@typescript-eslint/eslint-plugin>@typescript-eslint/type-utils>@typescript-eslint/utils>@typescript-eslint/typescript-estree>minimatch",
+        "packages__eslint-config>@typescript-eslint/eslint-plugin>@typescript-eslint/utils>@typescript-eslint/typescript-estree>minimatch",
+        "packages__eslint-config>@typescript-eslint/parser>@typescript-eslint/typescript-estree>minimatch",
+        "packages__eslint-config>eslint-plugin-import>eslint-module-utils>@typescript-eslint/parser>@typescript-eslint/typescript-estree>minimatch",
+        "packages__eslint-config>eslint-plugin-import>@typescript-eslint/parser>@typescript-eslint/typescript-estree>minimatch"
+      ]
+    }
+  ]
+}

@@ -279,8 +279,7 @@ export function Complaints({
               {event.type !== 'RAISED' &&
                 event.type !== 'APPEALED' &&
                 ` by ${event.actorName || 'staff'}`}{' '}
-              ·{' '}
-              {indiaTime(event.createdAt)}
+              · {indiaTime(event.createdAt)}
               {event.notes && (
                 <>
                   <br />
@@ -360,7 +359,8 @@ export function Complaints({
                 onClick={() =>
                   openAction({
                     title: 'Close with a decision',
-                    description: 'The member gets a notification and reads your message in the app.',
+                    description:
+                      'The member gets a notification and reads your message in the app.',
                     submitLabel: 'Close complaint',
                     fields: [
                       {

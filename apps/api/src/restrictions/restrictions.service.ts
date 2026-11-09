@@ -28,11 +28,7 @@ import { OrganizationMembership } from '../memberships/entities/organization-mem
 import { NotificationsService } from '../notifications/notifications.service';
 import { RequestsService } from '../requests/requests.service';
 import { CreditControlsService } from '../time-ledger/credit-controls.service';
-import {
-  ApproveRestrictionDto,
-  CaseNoteDto,
-  RecommendRestrictionDto,
-} from './dto/restriction.dto';
+import { ApproveRestrictionDto, CaseNoteDto, RecommendRestrictionDto } from './dto/restriction.dto';
 import { Appeal } from './entities/appeal.entity';
 import { RestrictionCaseEvent } from './entities/restriction-case-event.entity';
 import { RestrictionCase } from './entities/restriction-case.entity';
@@ -402,14 +398,7 @@ export class RestrictionsService {
         },
         [context.userId],
       );
-      await this.audit(
-        manager,
-        'REINSTATEMENT_RECOMMENDED',
-        context.userId,
-        found,
-        ipAddress,
-        {},
-      );
+      await this.audit(manager, 'REINSTATEMENT_RECOMMENDED', context.userId, found, ipAddress, {});
       return summary(found);
     });
   }
@@ -651,7 +640,9 @@ export class RestrictionsService {
     if (found.complaintId) {
       const clear = await this.complaints.canHandle(manager, found.complaintId, context);
       if (!clear) {
-        throw new ForbiddenException('You are part of the complaint behind this. A Super Admin must decide.');
+        throw new ForbiddenException(
+          'You are part of the complaint behind this. A Super Admin must decide.',
+        );
       }
     }
   }
@@ -965,7 +956,9 @@ function summary(found: RestrictionCase, appeal?: Appeal | null) {
     reinstatementRecommended: Boolean(found.reinstatementRecommendedByUserId),
     reviewOn: found.reviewOn ?? null,
     reviewDue: Boolean(
-      found.status === RestrictionCaseStatus.ACTIVE && found.reviewOn && found.reviewOn <= new Date(),
+      found.status === RestrictionCaseStatus.ACTIVE &&
+      found.reviewOn &&
+      found.reviewOn <= new Date(),
     ),
     appealStatus: appeal?.status ?? null,
     createdAt: found.createdAt,

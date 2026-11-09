@@ -10,10 +10,7 @@ describe('cleanPersonName', () => {
     expect(cleanPersonName('ആശ മേനോൻ')).toBe('ആശ മേനോൻ');
   });
 
-  it.each(['', 'A', '12345', 'Asha <b>', 'asha@example.com', 'Asha\u0000'])(
-    'refuses %j',
-    (raw) => {
-      expect(() => cleanPersonName(raw)).toThrow(BadRequestException);
-    },
-  );
+  it.each(['', 'A', '12345', 'Asha <b>', 'asha@example.com', 'Asha\u0000'])('refuses %j', (raw) => {
+    expect(() => cleanPersonName(raw)).toThrow(BadRequestException);
+  });
 });
