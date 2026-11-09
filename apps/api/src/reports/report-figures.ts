@@ -67,6 +67,14 @@ export interface StaffFigures {
     released: number;
     corrected: number;
   };
+  loyalty: {
+    earned: number;
+    redeemed: number;
+    held: number;
+    retired: number;
+    restored: number;
+    approvedMerchants: number;
+  };
   byService: VisitRow[];
   byWard: VisitRow[];
   safety: {
@@ -293,6 +301,30 @@ async function creditFigures(m: EntityManager, org: string | null, p: ReportPeri
   };
 }
 
+async function loyaltyFigures(m: EntityManager, org: string | null, p: ReportPeriod) {
+  const [row] = await m.query(
+    `SELECT
+      COALESCE(sum(l.amount+l.frozen_delta) FILTER (WHERE l.tx_type IN ('SERVICE_EARNED','MILESTONE_EARNED','ENGAGEMENT_EARNED')),0) AS earned,
+      COALESCE(sum(-l.amount) FILTER (WHERE l.tx_type='REDEEMED'),0) AS redeemed,
+      COALESCE(sum(l.frozen_delta) FILTER (WHERE l.tx_type IN ('SERVICE_EARNED','MILESTONE_EARNED','ENGAGEMENT_EARNED') AND l.frozen_delta>0),0) AS held,
+      COALESCE(sum(-l.amount-l.frozen_delta) FILTER (WHERE l.tx_type='RETIRED'),0) AS retired,
+      COALESCE(sum(l.amount+l.frozen_delta) FILTER (WHERE l.tx_type='RESTORED'),0) AS restored,
+      (SELECT count(*) FROM organization_merchants m WHERE ($1::uuid IS NULL OR m.organization_id=$1)
+        AND m.status='APPROVED' AND ${notRetired('m.owner_user_id')}) AS merchants
+     FROM loyalty_ledger l WHERE ($1::uuid IS NULL OR l.organization_id=$1)
+       AND l.created_at>=$2 AND l.created_at<$3 AND ${notRetired('l.user_id')}`,
+    [org, p.startsAt, p.endsBefore],
+  );
+  return {
+    earned: num(row?.earned),
+    redeemed: num(row?.redeemed),
+    held: num(row?.held),
+    retired: num(row?.retired),
+    restored: num(row?.restored),
+    approvedMerchants: num(row?.merchants),
+  };
+}
+
 async function safetyFigures(m: EntityManager, org: string | null, p: ReportPeriod) {
   const inScope = '($1::uuid IS NULL OR organization_id=$1)';
   const [row]: Record<string, string>[] = await m.query(
@@ -368,6 +400,7 @@ export async function staffFigures(
     },
     speed: { typicalMinutesToVolunteer: await typicalWait(m, org, p) },
     credits: await creditFigures(m, org, p),
+    loyalty: await loyaltyFigures(m, org, p),
     byService: visitRows(await serviceTotals(m, org, p)),
     byWard: org === null ? [] : await wardRows(m, org, p),
     safety: await safetyFigures(m, org, p),

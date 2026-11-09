@@ -6,6 +6,7 @@ import {
   failure,
   GatewayError,
   isStaff,
+  isDashboardUser,
   respond,
   setSession,
   upstream,
@@ -22,8 +23,8 @@ async function profileWithStaffCheck(token: string) {
 export async function GET(request: NextRequest) {
   try {
     const result = await withSession(request, profileWithStaffCheck);
-    if (!isStaff(result.body as Record<string, unknown>))
-      throw new GatewayError('Administrator or coordinator access is required', 403);
+    if (!isDashboardUser(result.body as Record<string, unknown>))
+      throw new GatewayError('Staff or merchant access is required', 403);
     return respond(result.body, result.renewed);
   } catch (error) {
     return failure(error);
@@ -84,12 +85,12 @@ export async function POST(request: NextRequest) {
       );
     }
     const profile = await profileWithStaffCheck(session['accessToken'] as string);
-    if (!isStaff(profile)) {
+    if (!isDashboardUser(profile)) {
       await upstream('/auth/logout', {
         method: 'POST',
         body: { refreshToken: session['refreshToken'] },
       });
-      throw new GatewayError('This dashboard requires administrator or coordinator access', 403);
+      throw new GatewayError('This dashboard requires staff or merchant access', 403);
     }
     const response = respond(profile);
     setSession(response, session);

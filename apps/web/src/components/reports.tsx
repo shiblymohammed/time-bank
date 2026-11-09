@@ -46,6 +46,14 @@ type Figures = {
     corrected: number;
   };
   byService: VisitRow[];
+  loyalty?: {
+    earned: number;
+    redeemed: number;
+    held: number;
+    retired: number;
+    restored: number;
+    approvedMerchants: number;
+  };
   byWard: VisitRow[];
   safety: {
     alertsRaised: number;
@@ -393,6 +401,25 @@ export function Reports({
               ['Removed after a review', figures.credits.corrected],
             ]}
           />
+          {figures.loyalty && (
+            <>
+              <FigureTable
+                title="Local loyalty coins"
+                unit="Coins"
+                rows={[
+                  ['Earned, including held awards', figures.loyalty.earned],
+                  ['Redeemed with merchants', figures.loyalty.redeemed],
+                  ['Earnings placed on hold', figures.loyalty.held],
+                  ['Retired after account closure', figures.loyalty.retired],
+                  ['Restored after reopening', figures.loyalty.restored],
+                ]}
+              />
+              <FigureTable
+                title="Merchants, as of today"
+                rows={[['Approved business records', figures.loyalty.approvedMerchants]]}
+              />
+            </>
+          )}
           <FigureTable
             title="Safety and governance"
             rows={[

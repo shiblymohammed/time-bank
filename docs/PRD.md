@@ -494,7 +494,7 @@ status; this table is the summary.
 | Kottakkal pilot                | Deploy, real SMS and push, staff second factor, backup restore drill, pilot checklist                                           | Last, after remaining milestones              |
 | Second-organization readiness  | App locked to its organization (ITB-007), push per app, flavor builds per organization (ITB-003, ITB-011), dashboard subdomains | Before the second organization                |
 | M5 Teams and transfers         | Team headcount rules, separate timers, sequential transfers                                                                     | Built; see TEAM_VISITS.md                     |
-| M6 Loyalty and merchants       | Coins, merchant offers, approvals, QR and code redemption, recognition                                                          | Planned                                       |
+| M6 Loyalty and merchants       | Coins, merchant offers, approvals, QR and code redemption, recognition                                                          | Built in development; device review pending   |
 | M7 Governance and reporting    | Safety alerts, complaints, appeals, account closure, reports and sponsor exports                                                | Built                                         |
 | M8 Offline reliability         | Durable local queue, sync states, offline timers, field tests                                                                   | Planned                                       |
 | M9 Production hardening        | Load test (300 concurrent), PITR drill, monitoring, accessibility and Malayalam validation                                      | Partly done (security review)                 |

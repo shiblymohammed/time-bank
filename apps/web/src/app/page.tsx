@@ -9,6 +9,7 @@ import { Complaints, useOpenComplaints } from '@/components/complaints';
 import { RestrictionCases, useWaitingRestrictions } from '@/components/restriction-cases';
 import { Closures, useWaitingClosures } from '@/components/closures';
 import { Reports } from '@/components/reports';
+import { Loyalty } from '@/components/loyalty';
 import { ServiceOperations } from '@/components/service-operations';
 import { TimeCredits } from '@/components/time-credits';
 import { ApiManagement } from '@/components/api-management';
@@ -29,6 +30,7 @@ type Tab =
   | 'restrictions'
   | 'closures'
   | 'reports'
+  | 'loyalty'
   | 'audit';
 type Grant = { id: string; role: string; status: string };
 type Membership = {
@@ -212,6 +214,14 @@ const PAGES: {
     group: 'Governance',
     description: 'Community pools, member wallets and independent credit reviews',
   },
+
+  {
+    id: 'loyalty',
+    text: 'Loyalty and merchants',
+    icon: 'wallet',
+    group: 'Governance',
+    description: 'Local coins, merchant-funded offers and recognition',
+  },
   {
     id: 'restrictions',
     text: 'Restrictions',
@@ -250,7 +260,9 @@ const approved = (profile: Profile) =>
 const globalAdmin = (profile: Profile) =>
   approved(profile).some((member) => member.roles.includes('SUPER_ADMIN'));
 const staffMemberships = (profile: Profile) =>
-  approved(profile).filter((member) => member.roles.some((role) => STAFF.includes(role)));
+  approved(profile).filter((member) =>
+    member.roles.some((role) => STAFF.includes(role) || role === 'MERCHANT'),
+  );
 /** Words whose capitals a plain "Sentence case" would lose. */
 const LABELS: Record<string, string> = {
   ID_VERIFIED: 'ID verified',
@@ -298,7 +310,7 @@ function SignIn({ onSignedIn }: { onSignedIn: (profile: Profile) => void }) {
           <BrandMark />
         </div>
         <h1>Sign in to Indian Time Bank</h1>
-        <p>Administration for coordinators and organization staff.</p>
+        <p>For coordinators, administrators and local merchants.</p>
         <form
           className="stack"
           onSubmit={async (event) => {
@@ -681,12 +693,14 @@ export default function AdminDashboard(): React.JSX.Element {
     ? (approved(profile).find((member) => member.organizationId === tenant)?.roles ?? [])
     : [];
   const canManageRoles = isGlobal || localRoles.includes('MUNICIPALITY_ADMIN');
+  const isStaffScope = isGlobal || localRoles.some((role) => STAFF.includes(role));
+  const isMerchantScope = localRoles.includes('MERCHANT');
   const openSafetyAlerts = useOpenSafetyAlerts(
-    profile && tenant !== 'GLOBAL' ? tenant : null,
+    profile && isStaffScope && tenant !== 'GLOBAL' ? tenant : null,
     revision,
   );
   const openComplaints = useOpenComplaints(
-    Boolean(profile),
+    Boolean(profile) && isStaffScope,
     tenant === 'GLOBAL' ? null : tenant,
     revision,
   );
@@ -706,7 +720,10 @@ export default function AdminDashboard(): React.JSX.Element {
     ...(isGlobal ? ['MUNICIPALITY_ADMIN'] : []),
   ];
   const tabs = PAGES.filter(
-    (page) => (isGlobal || !page.centralOnly) && (canManageRoles || !page.managersOnly),
+    (page) =>
+      (isStaffScope || page.id === 'loyalty') &&
+      (isGlobal || !page.centralOnly) &&
+      (canManageRoles || !page.managersOnly),
   );
   const selectedOrg = organizations.find((organization) => organization.id === tenant);
   const page = tabs.find((item) => item.id === tab);
@@ -726,7 +743,12 @@ export default function AdminDashboard(): React.JSX.Element {
         ? previous
         : (staffMemberships(next)[0]?.organizationId ?? 'GLOBAL'),
     );
-    if (!central)
+    if (
+      !central &&
+      !approved(next).some((member) => member.roles.some((role) => STAFF.includes(role)))
+    )
+      setTab('loyalty');
+    else if (!central)
       setTab((current) =>
         [
           'organizations',
@@ -737,6 +759,7 @@ export default function AdminDashboard(): React.JSX.Element {
           'catalogue',
           'operations',
           'credits',
+          'loyalty',
         ].includes(current)
           ? current
           : 'requests',
@@ -846,6 +869,13 @@ export default function AdminDashboard(): React.JSX.Element {
   }, [searchText]);
   function changeScope(value: string) {
     setTenant(value);
+    if (
+      !isGlobal &&
+      !approved(profile!)
+        .find((member) => member.organizationId === value)
+        ?.roles.some((role) => STAFF.includes(role))
+    )
+      setTab('loyalty');
     setSearch('');
     setSearchText('');
     setOffset(0);
@@ -979,7 +1009,13 @@ export default function AdminDashboard(): React.JSX.Element {
           </div>
           <div className="user-meta">
             <p>{phone(profile.phoneE164)}</p>
-            <p>{isGlobal ? 'Central administrator' : 'Organization staff'}</p>
+            <p>
+              {isGlobal
+                ? 'Central administrator'
+                : isStaffScope
+                  ? 'Organization staff'
+                  : 'Merchant'}
+            </p>
           </div>
           <button
             className="icon-button"
@@ -1161,6 +1197,17 @@ export default function AdminDashboard(): React.JSX.Element {
                 onExpired={expired}
               />
             ))}
+          {tab === 'loyalty' && (
+            <Loyalty
+              key={tenant}
+              organizationId={tenant === 'GLOBAL' ? null : tenant}
+              isGlobal={isGlobal}
+              canManage={canManageRoles}
+              canProposeAwards={isStaffScope}
+              isMerchant={isMerchantScope}
+              onExpired={expired}
+            />
+          )}
           {tab === 'safety' &&
             (tenant === 'GLOBAL' ? (
               <p className="glass-panel empty-state">

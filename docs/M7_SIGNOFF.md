@@ -61,8 +61,8 @@ These limits are carried into later release validation; they are not additional 
   file-validation endpoint was found in the API. ExcelJS uses UUID v4, while its advisory concerns v3/v5/v6 buffer APIs.
   These source observations limit demonstrated reachability; they do not waive the findings or prove all transitive code
   safe. Glob/minimatch also occur in runtime dependencies and must remain in the review.
-- **Later milestones:** loyalty coins and retirement on closure are M6; durable offline queues are M8; load,
-  accessibility, Malayalam, monitoring and deployment validation remain M9/release work. Lost-phone/SIM recovery remains
-  a separate open M2 feature and must be scheduled before launch.
+- **Later milestones:** M6 now implements loyalty and its closure integration; see [M6 notes](LOYALTY_AND_MERCHANTS.md).
+  Durable offline queues are M8; load, accessibility, Malayalam, monitoring and deployment validation remain M9/release
+  work. Lost-phone/SIM recovery remains a separate open M2 feature and must be scheduled before launch.
 
 No real-account action, production migration, report distribution or deployment is part of this sign-off.

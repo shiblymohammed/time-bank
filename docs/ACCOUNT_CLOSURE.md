@@ -82,9 +82,15 @@ On approval, the same stopping steps run, with these differences:
 - Credits already passed on are not reversed. Staff correct them by hand with the existing credit tools.
 - If another account now holds the document, the reopened account goes back to unverified and needs a new ID check.
 
+## Loyalty integration (M6)
+
+Death retires unused local loyalty coins. A closed duplicate preserves its coins in its closed wallet; they never
+transfer to the primary account or a nominee. Pending redemption codes are cancelled. Mistaken reopening restores
+retired coins through compensating entries, including independently verified earnings received after closure. An
+overlapping restriction can keep restored earnings on hold. See [LOYALTY_AND_MERCHANTS.md](LOYALTY_AND_MERCHANTS.md).
+
 ## Not in this work
 
-- **Loyalty coins (D#46, D#90):** retiring a closed account's coins belongs to Milestone 6, which is on its list.
 - **A living member closing their own account:** not in the PRD. Check with a lawyer about India's data protection law.
 - **Lost phone or SIM recovery (FR-IDENT-05):** not built, and needs a place in the order of work.
 - **Reused phone numbers:** a closed account keeps its number. A later Super Admin action could release it.

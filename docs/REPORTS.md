@@ -24,6 +24,8 @@ or CSV. The screen and the files show the same figures.
   helped, volunteers who helped; split by service and by ward.
 - **Speed:** the typical (median) time from a request to a volunteer accepting.
 - **Time credits:** earned, donated, spent, put on hold, released from hold, removed after a review.
+- **Local loyalty (M6):** coins earned (including held awards), merchant redemptions, earnings placed on hold,
+  retirement and restoration; approved business records as of today. These figures stay separate from time credits.
 - **Safety and governance:** counts of alerts, complaints by outcome, restrictions, appeals and closures.
 
 The all-communities summary adds one row per community and leaves out wards, since each community numbers its own.
@@ -80,7 +82,7 @@ Left out: safety alerts, complaints, restrictions, appeals, closures, budgets an
   font, with the Milestone 9 Malayalam validation. Excel and CSV are not affected.
 - **NFR-14, UC-28 and AT-29** are cited in the PRD but never defined. The privacy rules come from FR-REPORT-02 alone,
   and the limit of 5 is a choice to confirm before real use.
-- **Not in this work:** charts and trend graphs (front-end polish), loyalty figures (Milestone 6).
+- **Not in this work:** charts and trend graphs (front-end polish).
 - A community's own label for a service appears in its reports, so staff should not put a person's name in one.
 
 ## Commit validation — 9 November 2026

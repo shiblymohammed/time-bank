@@ -24,6 +24,8 @@ import { SafetyModule } from './safety/safety.module';
 import { ComplaintsModule } from './complaints/complaints.module';
 import { ReportsModule } from './reports/reports.module';
 import { RestrictionsModule } from './restrictions/restrictions.module';
+import { LoyaltyModule } from './loyalty/loyalty.module';
+import { MerchantsModule } from './merchants/merchants.module';
 
 /**
  * Root application module.
@@ -107,6 +109,8 @@ import { RestrictionsModule } from './restrictions/restrictions.module';
     ComplaintsModule,
     RestrictionsModule,
     ReportsModule,
+    LoyaltyModule,
+    MerchantsModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

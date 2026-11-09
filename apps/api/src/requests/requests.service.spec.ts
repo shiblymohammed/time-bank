@@ -1,3 +1,4 @@
+import { LoyaltyService } from '../loyalty/loyalty.service';
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
@@ -130,6 +131,7 @@ describe('RequestsService', () => {
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         RequestsService,
+        { provide: LoyaltyService, useValue: { awardVerifiedService: jest.fn() } },
         { provide: getRepositoryToken(ServiceRequest), useValue: mockRequestRepo },
         { provide: getRepositoryToken(RequestCancellation), useValue: mockCancellationRepo },
         { provide: getRepositoryToken(RequestRescheduleHistory), useValue: mockRescheduleRepo },

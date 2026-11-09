@@ -1,3 +1,6 @@
+import { LoyaltyService } from '../src/loyalty/loyalty.service';
+import { MerchantsService } from '../src/merchants/merchants.service';
+import { LoyaltyAndMerchants1729118400023 } from '../src/database/migrations/1729118400023-LoyaltyAndMerchants';
 import { ClosuresService } from '../src/closures/closures.service';
 import { SafetyService } from '../src/safety/safety.service';
 import { NomineeService } from '../src/closures/nominee.service';
@@ -9,7 +12,7 @@ import { BeneficiariesService } from '../src/beneficiaries/beneficiaries.service
 import { BeneficiaryEligibility } from '../src/beneficiaries/entities/beneficiary-eligibility.entity';
 import { CaregiverAuthorization } from '../src/beneficiaries/entities/caregiver-authorization.entity';
 import 'reflect-metadata';
-import { randomUUID } from 'crypto';
+import { createHmac, randomUUID } from 'crypto';
 import { join } from 'path';
 import {
   BadRequestException,
@@ -62,6 +65,7 @@ import { TimeCreditLedgerEntry } from '../src/time-ledger/entities/time-credit-l
 import { UniversalTimeWallet } from '../src/identity/entities/universal-time-wallet.entity';
 import {
   AccountStatus,
+  AssignmentReviewDecision,
   AppealOutcome,
   ClosureEvidenceType,
   ClosureKind,
@@ -147,6 +151,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       RestrictionCases1729118400020,
       AccountClosures1729118400021,
       SponsorReports1729118400022,
+      LoyaltyAndMerchants1729118400023,
     ],
     synchronize: false,
     extra: {
@@ -155,6 +160,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       options: '-c lock_timeout=10000 -c statement_timeout=15000',
     },
   });
+  let loyalty: LoyaltyService;
   let service: MatchingService;
   let requests: RequestsService;
   let audit: AuditService;
@@ -184,6 +190,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       db.getRepository(MembershipRoleGrant),
       db.getRepository(GlobalAccountRestriction),
     );
+    loyalty = new LoyaltyService(db, audit, authorization);
     ledger = new TimeLedgerService(
       db.getRepository(UniversalTimeWallet),
       db.getRepository(TimeCreditLedgerEntry),
@@ -241,6 +248,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         db,
         new PushSender(new ConfigService()),
       ),
+      loyalty,
     );
   });
 
@@ -2650,11 +2658,14 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       const migration = new CreditControls1729118400010();
       // Account closures redefine the ledger's checks, so they come off first and go back last.
       const closures = new AccountClosures1729118400021();
+      const coins = new LoyaltyAndMerchants1729118400023();
       await db.transaction(async (m) => {
+        await coins.down(m.queryRunner!);
         await closures.down(m.queryRunner!);
         await migration.down(m.queryRunner!);
         await migration.up(m.queryRunner!);
         await closures.up(m.queryRunner!);
+        await coins.up(m.queryRunner!);
       });
       await open();
       await expect(db.transaction((m) => migration.down(m.queryRunner!))).rejects.toThrow(
@@ -2763,6 +2774,730 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
           [orgA, user],
         ),
       ).rejects.toThrow(/chk_membership_application_details/);
+    });
+  });
+
+  describe('M6 loyalty and merchants', () => {
+    let root: string, admin: string, merchant: string;
+    let merchants: MerchantsService;
+    const secret = 'm6-disposable-qa-secret-not-for-production';
+    const policy = {
+      enabled: true,
+      coinsPerHour: 60,
+      engagementCap: 50,
+      campaignCapPerHour: 30,
+      milestones: [{ minutes: 60, name: 'First verified hour', coins: 20 }],
+    };
+    const grant = async (phone: string, role: string) => {
+      const user = await id('INSERT INTO users(phone_e164) VALUES($1) RETURNING id', [phone]);
+      const member = await id(
+        "INSERT INTO organization_memberships(organization_id,user_id,status) VALUES($1,$2,'APPROVED') RETURNING id",
+        [orgA, user],
+      );
+      await db.query(
+        'INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,$2,$3)',
+        [member, role, coordinator],
+      );
+      return user;
+    };
+    const wallet = async (user = volunteer, org = orgA) =>
+      (
+        await db.query(
+          'SELECT balance_coins::float AS balance,frozen_coins::float AS frozen,status FROM loyalty_wallets WHERE user_id=$1 AND organization_id=$2',
+          [user, org],
+        )
+      )[0];
+    const started = async (minutes = 60, member = memberA, org = orgA) => {
+      const now = new Date();
+      const beginning = new Date(now.getTime() - minutes * 60000);
+      const req = await request(beginning.toISOString(), org);
+      const assignment = await offer(req, member, org);
+      await service.acceptOffer(org, assignment, member, {});
+      await service.startAssignment(org, assignment, member, undefined, beginning);
+      return { req, assignment, now };
+    };
+    const paid = async (minutes = 60, member = memberA, org = orgA) => {
+      const visit = await started(minutes, member, org);
+      await service.finishAssignment(
+        org,
+        visit.assignment,
+        member,
+        { minutes },
+        undefined,
+        visit.now,
+      );
+      const beneficiary = (
+        await db.query('SELECT user_id FROM organization_memberships WHERE id=$1', [
+          org === orgA ? beneficiaryA : beneficiaryB,
+        ])
+      )[0].user_id;
+      const context = await authorization.evaluateOrganizationAccess(beneficiary, org);
+      await requests.confirmCompletion(
+        org,
+        visit.req,
+        visit.assignment,
+        beneficiary,
+        context,
+        { minutes },
+        undefined,
+        visit.now,
+      );
+      return visit;
+    };
+    const openOffer = async (limit = 5) => {
+      const business = await merchants.apply(orgA, merchant, {
+        name: 'QA merchant',
+        address: 'QA market, shop 1',
+        phone: '+919000000066',
+      });
+      await merchants.decideMerchant(orgA, admin, business.id, 'APPROVED');
+      const offer = await merchants.proposeOffer(orgA, merchant, {
+        title: 'Merchant-funded discount',
+        description: 'Ten percent off a purchase',
+        terms: 'Funded by the merchant. One use of this code.',
+        coins: 10,
+        startsAt: new Date(new Date().getTime() - 3600000).toISOString(),
+        endsAt: new Date(new Date().getTime() + 86400000).toISOString(),
+        redemptionLimit: limit,
+        clientOperationId: randomUUID(),
+      });
+      await merchants.decideOffer(orgA, admin, offer.id, true);
+      return offer;
+    };
+    const governance = async () => {
+      const notifications = new NotificationsService(
+        db.getRepository(PushDevice),
+        db,
+        new PushSender(new ConfigService()),
+      );
+      const restrictions = new RestrictionsService(
+        db,
+        notifications,
+        audit,
+        requests,
+        new CreditControlsService(db, audit),
+        {} as never,
+        loyalty,
+      );
+      const closures = new ClosuresService(
+        db,
+        notifications,
+        audit,
+        restrictions,
+        new CreditControlsService(db, audit),
+        loyalty,
+      );
+      return {
+        restrictions,
+        closures,
+        coordinator: await authorization.evaluateOrganizationAccess(coordinator, orgA),
+        admin: await authorization.evaluateOrganizationAccess(admin, orgA),
+        root: await authorization.evaluateOrganizationAccess(root, orgA),
+      };
+    };
+
+    beforeEach(async () => {
+      root = await grant('+919000000099', 'SUPER_ADMIN');
+      admin = await grant('+919000000098', 'MUNICIPALITY_ADMIN');
+      merchant = await grant('+919000000097', 'MERCHANT');
+      merchants = new MerchantsService(db, loyalty, new ConfigService({ JWT_SECRET: secret }));
+      await loyalty.setPolicy(root, policy);
+      await loyalty.setProgram(orgA, admin, { enabled: true, leaderboardEnabled: true });
+    });
+
+    it('awards service and a milestone atomically, separately from time credits, once per assignment', async () => {
+      const visit = await paid();
+      expect(await wallet()).toEqual({ balance: 80, frozen: 0, status: 'ACTIVE' });
+      await Promise.all([
+        db.transaction((m) => loyalty.awardVerifiedService(m, visit.assignment)),
+        db.transaction((m) => loyalty.awardVerifiedService(m, visit.assignment)),
+      ]);
+      expect(await wallet()).toEqual({ balance: 80, frozen: 0, status: 'ACTIVE' });
+      expect(await db.query('SELECT id FROM loyalty_ledger')).toHaveLength(2);
+      expect(
+        (
+          await db.query(
+            'SELECT balance_credits::float AS balance FROM universal_time_wallets WHERE user_id=$1',
+            [volunteer],
+          )
+        )[0].balance,
+      ).toBe(1);
+      await paid();
+      expect(await wallet()).toEqual({ balance: 140, frozen: 0, status: 'ACTIVE' });
+    });
+
+    it('earns coins even when whole-hour time-credit rules yield zero', async () => {
+      await db.query('UPDATE global_service_definitions SET allow_partial_hours=false');
+      await paid(30);
+      expect(await wallet()).toEqual({ balance: 30, frozen: 0, status: 'ACTIVE' });
+      expect(
+        await db.query("SELECT id FROM time_credit_ledger WHERE tx_type='SERVICE_EARNED'"),
+      ).toHaveLength(0);
+    });
+
+    it('records disabled service verification without retroactive minting after policy activation', async () => {
+      await loyalty.setProgram(orgA, admin, { enabled: false, leaderboardEnabled: false });
+      const visit = await paid();
+      await loyalty.setProgram(orgA, admin, { enabled: true, leaderboardEnabled: true });
+      await db.transaction((m) => loyalty.awardVerifiedService(m, visit.assignment));
+      expect(await wallet()).toEqual({ balance: 0, frozen: 0, status: 'ACTIVE' });
+    });
+
+    it('does not award unconfirmed or replaced work, and keeps coins local', async () => {
+      const visit = await started();
+      await expect(
+        db.transaction((m) => loyalty.awardVerifiedService(m, visit.assignment)),
+      ).rejects.toThrow('confirmed');
+      await db.query(
+        "UPDATE volunteer_assignments SET status='REPLACED',finished_at=$2,reported_minutes=60 WHERE id=$1",
+        [visit.assignment, visit.now],
+      );
+      await expect(
+        db.transaction((m) => loyalty.awardVerifiedService(m, visit.assignment)),
+      ).rejects.toThrow('confirmed');
+      await paid(60, memberB, orgB);
+      expect(await wallet(volunteer, orgB)).toEqual({ balance: 0, frozen: 0, status: 'ACTIVE' });
+      expect(await wallet()).toBeUndefined();
+    });
+
+    it('rolls back confirmation, both ledgers and coin balances when loyalty audit fails', async () => {
+      const visit = await started();
+      await service.finishAssignment(
+        orgA,
+        visit.assignment,
+        memberA,
+        { minutes: 60 },
+        undefined,
+        visit.now,
+      );
+      const original = audit.logEvent.bind(audit);
+      jest.spyOn(audit, 'logEvent').mockImplementation(async (event, manager) => {
+        if (event.eventType === 'LOYALTY_SERVICE_VERIFIED')
+          throw new Error('Forced loyalty audit failure');
+        return original(event, manager);
+      });
+      const beneficiary = (
+        await db.query('SELECT user_id FROM organization_memberships WHERE id=$1', [beneficiaryA])
+      )[0].user_id;
+      const context = await authorization.evaluateOrganizationAccess(beneficiary, orgA);
+      await expect(
+        requests.confirmCompletion(
+          orgA,
+          visit.req,
+          visit.assignment,
+          beneficiary,
+          context,
+          {},
+          undefined,
+          visit.now,
+        ),
+      ).rejects.toThrow('Forced loyalty');
+      expect(await db.query('SELECT id FROM loyalty_ledger')).toHaveLength(0);
+      expect(await db.query('SELECT id FROM time_credit_ledger')).toHaveLength(0);
+      expect(
+        (await db.getRepository(VolunteerAssignment).findOneByOrFail({ id: visit.assignment }))
+          .confirmedAt,
+      ).toBeNull();
+    });
+
+    it('requires central policy authority and independent engagement approval within its cap', async () => {
+      await expect(loyalty.setPolicy(admin, policy)).rejects.toThrow(ForbiddenException);
+      const award = await loyalty.proposeEngagement(orgA, coordinator, {
+        userId: volunteer,
+        coins: 25,
+        reason: 'Verified community participation',
+        clientOperationId: randomUUID(),
+      });
+      await expect(loyalty.decideEngagement(orgA, coordinator, award.id, true)).rejects.toThrow(
+        ForbiddenException,
+      );
+      await loyalty.decideEngagement(orgA, admin, award.id, true);
+      await expect(loyalty.decideEngagement(orgA, admin, award.id, true)).rejects.toThrow(
+        ConflictException,
+      );
+      expect(await wallet()).toMatchObject({ balance: 25 });
+      await expect(
+        loyalty.proposeEngagement(orgA, coordinator, {
+          userId: volunteer,
+          coins: 51,
+          reason: 'Above the central cap',
+          clientOperationId: randomUUID(),
+        }),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('publishes only independently approved merchant offers, and refuses wrong-community access', async () => {
+      const business = await merchants.apply(orgA, merchant, {
+        name: 'QA shop',
+        address: 'Test community market',
+        phone: '+919000000066',
+      });
+      await expect(
+        merchants.decideMerchant(orgA, merchant, business.id, 'APPROVED'),
+      ).rejects.toThrow(ForbiddenException);
+      expect(await merchants.offers(orgA, volunteer)).toEqual([]);
+      await merchants.decideMerchant(orgA, admin, business.id, 'APPROVED');
+      await expect(merchants.review(orgB, admin)).rejects.toThrow(ForbiddenException);
+      await expect(
+        merchants.consume(orgB, merchant, { token: '1234567890123456' }),
+      ).rejects.toThrow(ForbiddenException);
+    });
+
+    it('uses one debit for simultaneous QR/manual redemption retries and leaves time credits untouched', async () => {
+      await paid();
+      const offer = await openOffer();
+      const operation = { offerId: offer.id, clientOperationId: randomUUID() };
+      const issued = await merchants.issue(orgA, volunteer, operation);
+      expect(issued.qrSvg).toContain('<svg');
+      expect((await merchants.issue(orgA, volunteer, operation)).code).toBe(issued.code);
+      const token = createHmac('sha256', secret)
+        .update(`loyalty-qr:${issued.id}`)
+        .digest('base64url');
+      const results = await Promise.all([
+        merchants.consume(orgA, merchant, { token: `ktb-loyalty:${token}` }),
+        merchants.consume(orgA, merchant, { token: issued.code }),
+      ]);
+      expect(results.filter((row) => !row.replayed)).toHaveLength(1);
+      expect(results.every((row) => row.redeemedAt instanceof Date)).toBe(true);
+      expect(await wallet()).toMatchObject({ balance: 70 });
+      expect(await db.query("SELECT id FROM loyalty_ledger WHERE tx_type='REDEEMED'")).toHaveLength(
+        1,
+      );
+      expect(
+        (
+          await db.query(
+            'SELECT balance_credits::float AS balance FROM universal_time_wallets WHERE user_id=$1',
+            [volunteer],
+          )
+        )[0].balance,
+      ).toBe(1);
+      expect((await merchants.status(orgA, volunteer, issued.id)).status).toBe('REDEEMED');
+    });
+
+    it('serializes the final promotion slot and rejects cancelled tokens', async () => {
+      await paid();
+      await paid(60, otherMember);
+      const offer = await openOffer(1);
+      const one = await merchants.issue(orgA, volunteer, {
+        offerId: offer.id,
+        clientOperationId: randomUUID(),
+      });
+      const two = await merchants.issue(orgA, otherVolunteer, {
+        offerId: offer.id,
+        clientOperationId: randomUUID(),
+      });
+      const results = await Promise.allSettled([
+        merchants.consume(orgA, merchant, { token: one.code }),
+        merchants.consume(orgA, merchant, { token: two.code }),
+      ]);
+      expect(results.filter((row) => row.status === 'fulfilled')).toHaveLength(1);
+      expect(
+        (await db.query('SELECT redeemed_count FROM merchant_offers WHERE id=$1', [offer.id]))[0]
+          .redeemed_count,
+      ).toBe(1);
+      const pending =
+        (await merchants.status(orgA, volunteer, one.id)).status === 'PENDING' ? one : two;
+      const owner = pending.id === one.id ? volunteer : otherVolunteer;
+      await merchants.cancel(orgA, owner, pending.id);
+      await expect(merchants.consume(orgA, merchant, { token: pending.code })).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('rejects expired codes, wrong merchants and codes from another member without spending', async () => {
+      await paid();
+      const offer = await openOffer();
+      const issued = await merchants.issue(orgA, volunteer, {
+        offerId: offer.id,
+        clientOperationId: randomUUID(),
+      });
+      const otherMerchant = await grant('+919000000096', 'MERCHANT');
+      await expect(merchants.consume(orgA, otherMerchant, { token: issued.code })).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(merchants.status(orgA, otherVolunteer, issued.id)).rejects.toThrow(
+        NotFoundException,
+      );
+      await expect(merchants.cancel(orgA, otherVolunteer, issued.id)).rejects.toThrow(
+        ConflictException,
+      );
+      await db.query(
+        "UPDATE loyalty_redemptions SET expires_at=now()-interval '1 second' WHERE id=$1",
+        [issued.id],
+      );
+      expect((await merchants.status(orgA, volunteer, issued.id)).status).toBe('EXPIRED');
+      await expect(merchants.consume(orgA, merchant, { token: issued.code })).rejects.toThrow(
+        ConflictException,
+      );
+      expect(await wallet()).toMatchObject({ balance: 80 });
+    });
+
+    it('rolls back a merchant debit, stock count and receipt when audit fails, then retries safely', async () => {
+      await paid();
+      const offer = await openOffer(1);
+      const issued = await merchants.issue(orgA, volunteer, {
+        offerId: offer.id,
+        clientOperationId: randomUUID(),
+      });
+      const original = audit.logEvent.bind(audit);
+      const spy = jest.spyOn(audit, 'logEvent').mockImplementation(async (event, manager) => {
+        if (event.eventType === 'LOYALTY_REDEEMED')
+          throw new Error('Forced redemption audit failure');
+        return original(event, manager);
+      });
+      await expect(merchants.consume(orgA, merchant, { token: issued.code })).rejects.toThrow(
+        'Forced redemption',
+      );
+      expect(await wallet()).toMatchObject({ balance: 80 });
+      expect((await merchants.status(orgA, volunteer, issued.id)).status).toBe('PENDING');
+      expect(
+        (await db.query('SELECT redeemed_count FROM merchant_offers WHERE id=$1', [offer.id]))[0]
+          .redeemed_count,
+      ).toBe(0);
+      spy.mockRestore();
+      await merchants.consume(orgA, merchant, { token: issued.code });
+      expect(await wallet()).toMatchObject({ balance: 70 });
+    });
+
+    it('rechecks offer withdrawal and merchant authority at consumption time', async () => {
+      await paid();
+      const offer = await openOffer();
+      const issued = await merchants.issue(orgA, volunteer, {
+        offerId: offer.id,
+        clientOperationId: randomUUID(),
+      });
+      await merchants.withdraw(orgA, merchant, offer.id);
+      await expect(merchants.consume(orgA, merchant, { token: issued.code })).rejects.toThrow(
+        ConflictException,
+      );
+      await db.query(
+        "UPDATE membership_role_grants SET status='REVOKED' WHERE role='MERCHANT' AND membership_id IN (SELECT id FROM organization_memberships WHERE user_id=$1)",
+        [merchant],
+      );
+      await expect(merchants.consume(orgA, merchant, { token: issued.code })).rejects.toThrow(
+        ForbiddenException,
+      );
+      expect(await wallet()).toMatchObject({ balance: 80 });
+    });
+
+    it('requires independent central campaign approval and caps overlapping campaign bonuses', async () => {
+      const input = {
+        title: 'Community week',
+        bonusPerHour: 20,
+        startsAt: new Date(new Date().getTime() - 3600000).toISOString(),
+        endsAt: new Date(new Date().getTime() + 86400000).toISOString(),
+        clientOperationId: randomUUID(),
+      };
+      const [one, replay] = await Promise.all([
+        merchants.proposeCampaign(orgA, admin, input),
+        merchants.proposeCampaign(orgA, admin, input),
+      ]);
+      expect(one.id).toBe(replay.id);
+      await expect(merchants.decideCampaign(orgA, admin, one.id, true)).rejects.toThrow(
+        ForbiddenException,
+      );
+      const two = await merchants.proposeCampaign(orgA, admin, {
+        ...input,
+        clientOperationId: randomUUID(),
+      });
+      await merchants.decideCampaign(orgA, root, one.id, true);
+      await merchants.decideCampaign(orgA, root, two.id, true);
+      await paid();
+      expect(await wallet()).toMatchObject({ balance: 110 });
+      await loyalty.setPolicy(root, { ...policy, campaignCapPerHour: 5 });
+      await paid();
+      expect(await wallet()).toMatchObject({ balance: 175 });
+    });
+
+    it('resolves human member numbers for engagement and serializes repeated proposal and approval', async () => {
+      await db.query(
+        "UPDATE organization_memberships SET membership_number='QA-0042' WHERE id=$1",
+        [memberA],
+      );
+      const input = {
+        member: 'qa-0042',
+        coins: 25,
+        reason: 'Independently checked community work',
+        clientOperationId: randomUUID(),
+      };
+      const [one, replay] = await Promise.all([
+        loyalty.proposeEngagement(orgA, coordinator, input),
+        loyalty.proposeEngagement(orgA, coordinator, input),
+      ]);
+      expect(one.id).toBe(replay.id);
+      const result = await Promise.allSettled([
+        loyalty.decideEngagement(orgA, admin, one.id, true),
+        loyalty.decideEngagement(orgA, admin, one.id, true),
+      ]);
+      expect(result.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+      expect(await wallet()).toMatchObject({ balance: 25 });
+      await expect(
+        loyalty.proposeEngagement(orgA, coordinator, {
+          ...input,
+          member: 'another-community-member',
+        }),
+      ).rejects.toThrow(NotFoundException);
+      const entries = await loyalty.engagement(orgA, admin);
+      expect(entries[0]).toMatchObject({
+        membership_number: 'QA-0042',
+        member_phone: '+919000000001',
+      });
+    });
+
+    it('protects coin, policy and verification history from update or deletion', async () => {
+      await paid();
+      for (const table of ['loyalty_ledger', 'loyalty_policies', 'loyalty_service_awards']) {
+        await expect(db.query(`DELETE FROM ${table}`)).rejects.toThrow('append-only');
+      }
+      await expect(db.query('UPDATE loyalty_ledger SET amount=1000')).rejects.toThrow(
+        'append-only',
+      );
+      expect(await wallet()).toMatchObject({ balance: 80 });
+    });
+
+    it('reports local coin flows separately and excludes retired test accounts', async () => {
+      await paid();
+      const offer = await openOffer();
+      const issued = await merchants.issue(orgA, volunteer, {
+        offerId: offer.id,
+        clientOperationId: randomUUID(),
+      });
+      await merchants.consume(orgA, merchant, { token: issued.code });
+      const [community] = await db.query('SELECT id,name,code FROM organizations WHERE id=$1', [
+        orgA,
+      ]);
+      const figures = await staffFigures(
+        db.manager,
+        community,
+        monthPeriod(new Date().toISOString().slice(0, 7)),
+      );
+      expect(figures.loyalty).toEqual({
+        earned: 80,
+        redeemed: 10,
+        held: 0,
+        retired: 0,
+        restored: 0,
+        approvedMerchants: 1,
+      });
+      expect(figures.credits.earned).toBe(1);
+      expect(
+        (await staffFigures(db.manager, null, monthPeriod(new Date().toISOString().slice(0, 7))))
+          .loyalty.earned,
+      ).toBe(80);
+      await db.query("UPDATE users SET status='TEST_ACCOUNT_RETIRED' WHERE id=$1", [volunteer]);
+      expect(
+        (
+          await staffFigures(
+            db.manager,
+            community,
+            monthPeriod(new Date().toISOString().slice(0, 7)),
+          )
+        ).loyalty.earned,
+      ).toBe(0);
+    });
+
+    it('returns a fresh application when a rejected merchant resubmits', async () => {
+      const business = {
+        name: 'Local QA shop',
+        address: 'QA community market',
+        phone: '+919000000066',
+      };
+      const first = await merchants.apply(orgA, merchant, business);
+      await merchants.decideMerchant(orgA, admin, first.id, 'REJECTED');
+      const second = await merchants.apply(orgA, merchant, {
+        ...business,
+        name: 'Revised QA shop',
+      });
+      expect(second).toMatchObject({ id: first.id, name: 'Revised QA shop', status: 'PENDING' });
+      await expect(merchants.withdraw(orgA, merchant, randomUUID())).rejects.toThrow(
+        ConflictException,
+      );
+    });
+
+    it('awards each simultaneous team member only for their own independently confirmed minutes', async () => {
+      const now = new Date(),
+        beginning = new Date(now.getTime() - 3600000);
+      const req = await request(beginning.toISOString(), orgA, 2);
+      const one = await offer(req, memberA);
+      const two = await id(
+        `INSERT INTO volunteer_assignments(organization_id,service_request_id,volunteer_membership_id,matching_round_id,offer_expires_at)
+        SELECT organization_id,service_request_id,$1,matching_round_id,offer_expires_at FROM volunteer_assignments WHERE id=$2 RETURNING id`,
+        [otherMember, one],
+      );
+      await service.acceptOffer(orgA, one, memberA, {});
+      await service.acceptOffer(orgA, two, otherMember, {});
+      await service.startAssignment(orgA, one, memberA, undefined, beginning);
+      await service.startAssignment(orgA, two, otherMember, undefined, beginning);
+      await service.finishAssignment(orgA, one, memberA, { minutes: 60 }, undefined, now);
+      await service.finishAssignment(orgA, two, otherMember, { minutes: 30 }, undefined, now);
+      const [{ user_id: beneficiary }] = await db.query(
+        'SELECT user_id FROM organization_memberships WHERE id=$1',
+        [beneficiaryA],
+      );
+      const context = await authorization.evaluateOrganizationAccess(beneficiary, orgA);
+      await requests.confirmCompletion(
+        orgA,
+        req,
+        one,
+        beneficiary,
+        context,
+        { minutes: 60 },
+        undefined,
+        now,
+      );
+      expect(await wallet()).toMatchObject({ balance: 80 });
+      expect(await wallet(otherVolunteer)).toBeUndefined();
+      await requests.confirmCompletion(
+        orgA,
+        req,
+        two,
+        beneficiary,
+        context,
+        { minutes: 30 },
+        undefined,
+        now,
+      );
+      expect(await wallet(otherVolunteer)).toMatchObject({ balance: 30 });
+      expect(
+        await db.query('SELECT assignment_id FROM loyalty_service_awards WHERE request_id=$1', [
+          req,
+        ]),
+      ).toHaveLength(2);
+    });
+
+    it('retires late verified earnings after death and restores them once on mistaken reopening', async () => {
+      await paid();
+      const visit = await started();
+      const g = await governance();
+      const closure = await g.closures.report(orgA, g.coordinator, {
+        kind: ClosureKind.DECEASED,
+        member: '+919000000001',
+        reason: 'Verified closure evidence',
+        dateOfDeath: '2026-01-01',
+        evidenceType: ClosureEvidenceType.DEATH_CERTIFICATE,
+        evidenceLast4: '4321',
+      });
+      await g.closures.approve(orgA, closure.id, g.root, {
+        notes: 'Checked evidence',
+        memberMessage: 'Contact the coordinator.',
+      });
+      await requests.resolveServiceReview(
+        orgA,
+        visit.req,
+        visit.assignment,
+        coordinator,
+        g.coordinator,
+        {
+          decision: AssignmentReviewDecision.PAY,
+          minutes: 60,
+          notes: 'Independently confirmed the work before closure',
+        },
+        undefined,
+        visit.now,
+      );
+      expect(await wallet()).toEqual({ balance: 0, frozen: 0, status: 'RETIRED' });
+      expect(
+        (
+          await db.query(
+            "SELECT sum(-amount-frozen_delta)::int AS coins FROM loyalty_ledger WHERE tx_type='RETIRED'",
+          )
+        )[0].coins,
+      ).toBe(140);
+      await g.closures.reopen(orgA, closure.id, g.root, { notes: 'Closure was mistaken' });
+      expect(await wallet()).toEqual({ balance: 140, frozen: 0, status: 'ACTIVE' });
+      await expect(
+        g.closures.reopen(orgA, closure.id, g.root, { notes: 'Repeated reopening' }),
+      ).rejects.toThrow();
+      expect(await wallet()).toMatchObject({ balance: 140 });
+    });
+
+    it('keeps recognition private until explicit opt-in, with owner-only certificates', async () => {
+      await paid();
+      expect(await loyalty.leaderboard(orgA, volunteer)).toEqual([]);
+      await loyalty.preference(orgA, volunteer, { optIn: true, displayName: 'QA volunteer' });
+      const listed = await loyalty.leaderboard(orgA, otherVolunteer);
+      expect(listed).toEqual([{ name: 'QA volunteer', minutes: '60' }]);
+      const own = await loyalty.wallet(orgA, volunteer);
+      const certificate = await loyalty.certificate(orgA, volunteer, own.achievements[0].id);
+      expect(certificate.bytes.subarray(0, 5).toString()).toBe('%PDF-');
+      await expect(
+        loyalty.certificate(orgA, otherVolunteer, own.achievements[0].id),
+      ).rejects.toThrow(NotFoundException);
+      await loyalty.preference(orgA, volunteer, { optIn: false });
+      expect(await loyalty.leaderboard(orgA, otherVolunteer)).toEqual([]);
+    });
+
+    it.each([ClosureKind.DECEASED, ClosureKind.DUPLICATE])(
+      'applies %s coin rules, cancels codes and restores mistaken closures',
+      async (kind) => {
+        await paid();
+        const offer = await openOffer();
+        const issued = await merchants.issue(orgA, volunteer, {
+          offerId: offer.id,
+          clientOperationId: randomUUID(),
+        });
+        const g = await governance();
+        const closure = await g.closures.report(orgA, g.coordinator, {
+          kind,
+          member: '+919000000001',
+          reason: 'Verified closure evidence',
+          ...(kind === ClosureKind.DECEASED
+            ? {
+                dateOfDeath: '2026-01-01',
+                evidenceType: ClosureEvidenceType.DEATH_CERTIFICATE,
+                evidenceLast4: '4321',
+              }
+            : { primaryMember: '+919000000002' }),
+        });
+        await g.closures.approve(orgA, closure.id, g.root, {
+          notes: 'Checked the evidence',
+          memberMessage: 'Contact the coordinator.',
+        });
+        expect(await wallet()).toEqual({
+          balance: kind === ClosureKind.DECEASED ? 0 : 80,
+          frozen: 0,
+          status: kind === ClosureKind.DECEASED ? 'RETIRED' : 'CLOSED',
+        });
+        await g.closures.reopen(orgA, closure.id, g.root, { notes: 'The closure was a mistake' });
+        expect(await wallet()).toEqual({ balance: 80, frozen: 0, status: 'ACTIVE' });
+        await expect(merchants.consume(orgA, merchant, { token: issued.code })).rejects.toThrow(
+          ConflictException,
+        );
+      },
+    );
+
+    it('holds awards during global restrictions and releases them only after reinstatement', async () => {
+      const visit = await started();
+      const g = await governance();
+      const recommendation = await g.restrictions.recommend(orgA, g.coordinator, {
+        member: '+919000000001',
+        restrictionType: GlobalRestrictionType.TEMPORARY_SUSPENSION,
+        reason: 'Account review',
+      });
+      await g.restrictions.approve(orgA, recommendation.id, g.admin, {
+        notes: 'Review needed',
+        scope: RestrictionScope.PLATFORM,
+        memberMessage: 'Contact your coordinator.',
+      });
+      await requests.resolveServiceReview(
+        orgA,
+        visit.req,
+        visit.assignment,
+        coordinator,
+        g.coordinator,
+        {
+          decision: AssignmentReviewDecision.PAY,
+          minutes: 60,
+          notes: 'Confirmed the completed help',
+        },
+        undefined,
+        visit.now,
+      );
+      expect(await wallet()).toEqual({ balance: 0, frozen: 80, status: 'ACTIVE' });
+      await g.restrictions.reinstate(orgA, recommendation.id, g.root, {
+        notes: 'Review completed',
+      });
+      expect(await wallet()).toEqual({ balance: 80, frozen: 0, status: 'ACTIVE' });
     });
   });
 
@@ -3308,8 +4043,9 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         requests,
         controls,
         {} as never,
+        loyalty,
       );
-      closures = new ClosuresService(db, notifications, audit, restrictions, controls);
+      closures = new ClosuresService(db, notifications, audit, restrictions, controls, loyalty);
       nominees = new NomineeService(
         db,
         { confirmOwnPhoneCode: async (_: string, code: string) => code === '123456' } as never,

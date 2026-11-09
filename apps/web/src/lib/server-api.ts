@@ -198,3 +198,18 @@ export function isStaff(profile: Json) {
     )
   );
 }
+
+/** Merchants use the dashboard without receiving staff authority. */
+export function isDashboardUser(profile: Json) {
+  return (
+    isStaff(profile) ||
+    (profile['status'] === 'ACTIVE' &&
+      Array.isArray(profile['memberships']) &&
+      profile['memberships'].some(
+        (value: Json) =>
+          value['status'] === 'APPROVED' &&
+          Array.isArray(value['roles']) &&
+          value['roles'].includes('MERCHANT'),
+      ))
+  );
+}

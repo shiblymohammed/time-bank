@@ -262,6 +262,7 @@ function fixture() {
     authz,
     {} as any,
     { notifyRequestOwners: jest.fn(), notifyMemberships: jest.fn() } as any,
+    { awardVerifiedService: jest.fn() } as never,
   );
   const admin = new AdminService(
     users as any,

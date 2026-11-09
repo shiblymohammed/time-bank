@@ -84,7 +84,7 @@ before(async () => {
     if (req.url === '/api/admin/unavailable')
       return send(503, { message: 'Temporary API failure' });
     const actor = req.headers.authorization?.replace('Bearer access-', '');
-    if (!['admin', 'coordinator', 'volunteer'].includes(actor))
+    if (!['admin', 'coordinator', 'volunteer', 'merchant'].includes(actor))
       return send(401, { message: 'Expired access token' });
     if (req.url === '/api/auth/me')
       return send(200, {
@@ -98,7 +98,9 @@ before(async () => {
                 ? 'SUPER_ADMIN'
                 : actor === 'coordinator'
                   ? 'COORDINATOR'
-                  : 'VOLUNTEER',
+                  : actor === 'merchant'
+                    ? 'MERCHANT'
+                    : 'VOLUNTEER',
             ],
           },
         ],
@@ -164,6 +166,24 @@ test('Firebase sign-in rejects forged tokens and revokes non-staff sessions', as
   assert.equal(denied.cookies.get('ktb_admin_refresh'), undefined);
   assert.equal(revoked.has('refresh-volunteer'), true);
   revoked.delete('refresh-volunteer');
+});
+test('merchants enter their dashboard without staff verification or staff powers', async () => {
+  const start = calls.length;
+  const response = await login('merchant');
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).memberships[0].roles[0], 'MERCHANT');
+  assert.equal(
+    calls.slice(start).some((r) => r.path.startsWith('/api/auth/staff-code')),
+    false,
+  );
+  const denied = await proxy.GET(
+    new NextRequest('http://dashboard.test/api/backend/admin/overview', {
+      headers: { cookie: jar(response) },
+    }),
+    { params: Promise.resolve({ path: ['admin', 'overview'] }) },
+  );
+  assert.equal(denied.status, 403);
+  assert.equal((await session.GET(request('GET', undefined, jar(response)))).status, 200);
 });
 test('Firebase sign-in also requires a same-origin request', async () => {
   const response = await session.POST(

@@ -137,9 +137,9 @@ pnpm format       # Prettier format all files
 | M2        | Substantially implemented             | Identity, memberships, municipalities, roles; live SMS/recovery gaps remain              |
 | M3        | Core implemented                      | Catalogue, requests, matching, completion; automatic progression/replacement gaps remain |
 | M4        | Backend implemented; review pending   | Earnings, donations, voluntary assistance spending, holds and corrections                |
-| M5        | ⏳ Planned                            | Team and transfer workflows                                                              |
-| M6        | ⏳ Planned                            | Loyalty coins and merchants                                                              |
-| M7        | ⏳ Planned                            | Governance, safety, complaints, reports                                                  |
+| M5        | Built                                 | Team and transfer workflows                                                              |
+| M6        | Built; device review pending          | Loyalty coins and merchants                                                              |
+| M7        | Development complete                  | Governance, safety, complaints, reports                                                  |
 | M8        | ⏳ Planned                            | Offline reliability                                                                      |
 | M9        | ⏳ Planned                            | Production hardening, security review, load tests                                        |
 

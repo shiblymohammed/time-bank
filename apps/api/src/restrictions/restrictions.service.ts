@@ -28,6 +28,7 @@ import { OrganizationMembership } from '../memberships/entities/organization-mem
 import { NotificationsService } from '../notifications/notifications.service';
 import { RequestsService } from '../requests/requests.service';
 import { CreditControlsService } from '../time-ledger/credit-controls.service';
+import { LoyaltyService } from '../loyalty/loyalty.service';
 import { ApproveRestrictionDto, CaseNoteDto, RecommendRestrictionDto } from './dto/restriction.dto';
 import { Appeal } from './entities/appeal.entity';
 import { RestrictionCaseEvent } from './entities/restriction-case-event.entity';
@@ -83,6 +84,7 @@ export class RestrictionsService {
     private readonly requests: RequestsService,
     private readonly credits: CreditControlsService,
     private readonly complaints: ComplaintsService,
+    private readonly loyalty: LoyaltyService,
   ) {}
 
   async recommend(
@@ -527,6 +529,7 @@ export class RestrictionsService {
       );
     }
     if (accessRestored) await this.releaseHeldCredits(manager, restriction, found, actorId);
+    if (accessRestored) await this.loyalty.releaseEligible(manager, restriction.userId);
   }
 
   /** Ends a restriction in force: on reinstatement, or on an appeal that succeeds. */
@@ -565,6 +568,11 @@ export class RestrictionsService {
       );
     }
     await this.closeCase(manager, found, status, actorId, notes, ipAddress, now);
+    await this.loyalty.releaseEligible(
+      manager,
+      found.subjectUserId,
+      found.scope === RestrictionScope.COMMUNITY ? (found.organizationId ?? undefined) : undefined,
+    );
   }
 
   /** Staff are reminded once. Nothing about the person's access changes. */

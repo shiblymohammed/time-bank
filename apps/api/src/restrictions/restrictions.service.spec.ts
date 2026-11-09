@@ -215,6 +215,7 @@ describe('Restrictions and appeals', () => {
       requests as never,
       credits as never,
       complaints as unknown as ComplaintsService,
+      { releaseEligible: jest.fn() } as never,
     );
     appeals = new AppealsService(
       dataSource as never,

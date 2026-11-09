@@ -42,6 +42,7 @@ import { ApproveClosureDto, RecommendTransferDto, ReportClosureDto } from './dto
 import { AccountClosureEvent } from './entities/account-closure-event.entity';
 import { AccountClosure, ClosureRestoreState } from './entities/account-closure.entity';
 import { DeathNominee } from './entities/death-nominee.entity';
+import { LoyaltyService } from '../loyalty/loyalty.service';
 
 const LIST_LIMIT = 100;
 /** A nominee named this close to a death, or after it, gets a second look (D#45). */
@@ -65,6 +66,7 @@ export class ClosuresService {
     private readonly auditService: AuditService,
     private readonly restrictions: RestrictionsService,
     private readonly credits: CreditControlsService,
+    private readonly loyalty: LoyaltyService,
   ) {}
 
   async report(
@@ -323,6 +325,12 @@ export class ClosuresService {
         found.kind === ClosureKind.DECEASED && (await this.nomineeNamedLate(manager, found));
       await manager.save(AccountClosure, found);
       await this.addEvent(manager, found.id, context.userId, ClosureEventType.APPROVED, dto.notes);
+      await this.loyalty.closeAccount(
+        manager,
+        user.id,
+        found.id,
+        found.kind === ClosureKind.DECEASED,
+      );
       await this.tellReporter(manager, found);
       await this.audit(manager, 'CLOSURE_APPROVED', context.userId, found, ipAddress, {
         kind: found.kind,
@@ -668,6 +676,7 @@ export class ClosuresService {
       notes,
     );
     await this.releaseHeldCredits(manager, found, user, actorId);
+    await this.loyalty.reopenAccount(manager, user.id, found.id);
     await this.audit(
       manager,
       status === ClosureStatus.OVERTURNED ? 'CLOSURE_OVERTURNED' : 'CLOSURE_REOPENED',

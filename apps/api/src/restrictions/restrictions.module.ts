@@ -21,6 +21,7 @@ import {
 } from './restrictions.controller';
 import { RestrictionsService } from './restrictions.service';
 import { RestrictionsWorker } from './restrictions.worker';
+import { LoyaltyModule } from '../loyalty/loyalty.module';
 
 @Module({
   imports: [
@@ -30,6 +31,7 @@ import { RestrictionsWorker } from './restrictions.worker';
     NotificationsModule,
     RequestsModule,
     TimeLedgerModule,
+    LoyaltyModule,
   ],
   controllers: [
     RestrictionCasesController,

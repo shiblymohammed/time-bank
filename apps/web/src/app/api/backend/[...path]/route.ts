@@ -16,6 +16,26 @@ const ID = '[a-f0-9-]+';
 const ORG = `/organizations/${ID}`;
 // Dashboard-reachable API surface. The API still authorizes every call; this only narrows the proxy.
 const ROUTES: [methods: string, pattern: RegExp][] = [
+  [
+    'GET POST',
+    new RegExp(`^${ORG}/loyalty/(?:settings|merchant|offers|campaigns|engagement)$`, 'i'),
+  ],
+  ['GET', new RegExp(`^${ORG}/loyalty/(?:review|wallet|leaderboard)$`, 'i')],
+  [
+    'POST',
+    new RegExp(
+      `^${ORG}/loyalty/(?:wallet/refresh|visibility|redemptions|redemptions/consume)$`,
+      'i',
+    ),
+  ],
+  [
+    'POST',
+    new RegExp(
+      `^${ORG}/loyalty/(?:merchants/${ID}/(?:decide|suspend)|offers/${ID}/(?:decide|withdraw)|(?:campaigns|engagement)/${ID}/decide|redemptions/${ID}/cancel)$`,
+      'i',
+    ),
+  ],
+  ['GET', new RegExp(`^${ORG}/loyalty/(?:redemptions/${ID}|achievements/${ID}/certificate)$`, 'i')],
   ['*', /^\/admin\//],
   ['*', /^\/v1\/organizations(?:\/|$)/],
   ['*', new RegExp(`^${ORG}/memberships(?:/|$)`, 'i')],
@@ -59,7 +79,8 @@ const allowed = (method: string, resource: string) =>
       (methods === '*' || methods.split(' ').includes(method)) && pattern.test(resource),
   );
 /** Report downloads are the one thing here that is not JSON. */
-const FILE_DOWNLOADS = /\/reports(?:\/sponsor\/[a-f0-9-]+)?\/download$/i;
+const FILE_DOWNLOADS =
+  /(?:\/reports(?:\/sponsor\/[a-f0-9-]+)?\/download|\/loyalty\/achievements\/[a-f0-9-]+\/certificate)$/i;
 async function proxy(request: NextRequest, context: Context) {
   try {
     if (!['GET', 'POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method))

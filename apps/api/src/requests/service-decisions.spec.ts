@@ -114,6 +114,7 @@ describe('Service decisions', () => {
       {} as any,
       ledger,
       notifications,
+      { awardVerifiedService: jest.fn() } as never,
     );
   });
 

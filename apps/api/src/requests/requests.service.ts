@@ -49,6 +49,7 @@ import { RequestQueryDto } from './dto/request-query.dto';
 import { ConfirmServiceCompletionDto } from './dto/confirm-service-completion.dto';
 import { DisputeServiceCompletionDto } from './dto/dispute-service-completion.dto';
 import { ResolveServiceReviewDto } from './dto/resolve-service-review.dto';
+import { LoyaltyService } from '../loyalty/loyalty.service';
 
 /** A missed Start button should not send every visit to a coordinator. */
 /** A request in one of these has no one on the way yet. */
@@ -98,6 +99,7 @@ export class RequestsService {
     private readonly authorizationService: AuthorizationService,
     private readonly timeLedgerService: TimeLedgerService,
     private readonly notifications: NotificationsService,
+    private readonly loyalty: LoyaltyService,
   ) {}
 
   // ─── Create Service Request (D#8, D#59, D#60, D#61) ─────────────────────────
@@ -1263,6 +1265,7 @@ export class RequestsService {
       policy: await this.timeLedgerService.policyForRequest(manager, request.id),
       reference: request.requestNumber,
     });
+    await this.loyalty.awardVerifiedService(manager, saved.id);
     await this.notifications.notifyUsers(manager, [volunteer.userId], {
       organizationId: request.organizationId,
       requestId: request.id,

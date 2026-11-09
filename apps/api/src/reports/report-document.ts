@@ -80,6 +80,22 @@ function staffSections(f: StaffFigures): ReportSection[] {
       ],
     },
     {
+      title: 'Local loyalty coins',
+      columns: ['Figure', 'Coins'],
+      rows: [
+        ['Earned, including held awards', f.loyalty.earned],
+        ['Redeemed with merchants', f.loyalty.redeemed],
+        ['Earnings placed on hold', f.loyalty.held],
+        ['Retired after account closure', f.loyalty.retired],
+        ['Restored after reopening', f.loyalty.restored],
+      ],
+    },
+    {
+      title: 'Merchants, as of today',
+      columns: figures,
+      rows: [['Approved business records', f.loyalty.approvedMerchants]],
+    },
+    {
       title: 'Safety and governance',
       columns: figures,
       rows: [

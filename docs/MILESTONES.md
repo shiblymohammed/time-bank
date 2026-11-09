@@ -8,7 +8,7 @@ tests and documented limitations.
 
 ## Status on 9 November 2026
 
-The pilot runs after every feature is built. Order of work: M6, M8, front-end polish, M9, then deploy and pilot.
+The pilot runs after every feature is built. M6 is built. Next: M8, front-end polish, M9, then deploy and pilot.
 
 | Step                           | Status                                                                                                         |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------- |
@@ -19,7 +19,8 @@ The pilot runs after every feature is built. Order of work: M6, M8, front-end po
 | M5 Team and transfer workflows | Built. See [TEAM_VISITS.md](TEAM_VISITS.md)                                                                    |
 | Second-organization readiness  | See below; needed before a second organization goes live                                                       |
 | M7 Governance and reporting    | Development complete. See [M7 sign-off](M7_SIGNOFF.md) and [reports](REPORTS.md)                               |
-| M6, M8                         | Planned                                                                                                        |
+| M6 Loyalty and merchants       | Built in development; device review pending. See [M6 notes](LOYALTY_AND_MERCHANTS.md)                          |
+| M8 Offline reliability         | Planned                                                                                                        |
 | M9 Production hardening        | Security review done; the rest planned                                                                         |
 | Kottakkal pilot                | Last, after all of the above. Staff second factor and restore drill built; see [checklist](PILOT_CHECKLIST.md) |
 
@@ -177,18 +178,22 @@ Rules, API and limits: [TEAM_VISITS.md](TEAM_VISITS.md).
 
 ---
 
-## Milestone 6: Loyalty and merchants
+## Milestone 6: Loyalty and merchants — built, device review pending
 
 **Goal:** Coin rules, merchant offers, publication approval, QR/manual redemption, recognition.
 
-**Planned scope:**
+**Implemented scope:**
 
-- LoyaltyLedgerModule: separate wallet, earning rules (FR-LOY)
-- MerchantsModule: offer management, Municipality Admin approval (FR-LOY-03, D#20)
-- QR code + one-time code redemption (FR-LOY-04, D#21, AT-15)
-- Recognition: badges, certificates, opt-in leaderboard (D#36, D#37)
-- Retire a closed account's coins, on death or duplicate closure (D#46, D#90). See
-  [ACCOUNT_CLOSURE.md](ACCOUNT_CLOSURE.md).
+- [x] LoyaltyModule: separate wallet, earning rules (FR-LOY)
+- [x] MerchantsModule: offer management, Municipality Admin approval (FR-LOY-03, D#20)
+- [x] QR code + one-time code redemption (FR-LOY-04, D#21, AT-15)
+- [x] Recognition: badges, certificates, opt-in leaderboard (D#36, D#37)
+- [x] Retire unused coins on death; freeze coins inside a closed duplicate without transferring them (D#46, D#90). See
+      [ACCOUNT_CLOSURE.md](ACCOUNT_CLOSURE.md).
+
+- [x] Staff/merchant web dashboard, member Flutter screens and separate staff loyalty report totals.
+
+Rules, validation and release limits: [LOYALTY_AND_MERCHANTS.md](LOYALTY_AND_MERCHANTS.md).
 
 ---
 
