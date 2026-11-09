@@ -6,9 +6,13 @@ import {
 } from '@nestjs/common';
 import { DataSource, EntityManager, In } from 'typeorm';
 import {
+  AccountStatus,
   AppealKind,
   AppealOutcome,
   AppealStatus,
+  ClosureEventType,
+  ClosureKind,
+  ClosureStatus,
   ComplaintEventType,
   ComplaintLevel,
   ComplaintOutcome,
@@ -19,6 +23,8 @@ import {
   RestrictionScope,
 } from '@ktb/shared-types';
 import { AuditService } from '../audit/audit.service';
+import { ClosuresService } from '../closures/closures.service';
+import { AccountClosure } from '../closures/entities/account-closure.entity';
 import { EvaluatedMembershipContext } from '../authorization/authorization.service';
 import { ComplaintsService, levelsFor, nextComplaintLevel } from '../complaints/complaints.service';
 import { Complaint } from '../complaints/entities/complaint.entity';
@@ -34,8 +40,8 @@ import { newRestrictionReference, RestrictionsService } from './restrictions.ser
 const LIST_LIMIT = 100;
 
 /**
- * Appeals (FR-SAFE-04, D#77, D#78). A restriction goes to a Super Admin, whose word is final, and
- * a complaint's outcome goes one level up from whoever decided it. One appeal per decision, within
+ * Appeals (FR-SAFE-04, D#77, D#78). A restriction or a duplicate's closure goes to a Super Admin,
+ * whose word is final, and a complaint's outcome goes one level up. One appeal per decision, within
  * 30 days, heard by someone who had no part in the decision.
  *
  * An overturned restriction restores access and the wallet at once (BR-11, D#85). A cancelled
@@ -46,6 +52,7 @@ export class AppealsService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly restrictions: RestrictionsService,
+    private readonly closures: ClosuresService,
     private readonly complaints: ComplaintsService,
     private readonly notifications: NotificationsService,
     private readonly auditService: AuditService,
@@ -54,7 +61,7 @@ export class AppealsService {
   /** Works for someone who is blocked: it is one of the few routes their sign-in can reach. */
   async mine(userId: string, now = new Date()) {
     const manager = this.dataSource.manager;
-    const [user, platform, cases] = await Promise.all([
+    const [user, platform, cases, closures] = await Promise.all([
       manager.findOne(User, { where: { id: userId } }),
       manager.exists(GlobalAccountRestriction, {
         where: { userId, status: GlobalRestrictionStatus.ACTIVE },
@@ -64,16 +71,44 @@ export class AppealsService {
         relations: ['organization'],
         order: { decidedAt: 'DESC' },
       }),
+      manager.find(AccountClosure, {
+        where: {
+          subjectUserId: userId,
+          kind: ClosureKind.DUPLICATE,
+          status: ClosureStatus.CLOSED,
+        },
+      }),
     ]);
     const appeals = await manager.find(Appeal, {
       where: { restrictionCaseId: In(cases.map((found) => found.id)) },
     });
     const byCase = new Map(appeals.map((appeal) => [appeal.restrictionCaseId, appeal]));
+    const closureAppeals = closures.length
+      ? await manager.find(Appeal, { where: { closureId: In(closures.map((found) => found.id)) } })
+      : [];
+    const byClosure = new Map(closureAppeals.map((appeal) => [appeal.closureId, appeal]));
+    const closedItems = closures.map((found) => {
+      const appeal = byClosure.get(found.id);
+      const deadline = appealDeadline(found.decidedAt);
+      return {
+        id: found.id,
+        reference: found.reference,
+        restrictionType: AccountStatus.DUPLICATE_CLOSED as string,
+        scope: 'PLATFORM',
+        communityName: null,
+        // Only this: never the reason, or who reported it.
+        memberMessage: found.memberMessage,
+        since: found.decidedAt,
+        appealDeadline: deadline,
+        canAppeal: !appeal && deadline !== null && now <= deadline,
+        appeal: appeal ? memberAppealView(appeal) : null,
+      };
+    });
     return {
       accountStatus: user?.status ?? null,
-      restricted: platform,
+      restricted: platform || user?.status === AccountStatus.DUPLICATE_CLOSED,
       appealWindowDays: APPEAL_WINDOW_DAYS,
-      items: cases.map((found) => {
+      items: [...closedItems, ...cases.map((found) => {
         const appeal = byCase.get(found.id);
         const deadline = appealDeadline(found.decidedAt);
         return {
@@ -90,7 +125,7 @@ export class AppealsService {
           canAppeal: !appeal && deadline !== null && now <= deadline,
           appeal: appeal ? memberAppealView(appeal) : null,
         };
-      }),
+      })],
     };
   }
 
@@ -102,6 +137,12 @@ export class AppealsService {
     now = new Date(),
   ) {
     return this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const closure = await this.lockClosure(manager, caseId);
+      if (closure?.subjectUserId === userId) {
+        return memberAppealView(
+          await this.fileOnClosure(manager, closure, userId, dto, ipAddress, now),
+        );
+      }
       const found = await this.lockCase(manager, caseId);
       if (!found || found.subjectUserId !== userId) throw new NotFoundException('Case not found');
       return memberAppealView(
@@ -125,6 +166,27 @@ export class AppealsService {
       this.restrictions.assertCanRead(found, context);
       return memberAppealView(
         await this.fileOnCase(manager, found, context.userId, dto, ipAddress, now),
+      );
+    });
+  }
+
+  /** For someone who does not use the app. The person stays the appellant. */
+  async fileClosureForMember(
+    orgId: string,
+    closureId: string,
+    context: EvaluatedMembershipContext,
+    dto: FileAppealDto,
+    ipAddress?: string,
+    now = new Date(),
+  ) {
+    return this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const closure = await this.lockClosure(manager, closureId);
+      if (!closure || closure.organizationId !== orgId) {
+        throw new NotFoundException('Closure not found');
+      }
+      this.closures.assertCanRead(closure, context);
+      return memberAppealView(
+        await this.fileOnClosure(manager, closure, context.userId, dto, ipAddress, now),
       );
     });
   }
@@ -205,7 +267,7 @@ export class AppealsService {
         ...(orgId ? { organizationId: orgId } : {}),
         ...(open ? { status: AppealStatus.OPEN } : {}),
       },
-      relations: ['organization', 'restrictionCase'],
+      relations: ['organization', 'restrictionCase', 'closure'],
       order: { createdAt: 'DESC' },
       take: LIST_LIMIT,
     });
@@ -228,6 +290,11 @@ export class AppealsService {
         'restrictionCase',
         'restrictionCase.recommendedBy',
         'restrictionCase.decidedBy',
+        'closure',
+        'closure.subject',
+        'closure.primary',
+        'closure.reportedBy',
+        'closure.decidedBy',
         'complaint',
         'complaint.raisedBy',
       ],
@@ -236,6 +303,7 @@ export class AppealsService {
     await this.assertCanHear(manager, appeal, context);
     const found = appeal.restrictionCase;
     const complaint = appeal.complaint;
+    const closure = appeal.closure;
     return {
       ...appealSummary(appeal),
       grounds: appeal.grounds,
@@ -256,6 +324,20 @@ export class AppealsService {
             recommendedByName: found.recommendedBy?.fullName ?? null,
             decidedByName: found.decidedBy?.fullName ?? null,
             decidedAt: found.decidedAt,
+          }
+        : null,
+      closure: closure
+        ? {
+            id: closure.id,
+            reference: closure.reference,
+            kind: closure.kind,
+            reason: closure.reason,
+            memberMessage: closure.memberMessage ?? null,
+            primaryName: closure.primary?.fullName ?? null,
+            primaryPhone: closure.primary?.phoneE164 ?? null,
+            reportedByName: closure.reportedBy?.fullName ?? null,
+            decidedByName: closure.decidedBy?.fullName ?? null,
+            decidedAt: closure.decidedAt ?? null,
           }
         : null,
       complaint: complaint
@@ -292,13 +374,16 @@ export class AppealsService {
       }
       if (
         appeal.originalDeciderUserId === context.userId ||
-        appeal.restrictionCase?.recommendedByUserId === context.userId
+        appeal.restrictionCase?.recommendedByUserId === context.userId ||
+        appeal.closure?.reportedByUserId === context.userId
       ) {
         throw new ForbiddenException('You had a part in this decision, so someone else must hear it');
       }
 
       if (appeal.kind === AppealKind.RESTRICTION) {
         await this.decideOnCase(manager, appeal, context.userId, dto, ipAddress, now);
+      } else if (appeal.kind === AppealKind.CLOSURE) {
+        await this.decideOnClosure(manager, appeal, context.userId, dto, ipAddress, now);
       } else {
         await this.decideOnComplaint(manager, appeal, context.userId, dto, now);
       }
@@ -359,7 +444,10 @@ export class AppealsService {
       }),
     );
     await this.restrictions.addEvent(manager, found.id, filedBy, RestrictionCaseEventType.APPEALED);
-    await this.notifySuperAdmins(manager, found);
+    await this.notifySuperAdmins(manager, {
+      organizationId: found.organizationId ?? null,
+      excluded: [found.subjectUserId, found.recommendedByUserId, found.decidedByUserId],
+    });
     await this.audit(manager, 'APPEAL_FILED', filedBy, appeal, ipAddress, { kind: appeal.kind });
     return appeal;
   }
@@ -395,6 +483,76 @@ export class AppealsService {
       RestrictionCaseEventType.APPEAL_STANDS,
       dto.notes,
     );
+  }
+
+  private async fileOnClosure(
+    manager: EntityManager,
+    found: AccountClosure,
+    filedBy: string,
+    dto: FileAppealDto,
+    ipAddress: string | undefined,
+    now: Date,
+  ): Promise<Appeal> {
+    const earlier = await this.findRetry(manager, filedBy, dto);
+    if (earlier) return earlier;
+    if (found.kind !== ClosureKind.DUPLICATE) {
+      throw new ConflictException('A Super Admin can reopen this account if it was closed by mistake');
+    }
+    if (found.status !== ClosureStatus.CLOSED) {
+      throw new ConflictException('This account is not closed');
+    }
+    if (await manager.exists(Appeal, { where: { closureId: found.id } })) {
+      throw new ConflictException('This decision has already been appealed');
+    }
+    this.assertInWindow(found.decidedAt, now);
+    const appeal = await manager.save(
+      Appeal,
+      manager.create(Appeal, {
+        reference: newRestrictionReference('APL', now),
+        kind: AppealKind.CLOSURE,
+        organizationId: found.organizationId ?? null,
+        closureId: found.id,
+        appellantUserId: found.subjectUserId,
+        filedByUserId: filedBy,
+        originalDeciderUserId: found.decidedByUserId ?? null,
+        level: ComplaintLevel.SUPER_ADMIN,
+        status: AppealStatus.OPEN,
+        grounds: dto.grounds.trim(),
+        clientOperationId: dto.clientOperationId ?? null,
+      }),
+    );
+    await this.closures.addEvent(manager, found.id, filedBy, ClosureEventType.APPEALED);
+    await this.notifySuperAdmins(manager, {
+      organizationId: found.organizationId ?? null,
+      excluded: [found.subjectUserId, found.reportedByUserId, found.decidedByUserId],
+    });
+    await this.audit(manager, 'APPEAL_FILED', filedBy, appeal, ipAddress, { kind: appeal.kind });
+    return appeal;
+  }
+
+  private async decideOnClosure(
+    manager: EntityManager,
+    appeal: Appeal,
+    actorId: string,
+    dto: DecideAppealDto,
+    ipAddress: string | undefined,
+    now: Date,
+  ): Promise<void> {
+    const found = await this.lockClosure(manager, appeal.closureId as string);
+    if (!found) throw new NotFoundException('Closure not found');
+    if (dto.outcome === AppealOutcome.OVERTURNED) {
+      await this.closures.endClosure(
+        manager,
+        found,
+        ClosureStatus.OVERTURNED,
+        actorId,
+        dto.notes,
+        ipAddress,
+        now,
+      );
+      return;
+    }
+    await this.closures.addEvent(manager, found.id, actorId, ClosureEventType.APPEAL_STANDS, dto.notes);
   }
 
   /** The appeal's level becomes the complaint's. A Super Admin's decision is final. */
@@ -450,18 +608,29 @@ export class AppealsService {
         where: { id: appeal.restrictionCaseId },
       });
     }
+    if (appeal.closureId && !appeal.closure) {
+      appeal.closure = await manager.findOne(AccountClosure, { where: { id: appeal.closureId } });
+    }
   }
 
   private isPartOf(appeal: Appeal, userId: string): boolean {
     return (
       appeal.originalDeciderUserId === userId ||
-      appeal.restrictionCase?.recommendedByUserId === userId
+      appeal.restrictionCase?.recommendedByUserId === userId ||
+      appeal.closure?.reportedByUserId === userId
     );
   }
 
   private lockCase(manager: EntityManager, caseId: string): Promise<RestrictionCase | null> {
     return manager.findOne(RestrictionCase, {
       where: { id: caseId },
+      lock: { mode: 'pessimistic_write' },
+    });
+  }
+
+  private lockClosure(manager: EntityManager, closureId: string): Promise<AccountClosure | null> {
+    return manager.findOne(AccountClosure, {
+      where: { id: closureId },
       lock: { mode: 'pessimistic_write' },
     });
   }
@@ -486,20 +655,21 @@ export class AppealsService {
     }
   }
 
-  private async notifySuperAdmins(manager: EntityManager, found: RestrictionCase): Promise<void> {
+  private async notifySuperAdmins(
+    manager: EntityManager,
+    about: { organizationId: string | null; excluded: (string | null | undefined)[] },
+  ): Promise<void> {
     const central: { user_id: string }[] = await manager.query(
       `SELECT DISTINCT m.user_id FROM organization_memberships m
        JOIN membership_role_grants g ON g.membership_id = m.id
        WHERE m.status = 'APPROVED' AND g.status = 'ACTIVE' AND g.role = 'SUPER_ADMIN'`,
     );
-    const excluded = new Set(
-      [found.subjectUserId, found.recommendedByUserId, found.decidedByUserId].filter(Boolean),
-    );
+    const excluded = new Set(about.excluded.filter(Boolean));
     await this.notifications.notifyUsers(
       manager,
       central.map((row) => row.user_id).filter((id) => !excluded.has(id)),
       {
-        organizationId: found.organizationId ?? null,
+        organizationId: about.organizationId,
         type: 'APPEAL_FILED',
         title: 'An appeal needs review',
         body: 'Open the admin panel.',

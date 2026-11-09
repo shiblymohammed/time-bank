@@ -144,6 +144,12 @@ UPDATE appeals SET status = 'DECIDED', outcome = 'STANDS', decided_at = now(),
     member_message = 'Test account retired', updated_at = now()
   WHERE status = 'OPEN' AND appellant_user_id IN (SELECT id FROM targets);
 
+-- Their nominee goes, and any closure reported for them ends. The records stay.
+UPDATE death_nominees SET replaced_at = now()
+  WHERE replaced_at IS NULL AND user_id IN (SELECT id FROM targets);
+UPDATE account_closures SET status = 'REFUSED', decided_at = now(), updated_at = now()
+  WHERE status = 'REPORTED' AND subject_user_id IN (SELECT id FROM targets);
+
 -- Offers to a listed volunteer on someone else's request; matching moves on to others.
 UPDATE volunteer_assignments SET status = 'CANCELLED', updated_at = now()
   WHERE status = 'OFFERED'

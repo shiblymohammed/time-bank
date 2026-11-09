@@ -5,6 +5,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { randomUUID } from 'crypto';
 import { DataSource, EntityManager } from 'typeorm';
 import { UserRole } from '@ktb/shared-types';
 import { AuditService } from '../audit/audit.service';
@@ -118,6 +119,12 @@ export class CreditControlsService {
     ]);
     if (!account) throw new NotFoundException('Credit account not found');
     return account;
+  }
+
+  private async isClosedAccount(m: EntityManager, account: Account): Promise<boolean> {
+    if (account.status !== 'CLOSED' || !account.user_id) return false;
+    const [owner] = await m.query('SELECT status FROM users WHERE id=$1', [account.user_id]);
+    return owner?.status === 'DECEASED_CLOSED' || owner?.status === 'DUPLICATE_CLOSED';
   }
 
   private async assertActive(m: EntityManager, account: Account) {
@@ -415,8 +422,9 @@ export class CreditControlsService {
       if (account.user_id === actor)
         throw new ForbiddenException('You cannot resolve your own credits');
       const released = dto.decision === 'RELEASE';
-      // A resolved fraud case must not make banned/suspended credits spendable.
-      if (released) await this.assertActive(m, account);
+      // A resolved fraud case must not make banned/suspended credits spendable. A closed wallet
+      // cannot spend anything, and its review still has to end so the credits can be accounted for.
+      if (released && !(await this.isClosedAccount(m, account))) await this.assertActive(m, account);
       const amount = cents(review.held_amount);
       await this.move(m, account, !!review.pool_id, released ? amount : 0, -amount);
       if (amount > 0)
@@ -719,6 +727,111 @@ export class CreditControlsService {
       released += releasable;
     }
     return released / 100;
+  }
+
+  /** What a closed account could pass on now: its balance and any earnings held for it. */
+  async estateAvailable(m: EntityManager, userId: string): Promise<number> {
+    const [wallet] = await m.query('SELECT id FROM universal_time_wallets WHERE user_id=$1', [
+      userId,
+    ]);
+    if (!wallet) return 0;
+    const account = await this.account(m, wallet.id, null);
+    const held: { org: string }[] = await m.query(
+      `SELECT DISTINCT originating_org_id AS org FROM time_credit_ledger
+       WHERE wallet_id=$1 AND tx_type='SERVICE_EARNED' AND held AND originating_org_id IS NOT NULL`,
+      [account.id],
+    );
+    let total = cents(account.balance_credits);
+    for (const { org } of held) total += await this.availableFrozenEarnings(m, account, org);
+    return total / 100;
+  }
+
+  /**
+   * Moves what a deceased member left to their verified nominee (FR-IDENT-07, D#44). Earnings held
+   * for them are released first. Anything an open review reserved stays behind, and can follow
+   * once that review ends.
+   */
+  async transferEstate(
+    m: EntityManager,
+    params: {
+      closureId: string;
+      reference: string;
+      organizationId: string | null;
+      fromUserId: string;
+      toUserId: string;
+      actor: string;
+    },
+  ): Promise<number> {
+    const { closureId, reference, fromUserId, toUserId, actor } = params;
+    // A nominee not yet approved in any community, or an older account, may have no wallet.
+    await m.query(
+      'INSERT INTO universal_time_wallets(user_id) VALUES($1) ON CONFLICT (user_id) DO NOTHING',
+      [toUserId],
+    );
+    const wallets: { id: string; user_id: string }[] = await m.query(
+      'SELECT id, user_id FROM universal_time_wallets WHERE user_id = ANY($1) ORDER BY id',
+      [[fromUserId, toUserId]],
+    );
+    // Always in the same order, so two transfers cannot deadlock.
+    const accounts = new Map<string, Account>();
+    for (const wallet of wallets) {
+      accounts.set(wallet.user_id, await this.account(m, wallet.id, null));
+    }
+    const from = accounts.get(fromUserId);
+    const to = accounts.get(toUserId);
+    if (!from || !to) throw new NotFoundException('Wallet not found');
+    await this.assertActive(m, to);
+
+    const held: { org: string }[] = await m.query(
+      `SELECT DISTINCT originating_org_id AS org FROM time_credit_ledger
+       WHERE wallet_id=$1 AND tx_type='SERVICE_EARNED' AND held AND originating_org_id IS NOT NULL`,
+      [from.id],
+    );
+    for (const { org } of held) {
+      const releasable = await this.availableFrozenEarnings(m, from, org);
+      if (releasable <= 0) continue;
+      const dto = {
+        amount: releasable / 100,
+        idempotencyKey: `closure-${reference}-${randomUUID()}`.slice(0, 100),
+        reason: `Passing on to a nominee (${reference})`,
+      } as CreditAmountDto;
+      await this.move(m, from, false, releasable, -releasable);
+      const operation = await this.operation(m, org, actor, dto, 'FROZEN_RELEASED', from.id, null, null);
+      await this.post(m, org, from, false, 'FROZEN_RELEASED', releasable, -releasable, {
+        operationId: operation.id,
+      });
+    }
+
+    const amount = cents(from.balance_credits);
+    if (amount <= 0) throw new ConflictException('This account has no credits to pass on');
+    const [latest] = await m.query(
+      `SELECT originating_org_id AS org FROM time_credit_ledger
+       WHERE wallet_id=$1 AND originating_org_id IS NOT NULL ORDER BY created_at DESC LIMIT 1`,
+      [from.id],
+    );
+    const org: string | null = params.organizationId ?? latest?.org ?? null;
+    if (!org) throw new ConflictException('These credits have no community on record');
+
+    await this.move(m, from, false, -amount, 0);
+    await this.postEstate(m, from, 'ESTATE_SENT', -amount, org, closureId);
+    await this.move(m, to, false, amount, 0);
+    await this.postEstate(m, to, 'ESTATE_RECEIVED', amount, org, closureId);
+    return amount / 100;
+  }
+
+  private async postEstate(
+    m: EntityManager,
+    account: Account,
+    type: 'ESTATE_SENT' | 'ESTATE_RECEIVED',
+    amount: number,
+    org: string,
+    closureId: string,
+  ): Promise<void> {
+    await m.query(
+      `INSERT INTO time_credit_ledger(wallet_id,amount,balance_after,held,tx_type,
+       originating_org_id,frozen_delta,closure_id) VALUES($1,$2,$3,false,$4,$5,0,$6)`,
+      [account.id, amount / 100, account.balance_credits, type, org, closureId],
+    );
   }
 
   /** Unreviewed held earnings; resolved frozen-source cases also consume their attribution. */

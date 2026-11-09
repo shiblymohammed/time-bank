@@ -379,12 +379,35 @@ describe('AuthService', () => {
         findOne: jest.fn().mockResolvedValue({
           id: 'user-closed',
           phoneE164: '+919876543210',
-          status: AccountStatus.DUPLICATE_CLOSED,
+          status: AccountStatus.DECEASED_CLOSED,
         }),
       });
 
       await expect(service.verifyOtp({ phone: '9876543210', code: '123456' })).rejects.toThrow(
         ForbiddenException,
+      );
+    });
+
+    it('gives a duplicate account only a limited session, so its owner can appeal', async () => {
+      const challenge = {
+        attemptCount: 0,
+        expiresAt: new Date(Date.now() + 60_000),
+        maxAttempts: 3,
+        codeHash: sha256('123456'),
+        consumedAt: null as Date | null,
+      };
+      mockOtpRepo.findOne.mockResolvedValueOnce(challenge);
+      mockOtpRepo.save.mockResolvedValue(challenge);
+      mockQueryRunner.manager.getRepository.mockReturnValue({
+        findOne: jest.fn().mockResolvedValue({
+          id: 'user-duplicate',
+          phoneE164: '+919876543210',
+          status: AccountStatus.DUPLICATE_CLOSED,
+        }),
+      });
+
+      await expect(service.verifyOtp({ phone: '9876543210', code: '123456' })).resolves.toMatchObject(
+        { accountRestricted: true },
       );
     });
   });

@@ -5,6 +5,13 @@ import { ComplaintsModule } from '../complaints/complaints.module';
 import { NotificationsModule } from '../notifications/notifications.module';
 import { RequestsModule } from '../requests/requests.module';
 import { TimeLedgerModule } from '../time-ledger/time-ledger.module';
+import {
+  CentralClosuresController,
+  CommunityClosuresController,
+  MyNomineeController,
+} from '../closures/closures.controller';
+import { ClosuresService } from '../closures/closures.service';
+import { NomineeService } from '../closures/nominee.service';
 import { AppealsService } from './appeals.service';
 import {
   CentralRestrictionsController,
@@ -29,8 +36,17 @@ import { RestrictionsWorker } from './restrictions.worker';
     CommunityAppealsController,
     CentralRestrictionsController,
     MyRestrictionController,
+    CommunityClosuresController,
+    CentralClosuresController,
+    MyNomineeController,
   ],
-  providers: [RestrictionsService, AppealsService, RestrictionsWorker],
+  providers: [
+    RestrictionsService,
+    ClosuresService,
+    NomineeService,
+    AppealsService,
+    RestrictionsWorker,
+  ],
   exports: [RestrictionsService],
 })
 export class RestrictionsModule {}

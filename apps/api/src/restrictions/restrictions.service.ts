@@ -60,7 +60,7 @@ export function newRestrictionReference(prefix: string, now: Date): string {
 }
 
 /** A coordinator cannot touch a fellow coordinator's case, nor an administrator an administrator's. */
-function levelForRoles(roles: string[]): ComplaintLevel {
+export function levelForRoles(roles: string[]): ComplaintLevel {
   if (roles.includes(UserRole.SUPER_ADMIN) || roles.includes(UserRole.MUNICIPALITY_ADMIN)) {
     return ComplaintLevel.SUPER_ADMIN;
   }
@@ -767,7 +767,23 @@ export class RestrictionsService {
         : await manager.query('SELECT id FROM organization_memberships WHERE user_id = $1', [
             found.subjectUserId,
           ]);
-    const membershipIds = members.map((member) => member.id);
+    await this.stopBookingsFor(
+      manager,
+      members.map((member) => member.id),
+      found.subjectUserId,
+      actorId,
+      ipAddress,
+    );
+  }
+
+  /** Also used when an account closes. */
+  async stopBookingsFor(
+    manager: EntityManager,
+    membershipIds: string[],
+    subjectUserId: string,
+    actorId: string,
+    ipAddress?: string,
+  ): Promise<void> {
     if (membershipIds.length === 0) return;
     const { underWay } = await this.requests.cancelForRestriction(
       manager,
@@ -794,7 +810,7 @@ export class RestrictionsService {
           title: 'A visit under way needs you',
           body: 'Someone on it can no longer take part. Open the admin panel.',
         },
-        [found.subjectUserId],
+        [subjectUserId],
       );
     }
   }
@@ -842,7 +858,7 @@ export class RestrictionsService {
   }
 
   /** Member number or phone, within this community. */
-  private async findMember(
+  async findMember(
     manager: EntityManager,
     orgId: string,
     member: string,
@@ -868,7 +884,7 @@ export class RestrictionsService {
     return found;
   }
 
-  private async activeRoles(manager: EntityManager, userId: string): Promise<string[]> {
+  async activeRoles(manager: EntityManager, userId: string): Promise<string[]> {
     const rows: { role: string }[] = await manager.query(
       `SELECT DISTINCT g.role FROM membership_role_grants g
        JOIN organization_memberships m ON m.id = g.membership_id

@@ -113,6 +113,8 @@ const kind = (value: string) =>
     FRAUD_RELEASED: 'Review hold released',
     FROZEN_RELEASED: 'Frozen earnings released',
     CREDIT_CORRECTED: 'Credit correction',
+    ESTATE_SENT: 'Passed to nominee',
+    ESTATE_RECEIVED: 'Received as nominee',
   })[value] ?? 'Credit movement';
 const reason: Field = {
   key: 'reason',

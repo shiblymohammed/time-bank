@@ -274,7 +274,7 @@ export class RequestsService {
     const blocked: unknown[] = await manager.query(
       `SELECT 1 FROM organization_memberships m
        JOIN users u ON u.id = m.user_id
-       WHERE m.id = $1 AND (m.status = 'SUSPENDED' OR u.status IN ('SUSPENDED', 'PERMANENTLY_BANNED')
+       WHERE m.id = $1 AND (m.status IN ('SUSPENDED', 'REVOKED') OR u.status <> 'ACTIVE'
          OR EXISTS (SELECT 1 FROM global_account_restrictions r
            WHERE r.user_id = u.id AND r.status = 'ACTIVE'))`,
       [beneficiaryMembershipId],

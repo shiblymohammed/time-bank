@@ -59,8 +59,11 @@ Check these weekly with the coordinator:
 
 ## Known gaps to accept or close first
 
-- Account closure and reports (the rest of Milestone 7) are not built. [Safety alerts](SAFETY_ALERTS.md),
-  [complaints](COMPLAINTS.md) and [restrictions and appeals](RESTRICTIONS.md) are, within their stated limits.
+- Reports (the rest of Milestone 7) are not built. [Safety alerts](SAFETY_ALERTS.md), [complaints](COMPLAINTS.md),
+  [restrictions and appeals](RESTRICTIONS.md) and [account closure](ACCOUNT_CLOSURE.md) are, within their stated limits.
+- Passing on a deceased member's credits needs legal advice first (D#44), and the nominee's phone code has not been
+  tested on a real phone with real Firebase.
+- Lost phone or SIM recovery (FR-IDENT-05) is not built.
 - Offline use (Milestone 8) is not built, so volunteers need a connection.
 - Load, security and accessibility reviews and Malayalam validation (Milestone 9) have not been done.
 - [Other remaining issues](FULL_APPLICATION_AUDIT_2026-11-02.md), including request-key reuse and quota month

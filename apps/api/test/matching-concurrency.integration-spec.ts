@@ -1,10 +1,14 @@
+import { ClosuresService } from '../src/closures/closures.service';
+import { NomineeService } from '../src/closures/nominee.service';
+import { RestrictionsService } from '../src/restrictions/restrictions.service';
+import { EvaluatedMembershipContext } from '../src/authorization/authorization.service';
 import { BeneficiariesService } from '../src/beneficiaries/beneficiaries.service';
 import { BeneficiaryEligibility } from '../src/beneficiaries/entities/beneficiary-eligibility.entity';
 import { CaregiverAuthorization } from '../src/beneficiaries/entities/caregiver-authorization.entity';
 import 'reflect-metadata';
 import { randomUUID } from 'crypto';
 import { join } from 'path';
-import { ConflictException, ForbiddenException, ValidationPipe } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import httpRequest from 'supertest';
@@ -47,7 +51,15 @@ import { CommunityCreditPool } from '../src/donations/entities/community-credit-
 import { TimeLedgerService } from '../src/time-ledger/time-ledger.service';
 import { TimeCreditLedgerEntry } from '../src/time-ledger/entities/time-credit-ledger-entry.entity';
 import { UniversalTimeWallet } from '../src/identity/entities/universal-time-wallet.entity';
-import { UserRole, VolunteerAssignmentStatus } from '@ktb/shared-types';
+import {
+  AccountStatus,
+  ClosureEvidenceType,
+  ClosureKind,
+  GlobalRestrictionType,
+  MembershipStatus,
+  UserRole,
+  VolunteerAssignmentStatus,
+} from '@ktb/shared-types';
 import { MatchingService } from '../src/matching/matching.service';
 import { AuditService } from '../src/audit/audit.service';
 import { AuditEvent } from '../src/audit/entities/audit-event.entity';
@@ -77,6 +89,7 @@ import { SafetyAlerts1729118400017 } from '../src/database/migrations/1729118400
 import { TeamVisits1729118400018 } from '../src/database/migrations/1729118400018-TeamVisits';
 import { Complaints1729118400019 } from '../src/database/migrations/1729118400019-Complaints';
 import { RestrictionCases1729118400020 } from '../src/database/migrations/1729118400020-RestrictionCases';
+import { AccountClosures1729118400021 } from '../src/database/migrations/1729118400021-AccountClosures';
 import { Foundation1729118400001 } from '../src/database/migrations/1729118400001-Foundation';
 import { IdentityAndOrganizations1729118400002 } from '../src/database/migrations/1729118400002-IdentityAndOrganizations';
 import { ServiceCatalogueAndRequests1729118400003 } from '../src/database/migrations/1729118400003-ServiceCatalogueAndRequests';
@@ -115,6 +128,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       TeamVisits1729118400018,
       Complaints1729118400019,
       RestrictionCases1729118400020,
+      AccountClosures1729118400021,
     ],
     synchronize: false,
     extra: {
@@ -458,8 +472,8 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
 
     it('does not let a verified phone into a closed account', async () => {
       const { auth } = authentication();
-      await db.query("UPDATE users SET status='DEACTIVATED' WHERE id=$1", [volunteer]);
-      await expect(auth.signInVerifiedPhone(phone, {})).rejects.toThrow('deactivated');
+      await db.query("UPDATE users SET status='DECEASED_CLOSED' WHERE id=$1", [volunteer]);
+      await expect(auth.signInVerifiedPhone(phone, {})).rejects.toThrow('closed');
       expect(await db.getRepository(AuthenticationSession).count()).toBe(0);
     });
 
@@ -2616,9 +2630,13 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
 
     it('reverses the new schema only before credit-control records exist', async () => {
       const migration = new CreditControls1729118400010();
+      // Account closures redefine the ledger's checks, so they come off first and go back last.
+      const closures = new AccountClosures1729118400021();
       await db.transaction(async (m) => {
+        await closures.down(m.queryRunner!);
         await migration.down(m.queryRunner!);
         await migration.up(m.queryRunner!);
+        await closures.up(m.queryRunner!);
       });
       await open();
       await expect(db.transaction((m) => migration.down(m.queryRunner!))).rejects.toThrow(
@@ -2725,6 +2743,406 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
           [orgA, user],
         ),
       ).rejects.toThrow(/chk_membership_application_details/);
+    });
+  });
+
+  describe('account closures', () => {
+    let controls: CreditControlsService;
+    let closures: ClosuresService;
+    let restrictions: RestrictionsService;
+    let nominees: NomineeService;
+    let admin: string;
+    let superAdmin: string;
+    let receiver: string;
+    let earningSource: string;
+    const receiverPhone = '+919000000077';
+    const subjectPhone = '+919000000002';
+    const DEATH = '2026-01-15';
+    let nextEarning = 0;
+
+    const staff = (userId: string, roles: UserRole[], isSuperAdmin = false) =>
+      ({
+        userId,
+        organizationId: orgA,
+        membershipId: 'membership',
+        membershipStatus: MembershipStatus.APPROVED,
+        roles,
+        isSuperAdmin,
+      }) as EvaluatedMembershipContext;
+    const asCoordinator = () => staff(coordinator, [UserRole.COORDINATOR]);
+    const asAdmin = () => staff(admin, [UserRole.MUNICIPALITY_ADMIN]);
+    const asSuperAdmin = () => staff(superAdmin, [UserRole.SUPER_ADMIN], true);
+    const notes = { notes: 'Checked by staff' };
+
+    const reportDeath = (actor = asCoordinator(), member = subjectPhone) =>
+      closures.report(orgA, actor, {
+        kind: ClosureKind.DECEASED,
+        member,
+        reason: 'Certificate seen at the office',
+        dateOfDeath: DEATH,
+        evidenceType: ClosureEvidenceType.DEATH_CERTIFICATE,
+        evidenceLast4: '4821',
+      });
+    const closedDeath = async () => {
+      const made = await reportDeath();
+      await closures.approve(orgA, made.id, asAdmin(), notes);
+      return made;
+    };
+    const earn = async () => {
+      const visit = await request(`2030-01-0${++nextEarning}T10:00:00Z`);
+      const assignment = await offer(visit, otherMember);
+      return db.transaction((m) =>
+        ledger.postServiceEarning(m, {
+          volunteerUserId: otherVolunteer,
+          organizationId: orgA,
+          serviceRequestId: visit,
+          volunteerAssignmentId: assignment,
+          minutes: 60,
+          policy: { baseCreditRateHourly: 1, creditMultiplier: 1, allowPartialHours: true },
+        }),
+      );
+    };
+    const nominate = (phone = receiverPhone, namedOn = '2025-01-01') =>
+      db.query(
+        `INSERT INTO death_nominees(user_id,nominee_name,nominee_phone,created_at)
+         VALUES($1,'Fathima Rahman',$2,$3)`,
+        [otherVolunteer, phone, namedOn],
+      );
+    const verified = (userId: string, fingerprint: string | null = null) =>
+      db.query(
+        `INSERT INTO verified_identities(user_id,verification_status,verified_at,document_type,document_fingerprint)
+         VALUES($1,'VERIFIED',now(),'AADHAAR_CARD',$2)`,
+        [userId, fingerprint],
+      );
+    const wallet = async (userId: string) =>
+      (
+        await db.query(
+          `SELECT balance_credits::float AS balance, frozen_credits::float AS frozen, status
+           FROM universal_time_wallets WHERE user_id=$1`,
+          [userId],
+        )
+      )[0];
+    const statusOf = async (userId: string) =>
+      (await db.query('SELECT status FROM users WHERE id=$1', [userId]))[0].status;
+
+    beforeEach(async () => {
+      nextEarning = 0;
+      controls = new CreditControlsService(db, audit);
+      const notifications = new NotificationsService(
+        db.getRepository(PushDevice),
+        db,
+        new PushSender(new ConfigService()),
+      );
+      restrictions = new RestrictionsService(
+        db,
+        notifications,
+        audit,
+        requests,
+        controls,
+        {} as never,
+      );
+      closures = new ClosuresService(db, notifications, audit, restrictions, controls);
+      nominees = new NomineeService(
+        db,
+        { confirmOwnPhoneCode: async (_: string, code: string) => code === '123456' } as never,
+        { verifyPhoneToken: async (token: string) => token } as never,
+        audit,
+      );
+      const grant = async (phone: string, role: string) => {
+        const userId = await id('INSERT INTO users(phone_e164) VALUES($1) RETURNING id', [phone]);
+        const membership = await id(
+          "INSERT INTO organization_memberships(organization_id,user_id,status) VALUES($1,$2,'APPROVED') RETURNING id",
+          [orgA, userId],
+        );
+        await db.query(
+          'INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,$2,$3)',
+          [membership, role, coordinator],
+        );
+        return userId;
+      };
+      admin = await grant('+919000000088', 'MUNICIPALITY_ADMIN');
+      superAdmin = await grant('+919000000089', 'SUPER_ADMIN');
+      receiver = await grant(receiverPhone, 'VOLUNTEER');
+      await verified(receiver);
+      const earned = await earn();
+      earningSource = earned!.id;
+    });
+
+    it('lets only one of two simultaneous reports through', async () => {
+      const outcomes = await Promise.allSettled([reportDeath(), reportDeath()]);
+      expect(outcomes.filter((o) => o.status === 'fulfilled')).toHaveLength(1);
+      const [refused] = outcomes.filter((o) => o.status === 'rejected') as PromiseRejectedResult[];
+      expect(refused!.reason).toBeInstanceOf(ConflictException);
+      expect(await db.query('SELECT id FROM account_closures')).toHaveLength(1);
+    });
+
+    it('pays once when two administrators approve the same transfer together', async () => {
+      await nominate();
+      const made = await closedDeath();
+      await closures.recommendTransfer(orgA, made.id, asCoordinator(), {
+        receiver: receiverPhone,
+        notes: 'ID seen in person',
+      });
+      const outcomes = await Promise.allSettled([
+        closures.approveTransfer(orgA, made.id, asAdmin(), notes),
+        closures.approveTransfer(orgA, made.id, asSuperAdmin(), notes),
+      ]);
+      expect(outcomes.filter((o) => o.status === 'fulfilled')).toHaveLength(1);
+      expect(await wallet(receiver)).toMatchObject({ balance: 1 });
+      expect(await wallet(otherVolunteer)).toMatchObject({ balance: 0, status: 'CLOSED' });
+      expect(
+        await db.query('SELECT tx_type FROM time_credit_ledger WHERE closure_id=$1', [made.id]),
+      ).toHaveLength(2);
+    });
+
+    it('leaves credits under an open review behind, and they can follow once it ends', async () => {
+      await nominate();
+      const review = await controls.openReview(orgA, coordinator, {
+        amount: 0.5,
+        idempotencyKey: randomUUID(),
+        reason: 'Looking into this visit',
+        sourceEntryId: earningSource,
+      });
+      const made = await closedDeath();
+      const available = await db.transaction((m) => controls.estateAvailable(m, otherVolunteer));
+      expect(available).toBe(0.5);
+      const pass = async () => {
+        await closures.recommendTransfer(orgA, made.id, asCoordinator(), {
+          receiver: receiverPhone,
+          notes: 'ID seen in person',
+        });
+        return closures.approveTransfer(orgA, made.id, asAdmin(), notes);
+      };
+      expect((await pass()).amount).toBe(0.5);
+      expect(await wallet(receiver)).toMatchObject({ balance: 0.5 });
+      expect(await wallet(otherVolunteer)).toMatchObject({ balance: 0, frozen: 0.5 });
+
+      await controls.investigate(orgA, coordinator, review.id, { investigation: 'All in order' });
+      await controls.resolve(orgA, admin, review.id, {
+        decision: 'RELEASE',
+        resolution: 'Evidence reviewed and decision authorized',
+      });
+      expect((await pass()).amount).toBe(0.5);
+      expect(await wallet(receiver)).toMatchObject({ balance: 1 });
+      const [closure] = await db.query(
+        'SELECT transferred_credits::float AS moved FROM account_closures WHERE id=$1',
+        [made.id],
+      );
+      expect(closure.moved).toBe(1);
+    });
+
+    it('passes on what a visit under way earned after the account closed', async () => {
+      await nominate();
+      const made = await closedDeath();
+      const held = await earn();
+      expect(held!.held).toBe(true);
+      expect(await wallet(otherVolunteer)).toMatchObject({ balance: 1, frozen: 1 });
+      await closures.recommendTransfer(orgA, made.id, asCoordinator(), {
+        receiver: receiverPhone,
+        notes: 'ID seen in person',
+      });
+      expect((await closures.approveTransfer(orgA, made.id, asAdmin(), notes)).amount).toBe(2);
+      expect(await wallet(otherVolunteer)).toMatchObject({ balance: 0, frozen: 0 });
+      expect(await wallet(receiver)).toMatchObject({ balance: 2 });
+    });
+
+    it('needs a Super Admin when the account’s phone is not the one the member named', async () => {
+      await nominate('+919000000066');
+      const made = await closedDeath();
+      await closures.recommendTransfer(orgA, made.id, asCoordinator(), {
+        receiver: receiverPhone,
+        notes: 'They changed their number',
+      });
+      await expect(closures.approveTransfer(orgA, made.id, asAdmin(), notes)).rejects.toThrow(
+        'A Super Admin must decide',
+      );
+      expect(await wallet(receiver)).toBeUndefined();
+      await closures.approveTransfer(orgA, made.id, asSuperAdmin(), notes);
+      expect(await wallet(receiver)).toMatchObject({ balance: 1 });
+    });
+
+    it('reviews a nominee named within 30 days of the death, but not one named long before', async () => {
+      await nominate(receiverPhone, '2026-01-01');
+      const late = await closedDeath();
+      expect(
+        (await closures.detail(orgA, late.id, asCoordinator())).nomineeUnderReview,
+      ).toBe(true);
+      await closures.reopen(orgA, late.id, asSuperAdmin(), notes);
+
+      await db.query('UPDATE death_nominees SET created_at=$1', ['2025-01-01']);
+      const early = await closedDeath();
+      expect(
+        (await closures.detail(orgA, early.id, asCoordinator())).nomineeUnderReview,
+      ).toBe(false);
+    });
+
+    it('will not close the last Super Admin', async () => {
+      const other = staff(admin, [UserRole.SUPER_ADMIN], true);
+      const made = await closures.report(orgA, other, {
+        kind: ClosureKind.DECEASED,
+        member: '+919000000089',
+        reason: 'Certificate seen at the office',
+        dateOfDeath: DEATH,
+        evidenceType: ClosureEvidenceType.DEATH_CERTIFICATE,
+        evidenceLast4: '4821',
+      });
+      expect(made.level).toBe('SUPER_ADMIN');
+      const decider = staff(coordinator, [UserRole.SUPER_ADMIN], true);
+      await expect(closures.approve(orgA, made.id, decider, notes)).rejects.toThrow(
+        'no active Super Admin',
+      );
+      expect(await statusOf(superAdmin)).toBe('ACTIVE');
+    });
+
+    it('puts everything back on reopening, except staff roles', async () => {
+      const staffMember = (
+        await db.query('SELECT id FROM organization_memberships WHERE user_id=$1', [otherVolunteer])
+      )[0].id;
+      await db.query(
+        "INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,'COORDINATOR',$2)",
+        [staffMember, coordinator],
+      );
+      const made = await closures.report(orgA, asAdmin(), {
+        kind: ClosureKind.DECEASED,
+        member: subjectPhone,
+        reason: 'Certificate seen at the office',
+        dateOfDeath: DEATH,
+        evidenceType: ClosureEvidenceType.DEATH_CERTIFICATE,
+        evidenceLast4: '4821',
+      });
+      await closures.approve(orgA, made.id, asSuperAdmin(), notes);
+      expect(await statusOf(otherVolunteer)).toBe(AccountStatus.DECEASED_CLOSED);
+      await earn();
+
+      await expect(closures.reopen(orgA, made.id, asAdmin(), notes)).rejects.toThrow(
+        ForbiddenException,
+      );
+      await closures.reopen(orgA, made.id, asSuperAdmin(), notes);
+      expect(await statusOf(otherVolunteer)).toBe(AccountStatus.ACTIVE);
+      // What they earned while closed comes back with the account.
+      expect(await wallet(otherVolunteer)).toEqual({ balance: 2, frozen: 0, status: 'ACTIVE' });
+      const grants = await db.query(
+        'SELECT role, status FROM membership_role_grants WHERE membership_id=$1 ORDER BY role',
+        [staffMember],
+      );
+      expect(grants).toEqual([
+        { role: 'COORDINATOR', status: 'REVOKED' },
+        { role: 'VOLUNTEER', status: 'ACTIVE' },
+      ]);
+      const [member] = await db.query(
+        'SELECT status FROM organization_memberships WHERE id=$1',
+        [staffMember],
+      );
+      expect(member.status).toBe('APPROVED');
+    });
+
+    it('frees a duplicate’s ID, and returns it if nobody else has taken it', async () => {
+      await verified(otherVolunteer, 'same-document');
+      const made = await closures.report(orgA, asCoordinator(), {
+        kind: ClosureKind.DUPLICATE,
+        member: subjectPhone,
+        primaryMember: receiverPhone,
+        reason: 'Same person, same document',
+      });
+      await expect(closures.approve(orgA, made.id, asAdmin(), notes)).rejects.toThrow(
+        'what the person is told',
+      );
+      await closures.approve(orgA, made.id, asAdmin(), {
+        ...notes,
+        memberMessage: 'You have another account, which stays open.',
+      });
+      const fingerprint = async () =>
+        (
+          await db.query('SELECT document_fingerprint AS value FROM verified_identities WHERE user_id=$1', [
+            otherVolunteer,
+          ])
+        )[0].value;
+      expect(await fingerprint()).toBeNull();
+      await closures.reopen(orgA, made.id, asSuperAdmin(), notes);
+      expect(await fingerprint()).toBe('same-document');
+    });
+
+    it('ends a waiting recommendation when the account closes', async () => {
+      const recommended = await restrictions.recommend(orgA, asCoordinator(), {
+        member: subjectPhone,
+        restrictionType: GlobalRestrictionType.TEMPORARY_SUSPENSION,
+        reason: 'A concern about a visit',
+      });
+      await closedDeath();
+      const [found] = await db.query('SELECT status FROM restriction_cases WHERE id=$1', [
+        recommended.id,
+      ]);
+      expect(found.status).toBe('REFUSED');
+    });
+
+    it('refuses an estate ledger entry with no closure behind it', async () => {
+      const { id: walletId } = (
+        await db.query('SELECT id FROM universal_time_wallets WHERE user_id=$1', [otherVolunteer])
+      )[0];
+      await expect(
+        db.query(
+          `INSERT INTO time_credit_ledger(wallet_id,amount,balance_after,held,tx_type,originating_org_id,frozen_delta)
+           VALUES($1,1,2,false,'ESTATE_RECEIVED',$2,0)`,
+          [walletId, orgA],
+        ),
+      ).rejects.toThrow('chk_ledger_estate');
+    });
+
+    describe('nominees', () => {
+      const current = () =>
+        db.query(
+          'SELECT nominee_name AS name, nominee_phone AS phone, replaced_at FROM death_nominees WHERE user_id=$1 ORDER BY created_at',
+          [otherVolunteer],
+        );
+      const set = (over: Record<string, string> = {}) =>
+        nominees.set(otherVolunteer, {
+          name: 'Fathima Rahman',
+          phone: '9000000077',
+          code: '123456',
+          ...over,
+        });
+
+      it('keeps earlier nominees when changed, and does nothing for the same one', async () => {
+        await set();
+        await set();
+        expect(await current()).toHaveLength(1);
+        await set({ phone: '9000000066' });
+        const rows = await current();
+        expect(rows).toHaveLength(2);
+        expect(rows[0].replaced_at).not.toBeNull();
+        expect(rows[1].replaced_at).toBeNull();
+        expect((await nominees.mine(otherVolunteer)).nominee?.phone).toBe('+919000000066');
+        await nominees.remove(otherVolunteer, { code: '123456' });
+        expect((await nominees.mine(otherVolunteer)).nominee).toBeNull();
+        expect(await current()).toHaveLength(2);
+      });
+
+      it('refuses a wrong code, a token for another phone, and your own number', async () => {
+        await expect(set({ code: '000000' })).rejects.toThrow(BadRequestException);
+        await expect(
+          nominees.set(otherVolunteer, { name: 'Fathima Rahman', phone: '9000000077' }),
+        ).rejects.toThrow(BadRequestException);
+        await expect(
+          nominees.set(otherVolunteer, {
+            name: 'Fathima Rahman',
+            phone: '9000000077',
+            idToken: '+919000000099',
+          }),
+        ).rejects.toThrow(ForbiddenException);
+        await expect(set({ phone: subjectPhone })).rejects.toThrow('someone other than yourself');
+        expect(await current()).toHaveLength(0);
+        await nominees.set(otherVolunteer, {
+          name: 'Fathima Rahman',
+          phone: '9000000077',
+          idToken: subjectPhone,
+        });
+        expect(await current()).toHaveLength(1);
+      });
+
+      it('cannot be changed once the account is closed or restricted', async () => {
+        await db.query("UPDATE users SET status='DECEASED_CLOSED' WHERE id=$1", [otherVolunteer]);
+        await expect(set()).rejects.toThrow(ForbiddenException);
+      });
     });
   });
 });

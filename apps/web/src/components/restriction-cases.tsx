@@ -43,7 +43,7 @@ type CaseDetail = CaseSummary & {
 type AppealSummary = {
   id: string;
   reference: string;
-  kind: 'RESTRICTION' | 'COMPLAINT';
+  kind: 'RESTRICTION' | 'COMPLAINT' | 'CLOSURE';
   organizationId: string | null;
   organizationName: string | null;
   level: Level;
@@ -67,6 +67,16 @@ type AppealDetail = AppealSummary & {
     reason: string;
     memberMessage: string | null;
     recommendedByName: string | null;
+    decidedByName: string | null;
+    decidedAt: string | null;
+  } | null;
+  closure: {
+    reference: string;
+    reason: string;
+    memberMessage: string | null;
+    primaryName: string | null;
+    primaryPhone: string | null;
+    reportedByName: string | null;
     decidedByName: string | null;
     decidedAt: string | null;
   } | null;
@@ -116,6 +126,11 @@ const statusText = (row: CaseSummary) =>
       : row.status === 'ACTIVE' && row.reviewDue
         ? 'In force, review due'
         : STATUS[row.status];
+const APPEAL_ABOUT: Record<AppealSummary['kind'], string> = {
+  RESTRICTION: 'A restriction',
+  COMPLAINT: 'A complaint’s outcome',
+  CLOSURE: 'A duplicate closure',
+};
 const appealStatusText = (row: AppealSummary) =>
   row.status === 'OPEN'
     ? 'Waiting'
@@ -397,6 +412,8 @@ export function RestrictionCases({
       description:
         row.kind === 'RESTRICTION'
           ? 'If you overturn it, access and credits come back at once. Requests that were cancelled stay cancelled. Your decision is final.'
+          : row.kind === 'CLOSURE'
+            ? 'If you overturn it, the account and its credits come back at once, but staff roles must be granted again. Your decision is final.'
           : 'If you overturn it, the complaint’s outcome changes. The member reads your message in the app.',
       submitLabel: 'Decide appeal',
       fields: [
@@ -480,7 +497,7 @@ export function RestrictionCases({
                   <tr key={row.id} data-testid="appeal-row">
                     <td className="mono">{row.reference}</td>
                     {!organizationId && <td>{row.organizationName ?? '—'}</td>}
-                    <td>{row.kind === 'RESTRICTION' ? 'A restriction' : 'A complaint’s outcome'}</td>
+                    <td>{APPEAL_ABOUT[row.kind]}</td>
                     <td>{appealStatusText(row)}</td>
                     <td>{indiaTime(row.createdAt)}</td>
                     <td>
@@ -528,6 +545,26 @@ export function RestrictionCases({
               </p>
               <p>
                 <strong>They were told:</strong> “{appealDetail.restriction.memberMessage}”
+              </p>
+            </>
+          )}
+          {appealDetail.closure && (
+            <>
+              <h4>The closure</h4>
+              <p>
+                <strong>A duplicate account</strong> · {appealDetail.closure.reference} · Decided by{' '}
+                {appealDetail.closure.decidedByName || 'staff'}, reported by{' '}
+                {appealDetail.closure.reportedByName || 'staff'}
+              </p>
+              <p>
+                <strong>The account that stays:</strong>{' '}
+                {appealDetail.closure.primaryName || 'No name'} · {appealDetail.closure.primaryPhone}
+              </p>
+              <p>
+                <strong>Notes:</strong> {appealDetail.closure.reason}
+              </p>
+              <p>
+                <strong>They were told:</strong> “{appealDetail.closure.memberMessage}”
               </p>
             </>
           )}

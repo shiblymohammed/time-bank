@@ -214,6 +214,7 @@ describe('Restrictions and appeals', () => {
     appeals = new AppealsService(
       dataSource as never,
       service,
+      {} as never,
       complaints as unknown as ComplaintsService,
       notifications as never,
       audit as never,

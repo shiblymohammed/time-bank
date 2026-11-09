@@ -22,6 +22,9 @@ export enum TimeCreditTxType {
   FRAUD_RELEASED = 'FRAUD_RELEASED',
   CREDIT_CORRECTED = 'CREDIT_CORRECTED',
   FROZEN_RELEASED = 'FROZEN_RELEASED',
+  /** Credits leaving a deceased member's closed account for their verified nominee. */
+  ESTATE_SENT = 'ESTATE_SENT',
+  ESTATE_RECEIVED = 'ESTATE_RECEIVED',
 }
 
 const credits = {

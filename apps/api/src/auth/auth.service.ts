@@ -185,11 +185,25 @@ export class AuthService {
   async verifyOtp(dto: VerifyOtpDto, ipAddress?: string): Promise<AuthSessionResponse> {
     const phoneE164 = normalizeToE164(dto.phone);
     this.assertLegacyOtpEnabled();
+    // Throw after commit so a wrong code still spends an attempt.
+    if (!(await this.spendCode(phoneE164, dto.code))) {
+      throw new UnauthorizedException('Invalid verification code');
+    }
+    return this.signInVerifiedPhone(phoneE164, dto, ipAddress);
+  }
+
+  /** A signed-in person proves they still hold their phone, by a code sent to it. */
+  async confirmOwnPhoneCode(phone: string, code: string): Promise<boolean> {
+    this.assertLegacyOtpEnabled();
+    return this.spendCode(normalizeToE164(phone), code);
+  }
+
+  private async spendCode(phoneE164: string, code: string): Promise<boolean> {
     const phoneHash = sha256(phoneE164);
 
     // Lock verification and consumption together. Concurrent callers must not
     // both spend one code, or lose failed-attempt increments by saving stale rows.
-    const valid = await this.dataSource.transaction(async (manager) => {
+    return this.dataSource.transaction(async (manager) => {
       await manager.query('SELECT pg_advisory_xact_lock(hashtext($1))', [`otp:${phoneHash}`]);
       const otpRepo = manager.getRepository(OtpChallenge);
       const challenge = await otpRepo.findOne({
@@ -209,15 +223,11 @@ export class AuthService {
         );
       }
       challenge.attemptCount += 1;
-      const matches = sha256(dto.code) === challenge.codeHash;
+      const matches = sha256(code) === challenge.codeHash;
       if (matches) challenge.consumedAt = new Date();
       await otpRepo.save(challenge);
       return matches;
     });
-    // Throw after commit so a wrong code still spends an attempt.
-    if (!valid) throw new UnauthorizedException('Invalid verification code');
-
-    return this.signInVerifiedPhone(phoneE164, dto, ipAddress);
   }
 
   /** Called only after a server OTP or a verified Firebase phone ID token. */
@@ -302,7 +312,7 @@ export class AuthService {
 
     // 4. Check user status. A restricted person may still sign in, but only to read and appeal.
     const restricted = await this.isRestricted(user, () =>
-      new ForbiddenException(`Your account is ${user.status.toLowerCase()}. Access denied.`),
+      new ForbiddenException('This account is closed. Contact your community coordinator.'),
     );
 
     // 5. Resolve organization context (if provided)
@@ -443,13 +453,15 @@ export class AuthService {
   }
 
   /**
-   * True for a person restricted by a suspension, ban or hold. Any other closed account,
-   * such as a retired or deceased one, cannot sign in at all.
+   * True for a person restricted by a suspension, ban or hold, or closed as a duplicate: they can
+   * still read why, and appeal. Any other closed account, such as a retired or deceased one,
+   * cannot sign in at all.
    */
   private async isRestricted(user: User, refuse: () => Error): Promise<boolean> {
     if (
       user.status === AccountStatus.SUSPENDED ||
-      user.status === AccountStatus.PERMANENTLY_BANNED
+      user.status === AccountStatus.PERMANENTLY_BANNED ||
+      user.status === AccountStatus.DUPLICATE_CLOSED
     ) {
       return true;
     }

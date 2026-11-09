@@ -20,7 +20,7 @@ const stamp = String(Date.now()).slice(-4);
 const PHONES = { beneficiary: `+9190000${stamp}1`, volunteer: `+9190000${stamp}2` };
 
 async function call(method, path, token, body) {
-  const res = await fetch(API + path, {
+  const send = () => fetch(API + path, {
     method,
     headers: {
       'content-type': 'application/json',
@@ -28,6 +28,12 @@ async function call(method, path, token, body) {
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
+  let res = await send();
+  // Sign-ins are limited per minute. A long run can reach that, so wait it out once.
+  if (res.status === 429 && path.startsWith('/auth/')) {
+    await new Promise((r) => setTimeout(r, 61_000));
+    res = await send();
+  }
   const data = await res.json().catch(() => ({}));
   return { status: res.status, data: data && 'data' in data && !('meta' in data) ? data.data : data };
 }
@@ -616,10 +622,17 @@ const request = (token, minutes, notes) =>
   const act = (id, action, token, body = {}) =>
     call('POST', `/organizations/${ORG}/assignments/${id}/${action}`, token, body);
   const statusOf = async (id) => (await db('SELECT status FROM volunteer_assignments WHERE id = $1', [id]))[0].status;
-  const earned = async (token) =>
-    list(ok(await call('GET', '/wallet/transactions?limit=50', token), 'wallet')).filter(
-      (x) => (x.txType ?? x.tx_type) === 'SERVICE_EARNED',
-    ).length;
+  // Counted in the database: the wallet API shows a page, which fills up over many runs.
+  const earned = async (token) => {
+    const { id } = ok(await call('GET', '/auth/me', token), 'me');
+    const [row] = await db(
+      `SELECT count(*)::int AS count FROM time_credit_ledger l
+       JOIN universal_time_wallets w ON w.id = l.wallet_id
+       WHERE w.user_id = $1 AND l.tx_type = 'SERVICE_EARNED'`,
+      [id],
+    );
+    return row.count;
+  };
   // The QA service is for one volunteer; each step sets the team size it is testing.
   async function teamRequest(minimum, preferred, notes) {
     const r = ok(await request(t.beneficiary, 3, notes), 'create');
@@ -1233,6 +1246,346 @@ const request = (token, minutes, notes) =>
     assert.equal(after.memberMessage, 'We looked again and you were right.');
     assert.equal(after.appealOutcome, 'OVERTURNED');
     assert.equal(after.canAppeal, true, 'one more level remains above an administrator');
+  });
+
+  // ─── Account closures: nominees, deaths and duplicates ─────────────────────
+  const CLOSURES = `/organizations/${ORG}/closures`;
+  const CLOSURE_REASON = `Journey closure notes ${stamp}`;
+  const NOMINEE_NAME = `Journey Nominee ${stamp.replace(/\d/g, (d) => 'abcdefghij'[d])}`;
+  const today = () => new Date().toISOString().slice(0, 10);
+  const daysAgo = (days) => new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10);
+  // Someone who has joined this community, with a wallet holding these credits.
+  const closurePerson = async (digit, credits = 0, role = 'VOLUNTEER', chosenPhone = null) => {
+    const phone = chosenPhone ?? `+9190002${stamp}${digit}`;
+    const { accessToken } = await signInAgain(phone);
+    const [user] = await db('SELECT id FROM users WHERE phone_e164 = $1', [phone]);
+    const [member] = await db(
+      `INSERT INTO organization_memberships (organization_id, user_id, status, membership_number, approved_at)
+       VALUES ($1, $2, 'APPROVED', $3, now()) RETURNING id`,
+      [ORG, user.id, `JCL-${stamp}${digit}`],
+    );
+    await db(
+      `INSERT INTO membership_role_grants (membership_id, role, status, granted_by) VALUES ($1, $2, 'ACTIVE', $3)`,
+      [member.id, role, user.id],
+    );
+    await db(
+      `INSERT INTO universal_time_wallets (user_id, balance_credits, status) VALUES ($1, $2, 'ACTIVE')
+       ON CONFLICT (user_id) DO UPDATE SET balance_credits = $2`,
+      [user.id, credits],
+    );
+    return { phone, token: accessToken, userId: user.id, membershipId: member.id };
+  };
+  const checkId = (person, documentNumber) =>
+    call('POST', `/organizations/${ORG}/memberships/${person.membershipId}/identity`, t.coordinator, {
+      decision: 'VERIFY', documentType: 'AADHAAR_CARD', documentNumber, notes: 'Seen in person',
+    });
+  const madeUpId = (digit) => `8${stamp}${digit}${String(Date.now()).slice(-6)}`.slice(0, 12);
+  const walletOf = async (person) =>
+    (await db('SELECT balance_credits, frozen_credits, status FROM universal_time_wallets WHERE user_id = $1', [person.userId]))[0];
+  const nominate = async (person, name, phone) => {
+    await db(`UPDATE otp_challenges SET created_at = now() - interval '2 minutes' WHERE created_at > now() - interval '2 minutes'`);
+    const challenge = ok(await call('POST', '/auth/otp/request', null, { phone: person.phone }), 'code');
+    return ok(await call('PUT', '/me/nominee', person.token, { name, phone, code: challenge.devOtp ?? '123456' }), 'nominate');
+  };
+  const reportDeath = (token, person, date = daysAgo(1)) =>
+    call('POST', CLOSURES, token, {
+      kind: 'DECEASED', member: person.phone, reason: CLOSURE_REASON,
+      dateOfDeath: date, evidenceType: 'DEATH_CERTIFICATE', evidenceLast4: '4821',
+    });
+
+  await step('Nominee: naming someone takes a fresh code, and only you can see it', async () => {
+    t.deceased = await closurePerson('1', 5, 'BENEFICIARY');
+    ok(await call('POST', `/organizations/${ORG}/beneficiaries/eligibility`, t.coordinator, {
+      membershipId: t.deceased.membershipId,
+      eligibilityType: 'ONGOING',
+      reviewDueAt: new Date(Date.now() + 60 * 86_400_000).toISOString(),
+    }), 'eligibility');
+    const phone = `+9190003${stamp}1`;
+    assert.deepEqual(ok(await call('GET', '/me/nominee', t.deceased.token), 'empty').nominee, null);
+
+    await db(`UPDATE otp_challenges SET created_at = now() - interval '2 minutes' WHERE created_at > now() - interval '2 minutes'`);
+    ok(await call('POST', '/auth/otp/request', null, { phone: t.deceased.phone }), 'code');
+    const wrong = await call('PUT', '/me/nominee', t.deceased.token, { name: NOMINEE_NAME, phone, code: '000000' });
+    assert.equal(wrong.status, 400, `a wrong code, got ${wrong.status}`);
+    const none = await call('PUT', '/me/nominee', t.deceased.token, { name: NOMINEE_NAME, phone });
+    assert.equal(none.status, 400, `no code, got ${none.status}`);
+
+    const self = await call('PUT', '/me/nominee', t.deceased.token, { name: NOMINEE_NAME, phone: t.deceased.phone, code: '123456' });
+    assert.equal(self.status, 400, `naming yourself, got ${self.status}`);
+
+    const saved = await nominate(t.deceased, NOMINEE_NAME, phone);
+    assert.equal(saved.nominee.name, NOMINEE_NAME);
+    const [audit] = await db(
+      `SELECT payload::text AS payload FROM audit_events WHERE actor_id = $1 AND event_type = 'NOMINEE_SET' ORDER BY created_at DESC LIMIT 1`,
+      [t.deceased.userId],
+    );
+    assert.ok(audit, 'not audited');
+    assert.ok(!audit.payload.includes(NOMINEE_NAME) && !audit.payload.includes(phone), 'the audit names the nominee');
+    t.nomineePhone = phone;
+  });
+
+  await step('Death: a coordinator reports, nothing happens until a Municipality Admin approves', async () => {
+    const visit = ok(await request(t.deceased.token, 240, 'Journey closure visit'), 'request');
+    t.closureVisit = visit.id;
+    const member = await reportDeath(t.volunteer, t.deceased);
+    assert.equal(member.status, 403, `a member reporting, got ${member.status}`);
+    const future = await reportDeath(t.coordinator, t.deceased, '2099-01-01');
+    assert.equal(future.status, 400, `a future date, got ${future.status}`);
+    const made = ok(await reportDeath(t.coordinator, t.deceased), 'report');
+    t.deathClosure = made.id;
+    assert.equal(made.status, 'REPORTED');
+    assert.match(made.reference, /^CLS-/);
+    const twice = await reportDeath(t.coordinator, t.deceased);
+    assert.equal(twice.status, 409, `a second report, got ${twice.status}`);
+    ok(await call('GET', '/auth/me', t.deceased.token), 'still signed in');
+    assert.equal((await walletOf(t.deceased)).status, 'ACTIVE');
+
+    const one = `${CLOSURES}/${made.id}`;
+    const hidden = await call('GET', one, t.deceased.token);
+    assert.notEqual(hidden.status, 200, 'the person can read their own report');
+    const byCoordinator = await call('POST', `${one}/approve`, t.coordinator, { notes: 'Seen' });
+    assert.equal(byCoordinator.status, 403, `a coordinator approving, got ${byCoordinator.status}`);
+    return made.reference;
+  });
+
+  await step('Death: approval signs them out, cancels what has not started and freezes credits', async () => {
+    const one = `${CLOSURES}/${t.deathClosure}`;
+    ok(await call('POST', `${one}/approve`, t.municipalityAdmin, { notes: 'Certificate seen' }), 'approve');
+    const again = await call('POST', `${one}/approve`, t.municipalityAdmin, { notes: 'Certificate seen' });
+    assert.equal(again.status, 409, `approving twice, got ${again.status}`);
+
+    const [person] = await db('SELECT status FROM users WHERE id = $1', [t.deceased.userId]);
+    assert.equal(person.status, 'DECEASED_CLOSED');
+    const wallet = await walletOf(t.deceased);
+    assert.equal(wallet.status, 'CLOSED');
+    assert.equal(Number(wallet.balance_credits), 5, 'the credits moved');
+    const [member] = await db('SELECT status FROM organization_memberships WHERE id = $1', [t.deceased.membershipId]);
+    assert.equal(member.status, 'REVOKED');
+    const [cancelled] = await db(
+      `SELECT r.status, c.reason_code FROM service_requests r
+       JOIN request_cancellations c ON c.service_request_id = r.id WHERE r.id = $1`,
+      [t.closureVisit],
+    );
+    assert.equal(cancelled.status, 'CANCELLED', 'their request was left standing');
+    assert.equal(cancelled.reason_code, 'ACCOUNT_UNAVAILABLE');
+    const [{ live }] = await db(
+      `SELECT count(*)::int AS live FROM authentication_sessions WHERE user_id = $1 AND revoked_at IS NULL`,
+      [t.deceased.userId],
+    );
+    assert.equal(live, 0, 'a session is still live');
+
+    await db(`UPDATE otp_challenges SET created_at = now() - interval '2 minutes' WHERE created_at > now() - interval '2 minutes'`);
+    const challenge = ok(await call('POST', '/auth/otp/request', null, { phone: t.deceased.phone }), 'code');
+    const refused = await call('POST', '/auth/otp/verify', null, { phone: t.deceased.phone, code: challenge.devOtp ?? '123456' });
+    assert.equal(refused.status, 403, `signing in, got ${refused.status}`);
+
+    const changed = await call('PUT', '/me/nominee', t.deceased.token, { name: 'Someone Else', phone: '+919000399999', code: '123456' });
+    assert.equal(changed.status, 403, `changing a nominee afterwards, got ${changed.status}`);
+
+    const listed = ok(await call('GET', CLOSURES, t.coordinator), 'list');
+    assert.ok(listed.some((row) => row.id === t.deathClosure), 'not listed for staff');
+  });
+
+  await step('A nominee named close to the death waits for a review before any credits move', async () => {
+    const one = `${CLOSURES}/${t.deathClosure}`;
+    const seen = ok(await call('GET', one, t.coordinator), 'detail');
+    assert.equal(seen.nominee.name, NOMINEE_NAME);
+    assert.equal(seen.nomineeUnderReview, true, 'named yesterday, so it should be under review');
+    assert.equal(seen.transfer.available, 5);
+    assert.equal(seen.evidenceLast4, '4821');
+    assert.equal(seen.accounts[0].balance, 5);
+
+    const blocked = await call('POST', `${one}/recommend-transfer`, t.coordinator, { receiver: t.nomineePhone, notes: 'Seen' });
+    assert.equal(blocked.status, 409, `recommending during review, got ${blocked.status}`);
+    ok(await call('POST', `${one}/resolve-dispute`, t.coordinator, { notes: 'Family confirms it' }), 'review done');
+    assert.equal(ok(await call('GET', one, t.coordinator), 'detail').nomineeUnderReview, false);
+
+    ok(await call('POST', `${one}/dispute`, t.coordinator, { notes: 'A sibling questions this' }), 'dispute');
+    const again = await call('POST', `${one}/recommend-transfer`, t.coordinator, { receiver: t.nomineePhone, notes: 'Seen' });
+    assert.equal(again.status, 409, `recommending during a dispute, got ${again.status}`);
+    ok(await call('POST', `${one}/resolve-dispute`, t.coordinator, { notes: 'Settled with the family' }), 'settled');
+  });
+
+  await step('The nominee must have a verified account, and credits move only on a second person’s word', async () => {
+    const one = `${CLOSURES}/${t.deathClosure}`;
+    const noAccount = await call('POST', `${one}/recommend-transfer`, t.coordinator, { receiver: t.nomineePhone, notes: 'Seen' });
+    assert.equal(noAccount.status, 404, `no account yet, got ${noAccount.status}`);
+
+    const nominee = await closurePerson('8', 1, 'VOLUNTEER', t.nomineePhone);
+    t.nominee = nominee;
+    const unverified = await call('POST', `${one}/recommend-transfer`, t.coordinator, { receiver: nominee.phone, notes: 'Seen' });
+    assert.equal(unverified.status, 409, `an unchecked ID, got ${unverified.status}`);
+    ok(await checkId(nominee, madeUpId('8')), 'ID check');
+
+    ok(await call('POST', `${one}/recommend-transfer`, t.coordinator, { receiver: nominee.phone, notes: 'ID seen in person' }), 'recommend');
+    const twice = await call('POST', `${one}/recommend-transfer`, t.coordinator, { receiver: nominee.phone, notes: 'ID seen' });
+    assert.equal(twice.status, 409, `recommending twice, got ${twice.status}`);
+    const byCoordinator = await call('POST', `${one}/approve-transfer`, t.coordinator, { notes: 'Me too' });
+    assert.equal(byCoordinator.status, 403, `the recommender deciding, got ${byCoordinator.status}`);
+
+    const moved = ok(await call('POST', `${one}/approve-transfer`, t.municipalityAdmin, { notes: 'Passing it on' }), 'approve transfer');
+    assert.equal(Number(moved.amount), 5);
+    assert.equal(Number((await walletOf(t.deceased)).balance_credits), 0);
+    assert.equal(Number((await walletOf(nominee)).balance_credits), 6);
+    const legs = await db(
+      `SELECT tx_type, amount FROM time_credit_ledger WHERE closure_id = $1 ORDER BY tx_type`,
+      [t.deathClosure],
+    );
+    assert.deepEqual(legs.map((leg) => [leg.tx_type, Number(leg.amount)]), [['ESTATE_RECEIVED', 5], ['ESTATE_SENT', -5]]);
+
+    const nothing = await call('POST', `${one}/recommend-transfer`, t.coordinator, { receiver: nominee.phone, notes: 'Again' });
+    assert.equal(nothing.status, 409, `nothing left to move, got ${nothing.status}`);
+    return '5 credits passed on';
+  });
+
+  await step('Nothing sensitive reaches the audit log or a push', async () => {
+    const rows = await db(
+      `SELECT payload::text AS text FROM audit_events WHERE target_id = $1`,
+      [t.deathClosure],
+    );
+    assert.ok(rows.length >= 5, `only ${rows.length} audit rows`);
+    const pushes = await db(
+      `SELECT title || ' ' || body AS text FROM notification_outbox WHERE type LIKE 'CLOSURE%' AND created_at > now() - interval '30 minutes'`,
+    );
+    assert.ok(pushes.length, 'nobody was told');
+    for (const { text } of [...rows, ...pushes]) {
+      for (const secret of [CLOSURE_REASON, NOMINEE_NAME, t.nomineePhone, '4821']) {
+        assert.ok(!text.includes(secret), `"${secret}" leaked`);
+      }
+    }
+  });
+
+  await step('A wrong death report: only a Super Admin reopens, and memberships return but staff roles do not', async () => {
+    const mistaken = await closurePerson('2', 2, 'COORDINATOR');
+    const made = ok(await reportDeath(t.municipalityAdmin, mistaken), 'report');
+    const one = `${CLOSURES}/${made.id}`;
+    const selfDecide = await call('POST', `${one}/approve`, t.municipalityAdmin, { notes: 'Mine' });
+    assert.equal(selfDecide.status, 403, `the reporter deciding, got ${selfDecide.status}`);
+    ok(await call('POST', `${one}/approve`, t.admin, { notes: 'Report seen' }), 'approve');
+
+    const byAdmin = await call('POST', `${one}/reopen`, t.municipalityAdmin, { notes: 'Mistake' });
+    assert.equal(byAdmin.status, 403, `a Municipality Admin reopening, got ${byAdmin.status}`);
+    ok(await call('POST', `${one}/reopen`, t.admin, { notes: 'They are alive and well' }), 'reopen');
+
+    const [person] = await db('SELECT status FROM users WHERE id = $1', [mistaken.userId]);
+    assert.equal(person.status, 'ACTIVE');
+    assert.equal((await walletOf(mistaken)).status, 'ACTIVE');
+    const [member] = await db('SELECT status FROM organization_memberships WHERE id = $1', [mistaken.membershipId]);
+    assert.equal(member.status, 'APPROVED');
+    const [grant] = await db(`SELECT status FROM membership_role_grants WHERE membership_id = $1 AND role = 'COORDINATOR'`, [mistaken.membershipId]);
+    assert.equal(grant.status, 'REVOKED', 'a staff role came back by itself');
+  });
+
+  await step('Duplicate: an appealable limited session, frozen credits, and a repeated ID freed for the account that stays', async () => {
+    const extra = await closurePerson('3', 3);
+    const stays = await closurePerson('4', 0);
+    const sameId = madeUpId('3');
+    ok(await checkId(extra, sameId), 'ID check');
+    const repeated = await checkId(stays, sameId);
+    assert.equal(repeated.status, 409, `a repeated ID, got ${repeated.status}`);
+    assert.match(repeated.data.message, /Account closures/, 'staff are not told what to do next');
+    const report = (primaryMember) =>
+      call('POST', CLOSURES, t.coordinator, { kind: 'DUPLICATE', member: extra.phone, reason: CLOSURE_REASON, ...(primaryMember ? { primaryMember } : {}) });
+    assert.equal((await report()).status, 400, 'no account named to stay');
+    assert.equal((await report(extra.phone)).status, 400, 'itself named to stay');
+    const made = ok(await report(stays.phone), 'report');
+    const one = `${CLOSURES}/${made.id}`;
+
+    const seen = ok(await call('GET', one, t.coordinator), 'detail');
+    assert.equal(seen.accounts.length, 2, 'staff should compare both accounts');
+    assert.equal(seen.accounts[0].balance, 3);
+    assert.equal(seen.primary.phone, stays.phone);
+    const noMessage = await call('POST', `${one}/approve`, t.municipalityAdmin, { notes: 'Compared' });
+    assert.equal(noMessage.status, 400, `no message for them, got ${noMessage.status}`);
+    const toldThem = `Journey duplicate message ${stamp}`;
+    ok(await call('POST', `${one}/approve`, t.municipalityAdmin, { notes: 'Compared them', memberMessage: toldThem }), 'approve');
+
+    ok(await checkId(stays, sameId), 'the ID was not freed for the account that stays');
+    const wallet = await walletOf(extra);
+    assert.equal(wallet.status, 'CLOSED');
+    assert.equal(Number(wallet.balance_credits), 3);
+    assert.equal(Number((await walletOf(stays)).balance_credits), 0, 'credits were merged');
+    const transfer = await call('POST', `${one}/recommend-transfer`, t.coordinator, { receiver: stays.phone, notes: 'Move them' });
+    assert.equal(transfer.status, 409, `moving a duplicate's credits, got ${transfer.status}`);
+
+    const session = await signInAgain(extra.phone);
+    assert.equal(session.accountRestricted, true);
+    const blocked = await call('GET', `/organizations/${ORG}/requests`, session.accessToken);
+    assert.equal(blocked.status, 403, `reaching the community, got ${blocked.status}`);
+    const nominee = await call('GET', '/me/nominee', session.accessToken);
+    assert.equal(nominee.status, 403, `reaching their nominee, got ${nominee.status}`);
+    const view = ok(await call('GET', '/me/restriction', session.accessToken), 'my restriction');
+    assert.equal(view.restricted, true);
+    const [item] = view.items;
+    assert.equal(item.restrictionType, 'DUPLICATE_CLOSED');
+    assert.equal(item.memberMessage, toldThem);
+    assert.equal(item.canAppeal, true);
+    assert.ok(!JSON.stringify(view).includes(CLOSURE_REASON), 'the person can read the staff notes');
+
+    const appealPath = `/me/restriction/${made.id}/appeal`;
+    const filed = ok(await call('POST', appealPath, session.accessToken, { grounds: GROUNDS }), 'appeal');
+    const twice = await call('POST', appealPath, session.accessToken, { grounds: GROUNDS });
+    assert.equal(twice.status, 409, `a second appeal, got ${twice.status}`);
+
+    const open = list(ok(await call('GET', '/admin/appeals', t.admin), 'appeals')).find((row) => row.reference === filed.reference);
+    assert.ok(open, 'the appeal is not with the Super Admin');
+    assert.equal(open.kind, 'CLOSURE');
+    const read = ok(await call('GET', `/admin/appeals/${open.id}`, t.admin), 'appeal detail');
+    assert.equal(read.closure.primaryPhone, stays.phone);
+    const byLocal = await call('POST', `${APPEALS}/${open.id}/decide`, t.municipalityAdmin, { outcome: 'OVERTURNED', notes: 'Mine', memberMessage: 'Back' });
+    assert.ok(byLocal.status >= 400, 'the person who decided heard the appeal');
+    ok(await call('POST', `/admin/appeals/${open.id}/decide`, t.admin, {
+      outcome: 'OVERTURNED', notes: 'They are two people', memberMessage: 'We got this wrong.',
+    }), 'overturn');
+
+    const [person] = await db('SELECT status FROM users WHERE id = $1', [extra.userId]);
+    assert.equal(person.status, 'ACTIVE');
+    assert.equal((await walletOf(extra)).status, 'ACTIVE');
+    const [restored] = await db('SELECT verification_status FROM verified_identities WHERE user_id = $1', [extra.userId]);
+    assert.equal(restored.verification_status, 'UNVERIFIED', 'the other account now holds that ID, so this one needs a new check');
+    const [closure] = await db('SELECT status FROM account_closures WHERE id = $1', [made.id]);
+    assert.equal(closure.status, 'OVERTURNED');
+    const fresh = await signInAgain(extra.phone);
+    assert.ok(!fresh.accountRestricted, 'still restricted');
+    ok(await call('GET', `/organizations/${ORG}/complaints/mine`, fresh.accessToken), 'back in');
+  });
+
+  await step('Death has no appeal, and a closed account cannot be the one that stays', async () => {
+    const gone = await closurePerson('5', 0);
+    const made = ok(await reportDeath(t.coordinator, gone), 'report');
+    const one = `${CLOSURES}/${made.id}`;
+    ok(await call('POST', `${one}/approve`, t.municipalityAdmin, { notes: 'Record seen' }), 'approve');
+    const appeal = await call('POST', `${one}/appeal`, t.coordinator, { grounds: GROUNDS });
+    assert.equal(appeal.status, 409, `appealing a death, got ${appeal.status}`);
+
+    const another = await closurePerson('6', 0);
+    const named = await call('POST', CLOSURES, t.coordinator, {
+      kind: 'DUPLICATE', member: another.phone, primaryMember: gone.phone, reason: CLOSURE_REASON,
+    });
+    assert.equal(named.status, 409, `a closed account staying, got ${named.status}`);
+  });
+
+  await step('Someone in two communities needs a Super Admin, and the last Super Admin is protected', async () => {
+    const both = await closurePerson('7', 0);
+    await db(
+      `INSERT INTO organization_memberships (organization_id, user_id, status, membership_number, approved_at)
+       VALUES ((SELECT id FROM organizations WHERE id <> $1 ORDER BY created_at LIMIT 1), $2, 'APPROVED', $3, now())`,
+      [ORG, both.userId, `JCX-${stamp}7`],
+    );
+    const made = ok(await reportDeath(t.coordinator, both), 'report');
+    assert.equal(made.needsSuperAdmin, true);
+    const one = `${CLOSURES}/${made.id}`;
+    const byLocal = await call('POST', `${one}/approve`, t.municipalityAdmin, { notes: 'Seen it' });
+    assert.equal(byLocal.status, 403, `a Municipality Admin deciding, got ${byLocal.status}`);
+    ok(await call('POST', `${one}/refuse`, t.admin, { notes: 'No record of this' }), 'refused');
+    const [person] = await db('SELECT status FROM users WHERE id = $1', [both.userId]);
+    assert.equal(person.status, 'ACTIVE', 'a refused report changed the account');
+
+    const selfReport = await call('POST', CLOSURES, t.municipalityAdmin, {
+      kind: 'DECEASED', member: '+919000000107', reason: CLOSURE_REASON,
+      dateOfDeath: today(), evidenceType: 'DEATH_CERTIFICATE', evidenceLast4: '1111',
+    });
+    assert.equal(selfReport.status, 403, `reporting yourself, got ${selfReport.status}`);
   });
 
   await step('People are told along the way (push queue)', async () => {

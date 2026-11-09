@@ -7,6 +7,7 @@ import { ServiceCatalogue } from '@/components/service-catalogue';
 import { SafetyAlerts, useOpenSafetyAlerts } from '@/components/safety-alerts';
 import { Complaints, useOpenComplaints } from '@/components/complaints';
 import { RestrictionCases, useWaitingRestrictions } from '@/components/restriction-cases';
+import { Closures, useWaitingClosures } from '@/components/closures';
 import { ServiceOperations } from '@/components/service-operations';
 import { TimeCredits } from '@/components/time-credits';
 import { ApiManagement } from '@/components/api-management';
@@ -25,6 +26,7 @@ type Tab =
   | 'operations'
   | 'credits'
   | 'restrictions'
+  | 'closures'
   | 'audit';
 type Grant = { id: string; role: string; status: string };
 type Membership = {
@@ -212,6 +214,13 @@ const PAGES: {
     icon: 'restrictions',
     group: 'Governance',
     description: 'Suspensions, bans, reinstatement and appeals',
+  },
+  {
+    id: 'closures',
+    text: 'Account closures',
+    icon: 'closures',
+    group: 'Governance',
+    description: 'Deaths, duplicate accounts and passing on credits',
   },
   {
     id: 'audit',
@@ -674,6 +683,11 @@ export default function AdminDashboard(): React.JSX.Element {
     tenant === 'GLOBAL' ? null : tenant,
     revision,
   );
+  const waitingClosures = useWaitingClosures(
+    Boolean(profile) && canManageRoles,
+    tenant === 'GLOBAL' ? null : tenant,
+    revision,
+  );
   const initialRoles = [
     ...OPERATIONS,
     ...(canManageRoles ? ['COORDINATOR'] : []),
@@ -932,6 +946,12 @@ export default function AdminDashboard(): React.JSX.Element {
                 {item.id === 'restrictions' && waitingRestrictions > 0 && (
                   <span className="nav-alert-count" role="status">
                     {waitingRestrictions}
+                    <span className="sr-only"> waiting</span>
+                  </span>
+                )}
+                {item.id === 'closures' && waitingClosures > 0 && (
+                  <span className="nav-alert-count" role="status">
+                    {waitingClosures}
                     <span className="sr-only"> waiting</span>
                   </span>
                 )}
@@ -1979,6 +1999,18 @@ export default function AdminDashboard(): React.JSX.Element {
           )}
           {tab === 'restrictions' && (
             <RestrictionCases
+              key={tenant}
+              organizationId={tenant === 'GLOBAL' ? null : tenant}
+              isGlobal={isGlobal}
+              canDecide={canManageRoles}
+              revision={revision}
+              pending={pending}
+              openAction={openAction}
+              onExpired={expired}
+            />
+          )}
+          {tab === 'closures' && (
+            <Closures
               key={tenant}
               organizationId={tenant === 'GLOBAL' ? null : tenant}
               isGlobal={isGlobal}

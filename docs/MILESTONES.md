@@ -19,7 +19,7 @@ pilot.
 | M4 Time credits                | Built                                                                                                               |
 | M5 Team and transfer workflows | Built. See [TEAM_VISITS.md](TEAM_VISITS.md)                                                                         |
 | Second-organization readiness  | See below; needed before a second organization goes live                                                            |
-| M7 Governance and reporting    | Alerts, complaints, restrictions and appeals built; closure and reports planned                                 |
+| M7 Governance and reporting    | Alerts, complaints, restrictions, appeals and account closure built; reports planned                            |
 | M6, M8                         | Planned                                                                                                             |
 | M9 Production hardening        | Security review done; the rest planned                                                                              |
 | Kottakkal pilot                | Last, after all of the above. Staff second factor and restore drill built; see [checklist](PILOT_CHECKLIST.md)      |
@@ -93,8 +93,8 @@ recovery.
 - MunicipalitiesModule: Super Admin provisions municipalities (D#52, FR-GOV-01)
 - RolesModule: role grants, permission checks per API operation (NFR-09, FR-GOV-03)
 - BeneficiariesModule: eligibility, review dates, caregiver authorization (FR-BEN)
-- Phone/SIM recovery (FR-IDENT-04, D#43)
-- Nominee registration (FR-IDENT-05, D#44)
+- Phone/SIM recovery (FR-IDENT-05, D#43). Not built yet, and needs a place in the order of work.
+- Nominee registration (FR-IDENT-06, D#44). Built in Milestone 7; see [ACCOUNT_CLOSURE.md](ACCOUNT_CLOSURE.md).
 - Permission matrix tests (NFR-16)
 - Coordinator-facing Next.js screens for registration review
 
@@ -188,6 +188,7 @@ Rules, API and limits: [TEAM_VISITS.md](TEAM_VISITS.md).
 - MerchantsModule: offer management, Municipality Admin approval (FR-LOY-03, D#20)
 - QR code + one-time code redemption (FR-LOY-04, D#21, AT-15)
 - Recognition: badges, certificates, opt-in leaderboard (D#36, D#37)
+- Retire a closed account's coins, on death or duplicate closure (D#46, D#90). See [ACCOUNT_CLOSURE.md](ACCOUNT_CLOSURE.md).
 
 ---
 
@@ -201,7 +202,8 @@ Rules, API and limits: [TEAM_VISITS.md](TEAM_VISITS.md).
 - [x] ComplaintsModule: escalation hierarchy (FR-SAFE-03, D#75, D#76). See [COMPLAINTS.md](COMPLAINTS.md).
 - [x] RestrictionsModule: suspension, ban, reinstatement (FR-SAFE-06, FR-SAFE-07). See [RESTRICTIONS.md](RESTRICTIONS.md).
 - [x] Appeals, to Super Admin and through the complaint levels (D#77, D#78, BR-11, AT-09). Same document.
-- Account closure: death, duplicate (FR-IDENT-06, FR-IDENT-07)
+- [x] Account closure: death, duplicate, nominees (FR-IDENT-06, FR-IDENT-07, FR-IDENT-08). See
+      [ACCOUNT_CLOSURE.md](ACCOUNT_CLOSURE.md).
 - ReportsModule: municipality dashboard, PDF/XLSX/CSV exports (FR-REPORT)
 - External sponsor impact report export (D#54, UC-28, AT-29)
 

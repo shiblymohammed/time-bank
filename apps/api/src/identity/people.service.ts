@@ -167,7 +167,7 @@ export class PeopleService {
         if (other) {
           throw new ConflictException(
             `This document already verifies another account (membership ${other.membership_number ?? 'without a number'}). ` +
-              'Check with your Super Admin before going on.',
+              'If this is one person with two accounts, report the extra one under Account closures.',
           );
         }
         const updated = await m.query(

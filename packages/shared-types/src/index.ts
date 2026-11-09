@@ -354,6 +354,45 @@ export enum RestrictionCaseEventType {
 export enum AppealKind {
   RESTRICTION = 'RESTRICTION',
   COMPLAINT = 'COMPLAINT',
+  CLOSURE = 'CLOSURE',
+}
+
+/** Why an account is being closed (FR-IDENT-07, FR-IDENT-08). */
+export enum ClosureKind {
+  DECEASED = 'DECEASED',
+  DUPLICATE = 'DUPLICATE',
+}
+
+export enum ClosureStatus {
+  REPORTED = 'REPORTED',
+  REFUSED = 'REFUSED',
+  CLOSED = 'CLOSED',
+  /** A Super Admin found it was wrong. */
+  REOPENED = 'REOPENED',
+  OVERTURNED = 'OVERTURNED',
+}
+
+/** What staff saw. Only its type and last 4 characters are kept, never the document. */
+export enum ClosureEvidenceType {
+  DEATH_CERTIFICATE = 'DEATH_CERTIFICATE',
+  MUNICIPAL_RECORD = 'MUNICIPAL_RECORD',
+  HOSPITAL_RECORD = 'HOSPITAL_RECORD',
+}
+
+export enum ClosureEventType {
+  REPORTED = 'REPORTED',
+  REFUSED = 'REFUSED',
+  APPROVED = 'APPROVED',
+  NOTE = 'NOTE',
+  DISPUTED = 'DISPUTED',
+  DISPUTE_RESOLVED = 'DISPUTE_RESOLVED',
+  TRANSFER_RECOMMENDED = 'TRANSFER_RECOMMENDED',
+  TRANSFER_REFUSED = 'TRANSFER_REFUSED',
+  TRANSFERRED = 'TRANSFERRED',
+  APPEALED = 'APPEALED',
+  APPEAL_STANDS = 'APPEAL_STANDS',
+  OVERTURNED = 'OVERTURNED',
+  REOPENED = 'REOPENED',
 }
 
 export enum AppealStatus {

@@ -8,12 +8,13 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { AppealKind, AppealOutcome, AppealStatus, ComplaintLevel } from '@ktb/shared-types';
+import { AccountClosure } from '../../closures/entities/account-closure.entity';
 import { Complaint } from '../../complaints/entities/complaint.entity';
 import { User } from '../../identity/entities/user.entity';
 import { Organization } from '../../organizations/entities/organization.entity';
 import { RestrictionCase } from './restriction-case.entity';
 
-/** A challenge to a restriction or a complaint's outcome, heard by someone who did not decide it. */
+/** A challenge to a restriction, a closure or a complaint's outcome, heard by someone who did not decide it. */
 @Entity('appeals')
 export class Appeal {
   @PrimaryGeneratedColumn('uuid')
@@ -38,6 +39,13 @@ export class Appeal {
   @ManyToOne(() => RestrictionCase, { onDelete: 'RESTRICT', nullable: true })
   @JoinColumn({ name: 'restriction_case_id' })
   restrictionCase?: RestrictionCase | null;
+
+  @Column({ name: 'closure_id', type: 'uuid', nullable: true })
+  closureId?: string | null;
+
+  @ManyToOne(() => AccountClosure, { onDelete: 'RESTRICT', nullable: true })
+  @JoinColumn({ name: 'closure_id' })
+  closure?: AccountClosure | null;
 
   @Column({ name: 'complaint_id', type: 'uuid', nullable: true })
   complaintId?: string | null;
