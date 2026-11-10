@@ -57,6 +57,6 @@ import { PeopleController } from '../identity/people.controller';
     StaffCodeService,
     PeopleService,
   ],
-  exports: [JwtModule, AuthGuard, AuthService, SmsService, FirebaseTokenService],
+  exports: [JwtModule, AuthGuard, AuthService, SmsService, FirebaseTokenService, PeopleService],
 })
 export class AuthModule {}

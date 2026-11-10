@@ -70,6 +70,7 @@ import {
   AppealOutcome,
   ClosureEvidenceType,
   ClosureKind,
+  IdentityDocumentType,
   GlobalRestrictionType,
   GlobalRestrictionStatus,
   MembershipStatus,
@@ -112,6 +113,9 @@ import { SponsorReports1729118400022 } from '../src/database/migrations/17291184
 import { staffFigures, summaryFigures } from '../src/reports/report-figures';
 import { monthPeriod } from '../src/reports/report-period';
 import { ReportsService } from '../src/reports/reports.service';
+import { PhoneRecovery1729118400025 } from '../src/database/migrations/1729118400025-PhoneRecovery';
+import { PeopleService } from '../src/identity/people.service';
+import { PhoneRecoveryService } from '../src/phone-recovery/phone-recovery.service';
 import { Foundation1729118400001 } from '../src/database/migrations/1729118400001-Foundation';
 import { IdentityAndOrganizations1729118400002 } from '../src/database/migrations/1729118400002-IdentityAndOrganizations';
 import { ServiceCatalogueAndRequests1729118400003 } from '../src/database/migrations/1729118400003-ServiceCatalogueAndRequests';
@@ -154,6 +158,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       SponsorReports1729118400022,
       LoyaltyAndMerchants1729118400023,
       OfflineVisits1729118400024,
+      PhoneRecovery1729118400025,
     ],
     synchronize: false,
     extra: {
@@ -5116,6 +5121,739 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       it('cannot be changed once the account is closed or restricted', async () => {
         await db.query("UPDATE users SET status='DECEASED_CLOSED' WHERE id=$1", [otherVolunteer]);
         await expect(set()).rejects.toThrow(ForbiddenException);
+      });
+    });
+
+    describe('after a move to a new number', () => {
+      const moved = (oldPhone: string, newPhone: string, subject: string, decidedOn: string) =>
+        db.query(
+          `INSERT INTO phone_recovery_cases(reference,organization_id,subject_user_id,subject_membership_id,
+             old_phone,new_phone,level,status,document_type,document_last4,document_result,reason,
+             opened_by_user_id,confirmed_at,decided_by_user_id,decided_at)
+           VALUES($1,$2,$3,(SELECT id FROM organization_memberships WHERE user_id=$3 LIMIT 1),$4,$5,
+             'COORDINATOR','COMPLETED','AADHAAR_CARD','9012','MATCHED','Seen at the office',$6,$7,$6,$7)`,
+          [`PHN-${oldPhone}`, orgA, subject, oldPhone, newPhone, coordinator, decidedOn],
+        );
+
+      it('no longer treats a number that has moved as the named nominee', async () => {
+        await nominate();
+        await moved(receiverPhone, '+919000000055', receiver, '2025-06-01');
+        const made = await closedDeath();
+        await closures.recommendTransfer(orgA, made.id, asCoordinator(), {
+          receiver: receiverPhone,
+          notes: 'A stranger later holds the number',
+        });
+        expect(
+          (await closures.detail(orgA, made.id, asCoordinator())).transfer.receiverMatchesNominee,
+        ).toBe(false);
+        await expect(closures.approveTransfer(orgA, made.id, asAdmin(), notes)).rejects.toThrow(
+          'A Super Admin must decide',
+        );
+        await closures.approveTransfer(orgA, made.id, asSuperAdmin(), notes);
+        expect(await wallet(receiver)).toMatchObject({ balance: 1 });
+      });
+
+      it('still trusts a number that moved before the nominee was named', async () => {
+        await moved(receiverPhone, '+919000000055', receiver, '2024-06-01');
+        await nominate();
+        const made = await closedDeath();
+        await closures.recommendTransfer(orgA, made.id, asCoordinator(), {
+          receiver: receiverPhone,
+          notes: 'Checked',
+        });
+        await closures.approveTransfer(orgA, made.id, asAdmin(), notes);
+        expect(await wallet(receiver)).toMatchObject({ balance: 1 });
+      });
+
+      it('reviews a nominee named within 30 days after the member’s own move', async () => {
+        await nominate(receiverPhone, '2025-06-10');
+        await moved(subjectPhone, '+919000000054', otherVolunteer, '2025-06-01');
+        const made = await closedDeath();
+        expect((await closures.detail(orgA, made.id, asCoordinator())).nomineeUnderReview).toBe(true);
+      });
+
+      it('does not review a nominee named well after the move', async () => {
+        await nominate(receiverPhone, '2025-09-10');
+        await moved(subjectPhone, '+919000000054', otherVolunteer, '2025-06-01');
+        const made = await closedDeath();
+        expect((await closures.detail(orgA, made.id, asCoordinator())).nomineeUnderReview).toBe(false);
+      });
+    });
+  });
+
+  describe('lost phone recovery', () => {
+    const subjectPhone = '+919000000002';
+    const newPhone = '+919000000050';
+    const DOCUMENT = '123456789012';
+    const notes = { notes: 'Checked by staff' };
+    let recoveries: PhoneRecoveryService;
+    let people: PeopleService;
+    let closures: ClosuresService;
+    let nominees: NomineeService;
+    let auth: AuthService;
+    let admin: string;
+    let superAdmin: string;
+
+    const staff = (userId: string, roles: UserRole[], isSuperAdmin = false) =>
+      ({
+        userId,
+        organizationId: orgA,
+        membershipId: 'membership',
+        membershipStatus: MembershipStatus.APPROVED,
+        roles,
+        isSuperAdmin,
+      }) as EvaluatedMembershipContext;
+    const asCoordinator = () => staff(coordinator, [UserRole.COORDINATOR]);
+    const asAdmin = () => staff(admin, [UserRole.MUNICIPALITY_ADMIN]);
+    const asSuperAdmin = () => staff(superAdmin, [UserRole.SUPER_ADMIN], true);
+
+    const verifyOnRecord = (membership = otherMember) =>
+      people.decideIdentity(orgA, membership, coordinator, {
+        decision: 'VERIFY',
+        documentType: 'AADHAAR_CARD',
+        documentNumber: DOCUMENT,
+      });
+    const open = (actor = asCoordinator(), overrides: Record<string, unknown> = {}) =>
+      recoveries.open(orgA, actor, {
+        member: subjectPhone,
+        newPhone,
+        documentType: IdentityDocumentType.AADHAAR_CARD,
+        documentNumber: DOCUMENT,
+        reason: 'Aadhaar card seen at the office',
+        ...overrides,
+      } as never);
+    /** The person signs in with the new SIM, which makes an empty account, and confirms. */
+    const confirmFromNewPhone = async (caseId: string, phone = newPhone) => {
+      const session = await auth.signInVerifiedPhone(phone, {});
+      await recoveries.confirm(session.user.id, caseId, { code: '123456' });
+      return session.user.id;
+    };
+    const ready = async () => {
+      await verifyOnRecord();
+      const made = await open();
+      const placeholder = await confirmFromNewPhone(made.id);
+      return { made, placeholder };
+    };
+    const userRow = async (userId: string) =>
+      (await db.query('SELECT phone_e164 AS phone, status FROM users WHERE id=$1', [userId]))[0];
+    const liveSessions = async (userId: string) =>
+      Number(
+        (
+          await db.query(
+            'SELECT count(*) FROM authentication_sessions WHERE user_id=$1 AND revoked_at IS NULL',
+            [userId],
+          )
+        )[0].count,
+      );
+
+    beforeEach(async () => {
+      const notifications = new NotificationsService(
+        db.getRepository(PushDevice),
+        db,
+        new PushSender(new ConfigService()),
+      );
+      const controls = new CreditControlsService(db, audit);
+      const restrictions = new RestrictionsService(
+        db,
+        notifications,
+        audit,
+        requests,
+        controls,
+        {} as never,
+        loyalty,
+      );
+      closures = new ClosuresService(db, notifications, audit, restrictions, controls, loyalty);
+      people = new PeopleService(
+        db,
+        new ConfigService({ NODE_ENV: 'test', JWT_SECRET: 'disposable-integration-test-secret' }),
+        audit,
+      );
+      const codes = { confirmOwnPhoneCode: async (_: string, code: string) => code === '123456' };
+      const tokens = { verifyPhoneToken: async (token: string) => token };
+      recoveries = new PhoneRecoveryService(
+        db,
+        notifications,
+        audit,
+        restrictions,
+        people,
+        codes as never,
+        tokens as never,
+      );
+      nominees = new NomineeService(db, codes as never, tokens as never, audit);
+      auth = new AuthService(
+        db.getRepository(OtpChallenge),
+        db.getRepository(AuthenticationSession),
+        db.getRepository(User),
+        db.getRepository(Organization),
+        db.getRepository(OrganizationMembership),
+        db,
+        new JwtService({ secret: 'disposable-integration-test-secret' }),
+        new ConfigService({ NODE_ENV: 'test', AUTH_ALLOW_MOCK_OTP: 'true' }),
+        audit,
+        { sendOtp: jest.fn() } as unknown as SmsService,
+      );
+      const grant = async (phone: string, role: string) => {
+        const userId = await id('INSERT INTO users(phone_e164) VALUES($1) RETURNING id', [phone]);
+        const membership = await id(
+          "INSERT INTO organization_memberships(organization_id,user_id,status) VALUES($1,$2,'APPROVED') RETURNING id",
+          [orgA, userId],
+        );
+        await db.query(
+          'INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,$2,$3)',
+          [membership, role, coordinator],
+        );
+        return userId;
+      };
+      admin = await grant('+919000000088', 'MUNICIPALITY_ADMIN');
+      superAdmin = await grant('+919000000089', 'SUPER_ADMIN');
+      await db.query(
+        "INSERT INTO universal_time_wallets(user_id,balance_credits) VALUES($1,5)",
+        [otherVolunteer],
+      );
+    });
+
+    it('moves the number and keeps the same account, wallet and membership', async () => {
+      const { made, placeholder } = await ready();
+      const old = await auth.signInVerifiedPhone(subjectPhone, {});
+      await db.query(
+        "INSERT INTO push_devices(user_id,token,platform) VALUES($1,'old-phone','ANDROID'),($2,'new-phone','ANDROID')",
+        [otherVolunteer, placeholder],
+      );
+      expect(old.user.id).toBe(otherVolunteer);
+
+      await recoveries.approve(orgA, made.id, asAdmin(), notes);
+
+      expect(await userRow(otherVolunteer)).toMatchObject({ phone: newPhone, status: 'ACTIVE' });
+      const [wallet] = await db.query(
+        'SELECT balance_credits::float AS balance, status FROM universal_time_wallets WHERE user_id=$1',
+        [otherVolunteer],
+      );
+      expect(wallet).toEqual({ balance: 5, status: 'ACTIVE' });
+      const [membership] = await db.query(
+        'SELECT status FROM organization_memberships WHERE id=$1',
+        [otherMember],
+      );
+      expect(membership.status).toBe('APPROVED');
+      // Every phone signed in until now is signed out, on both accounts.
+      expect(await liveSessions(otherVolunteer)).toBe(0);
+      expect(await liveSessions(placeholder)).toBe(0);
+      expect(await db.query('SELECT 1 FROM push_devices')).toHaveLength(0);
+      // The empty account keeps its row, and gives up the number.
+      expect(await userRow(placeholder)).toMatchObject({
+        status: 'RECOVERY_PLACEHOLDER_RETIRED',
+        phone: expect.stringMatching(/^retired-/),
+      });
+      const [emptyWallet] = await db.query(
+        'SELECT status FROM universal_time_wallets WHERE user_id=$1',
+        [placeholder],
+      );
+      expect(emptyWallet.status).toBe('CLOSED');
+      // Signing in with the new number now reaches the original account.
+      const next = await auth.signInVerifiedPhone(newPhone, {});
+      expect(next.user.id).toBe(otherVolunteer);
+      expect(next.roles).toEqual([]);
+    });
+
+    it('cancels a merchant code waiting on the old phone, and keeps the coins', async () => {
+      const { made } = await ready();
+      const wallet = await id(
+        'INSERT INTO loyalty_wallets(organization_id,user_id,balance_coins) VALUES($1,$2,10) RETURNING id',
+        [orgA, otherVolunteer],
+      );
+      const merchant = await id(
+        `INSERT INTO organization_merchants(organization_id,owner_user_id,name,address,phone,status)
+         VALUES($1,$2,'Tea shop','Beach Road','+919000000077','APPROVED') RETURNING id`,
+        [orgA, coordinator],
+      );
+      const offer = await id(
+        `INSERT INTO merchant_offers(organization_id,merchant_id,title,description,terms,coins,starts_at,
+           ends_at,redemption_limit,status,proposed_by,client_operation_id)
+         VALUES($1,$2,'Tea','A cup of tea','One a day',5,now()-interval '1 day',now()+interval '1 day',
+           10,'APPROVED',$3,gen_random_uuid()) RETURNING id`,
+        [orgA, merchant, coordinator],
+      );
+      const code = await id(
+        `INSERT INTO loyalty_redemptions(organization_id,user_id,wallet_id,merchant_id,offer_id,coins,
+           token_hash,code_hash,client_operation_id,expires_at)
+         VALUES($1,$2,$3,$4,$5,5,repeat('a',64),repeat('b',64),gen_random_uuid(),now()+interval '5 minutes')
+         RETURNING id`,
+        [orgA, otherVolunteer, wallet, merchant, offer],
+      );
+
+      await recoveries.approve(orgA, made.id, asAdmin(), notes);
+
+      const [redemption] = await db.query('SELECT status FROM loyalty_redemptions WHERE id=$1', [code]);
+      expect(redemption.status).toBe('CANCELLED');
+      const [coins] = await db.query(
+        'SELECT balance_coins::float AS balance, status FROM loyalty_wallets WHERE id=$1',
+        [wallet],
+      );
+      expect(coins).toEqual({ balance: 10, status: 'ACTIVE' });
+    });
+
+    it('warns the old phones when a case opens, and changes nothing yet', async () => {
+      await verifyOnRecord();
+      const session = await auth.signInVerifiedPhone(subjectPhone, {});
+      await open();
+      const [notice] = await db.query(
+        "SELECT title, body FROM notification_outbox WHERE user_id=$1 AND type='PHONE_RECOVERY_OPENED'",
+        [otherVolunteer],
+      );
+      expect(notice.body).not.toContain(newPhone);
+      expect(notice.body).not.toContain('Aadhaar');
+      expect(await userRow(otherVolunteer)).toMatchObject({ phone: subjectPhone });
+      expect(await liveSessions(session.user.id)).toBe(1);
+    });
+
+    it('cannot be approved until the new number has proved itself', async () => {
+      await verifyOnRecord();
+      const made = await open();
+      await expect(recoveries.approve(orgA, made.id, asAdmin(), notes)).rejects.toThrow(
+        'has not confirmed',
+      );
+      const session = await auth.signInVerifiedPhone(newPhone, {});
+      await expect(recoveries.confirm(session.user.id, made.id, { code: '000000' })).rejects.toThrow(
+        BadRequestException,
+      );
+      await expect(
+        recoveries.confirm(session.user.id, made.id, { idToken: '+919000000051' }),
+      ).rejects.toThrow(ForbiddenException);
+      await recoveries.confirm(session.user.id, made.id, { idToken: newPhone });
+      await recoveries.approve(orgA, made.id, asAdmin(), notes);
+      expect(await userRow(otherVolunteer)).toMatchObject({ phone: newPhone });
+    });
+
+    it('lets only the holder of the new number confirm or decline', async () => {
+      await verifyOnRecord();
+      const made = await open();
+      await expect(recoveries.confirm(volunteer, made.id, { code: '123456' })).rejects.toThrow(
+        'Case not found',
+      );
+      await expect(recoveries.decline(volunteer, made.id)).rejects.toThrow('Case not found');
+    });
+
+    it('shows whoever holds the new number only a reference', async () => {
+      await verifyOnRecord();
+      const made = await open();
+      const session = await auth.signInVerifiedPhone(newPhone, {});
+      const seen = await recoveries.mine(session.user.id);
+      expect(seen.pending).toEqual({
+        id: made.id,
+        reference: made.reference,
+        communityName: 'Organization A',
+        status: 'OPENED',
+      });
+      expect(JSON.stringify(seen)).not.toContain(subjectPhone);
+      expect((await recoveries.mine(volunteer)).pending).toBeNull();
+    });
+
+    it('ends the case if the holder of the new number says it is not them', async () => {
+      await verifyOnRecord();
+      const made = await open();
+      const session = await auth.signInVerifiedPhone(newPhone, {});
+      await recoveries.decline(session.user.id, made.id);
+      expect((await recoveries.detail(orgA, made.id, asAdmin())).status).toBe('REFUSED');
+      expect(await userRow(otherVolunteer)).toMatchObject({ phone: subjectPhone });
+      expect((await recoveries.mine(session.user.id)).pending).toBeNull();
+      // The case has gone, so someone else can open one for that person.
+      await open(asCoordinator(), { newPhone: '+919000000051' });
+    });
+
+    describe('who decides', () => {
+      it('refuses a coordinator, and whoever opened the case', async () => {
+        const { made } = await ready();
+        await expect(recoveries.approve(orgA, made.id, asCoordinator(), notes)).rejects.toThrow(
+          'Municipality Admin must decide',
+        );
+        const byAdmin = await recoveries.withdraw(orgA, made.id, asCoordinator(), notes);
+        expect(byAdmin.status).toBe('WITHDRAWN');
+        const second = await open(asAdmin());
+        const session = await auth.signInVerifiedPhone(newPhone, {});
+        await recoveries.confirm(session.user.id, second.id, { code: '123456' });
+        await expect(recoveries.approve(orgA, second.id, asAdmin(), notes)).rejects.toThrow(
+          'someone else must decide',
+        );
+        await recoveries.approve(orgA, second.id, asSuperAdmin(), notes);
+      });
+
+      it('sends a document that does not match to a Super Admin', async () => {
+        await verifyOnRecord();
+        const made = await open(asCoordinator(), { documentNumber: '999988887777' });
+        expect(made).toMatchObject({ needsSuperAdmin: true, documentResult: 'DIFFERENT' });
+        await confirmFromNewPhone(made.id);
+        await expect(recoveries.approve(orgA, made.id, asAdmin(), notes)).rejects.toThrow(
+          'A Super Admin must decide',
+        );
+        await recoveries.approve(orgA, made.id, asSuperAdmin(), notes);
+      });
+
+      it('sends an account with no document on record to a Super Admin', async () => {
+        const made = await open();
+        expect(made).toMatchObject({ needsSuperAdmin: true, documentResult: 'NONE_ON_RECORD' });
+      });
+
+      it('sends someone in several communities to a Super Admin', async () => {
+        await verifyOnRecord(memberA);
+        const made = await open(asCoordinator(), { member: '+919000000001' });
+        expect(made).toMatchObject({ needsSuperAdmin: true, documentResult: 'MATCHED' });
+      });
+
+      it('refuses a document that verifies a different account, and records the attempt', async () => {
+        await verifyOnRecord(memberA);
+        await expect(open()).rejects.toThrow('already verifies another account');
+        expect(await db.query('SELECT 1 FROM phone_recovery_cases')).toHaveLength(0);
+        expect(
+          await db.query("SELECT 1 FROM audit_events WHERE event_type='PHONE_RECOVERY_DOCUMENT_REFUSED'"),
+        ).toHaveLength(1);
+      });
+
+      it('keeps a coordinator from opening a case about an administrator', async () => {
+        await expect(open(asCoordinator(), { member: '+919000000088' })).rejects.toThrow(
+          'higher level',
+        );
+      });
+
+      it('never lets someone act on their own case, or read it', async () => {
+        await expect(open(staff(otherVolunteer, [UserRole.COORDINATOR]))).rejects.toThrow(
+          ForbiddenException,
+        );
+        await verifyOnRecord();
+        const made = await open();
+        const own = staff(otherVolunteer, [UserRole.MUNICIPALITY_ADMIN]);
+        await expect(recoveries.detail(orgA, made.id, own)).rejects.toThrow('Case not found');
+        await expect(recoveries.refuse(orgA, made.id, own, notes)).rejects.toThrow('Case not found');
+        expect(await recoveries.list(orgA, own, true)).toHaveLength(0);
+      });
+
+      it('lets the only other Super Admin both open and approve for a Super Admin', async () => {
+        const second = await id("INSERT INTO users(phone_e164) VALUES('+919000000087') RETURNING id");
+        const membership = await id(
+          "INSERT INTO organization_memberships(organization_id,user_id,status) VALUES($1,$2,'APPROVED') RETURNING id",
+          [orgA, second],
+        );
+        await db.query(
+          "INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,'SUPER_ADMIN',$2)",
+          [membership, coordinator],
+        );
+        const lost = await open(asSuperAdmin(), { member: '+919000000087' });
+        await confirmFromNewPhone(lost.id);
+        await recoveries.approve(orgA, lost.id, asSuperAdmin(), notes);
+        expect(await userRow(second)).toMatchObject({ phone: newPhone });
+      });
+
+      it('holds the opener back when a third Super Admin could decide', async () => {
+        const grantSuper = async (phone: string) => {
+          const userId = await id('INSERT INTO users(phone_e164) VALUES($1) RETURNING id', [phone]);
+          const membership = await id(
+            "INSERT INTO organization_memberships(organization_id,user_id,status) VALUES($1,$2,'APPROVED') RETURNING id",
+            [orgA, userId],
+          );
+          await db.query(
+            "INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,'SUPER_ADMIN',$2)",
+            [membership, coordinator],
+          );
+          return userId;
+        };
+        await grantSuper('+919000000087');
+        await grantSuper('+919000000086');
+        const lost = await open(asSuperAdmin(), { member: '+919000000087' });
+        await confirmFromNewPhone(lost.id);
+        await expect(recoveries.approve(orgA, lost.id, asSuperAdmin(), notes)).rejects.toThrow(
+          'someone else must decide',
+        );
+      });
+    });
+
+    describe('when the new number already has an account', () => {
+      it('refuses an account with real standing', async () => {
+        await verifyOnRecord();
+        await expect(open(asCoordinator(), { newPhone: '+919000000001' })).rejects.toThrow(
+          'its own account',
+        );
+      });
+
+      it('refuses an account that has credit history, even with no membership', async () => {
+        await verifyOnRecord();
+        const other = await id(
+          'INSERT INTO users(phone_e164) VALUES($1) RETURNING id',
+          [newPhone],
+        );
+        await db.query('INSERT INTO universal_time_wallets(user_id,balance_credits) VALUES($1,1)', [
+          other,
+        ]);
+        await expect(open()).rejects.toThrow('its own account');
+      });
+
+      it.each([
+        [
+          'coins',
+          (user: string) =>
+            db.query(
+              'INSERT INTO loyalty_wallets(organization_id,user_id,frozen_coins) VALUES($1,$2,3)',
+              [orgA, user],
+            ),
+        ],
+        [
+          'coin history',
+          async (user: string) => {
+            const wallet = await id(
+              'INSERT INTO loyalty_wallets(organization_id,user_id) VALUES($1,$2) RETURNING id',
+              [orgA, user],
+            );
+            await db.query(
+              `INSERT INTO loyalty_ledger(wallet_id,organization_id,user_id,amount,balance_after,frozen_after,
+                 tx_type,event_key)
+               VALUES($1,$2,$3,2,2,0,'ENGAGEMENT_EARNED','award-1')`,
+              [wallet, orgA, user],
+            );
+          },
+        ],
+        [
+          'a merchant',
+          (user: string) =>
+            db.query(
+              `INSERT INTO organization_merchants(organization_id,owner_user_id,name,address,phone)
+               VALUES($1,$2,'Tea shop','Beach Road',$3)`,
+              [orgA, user, newPhone],
+            ),
+        ],
+      ])('refuses an account with %s, even with no membership', async (_, add) => {
+        await verifyOnRecord();
+        const other = await id('INSERT INTO users(phone_e164) VALUES($1) RETURNING id', [newPhone]);
+        await add(other);
+        await expect(open()).rejects.toThrow('its own account');
+      });
+
+      it('asks staff to reject a waiting application first, then accepts the number', async () => {
+        await verifyOnRecord();
+        const other = await id('INSERT INTO users(phone_e164) VALUES($1) RETURNING id', [newPhone]);
+        const application = await id(
+          "INSERT INTO organization_memberships(organization_id,user_id,status) VALUES($1,$2,'APPLIED') RETURNING id",
+          [orgA, other],
+        );
+        await expect(open()).rejects.toThrow('waiting membership application');
+        await db.query("UPDATE organization_memberships SET status='REJECTED' WHERE id=$1", [
+          application,
+        ]);
+        const made = await open();
+        await recoveries.confirm(other, made.id, { code: '123456' });
+        await recoveries.approve(orgA, made.id, asAdmin(), notes);
+        expect(await userRow(other)).toMatchObject({ status: 'RECOVERY_PLACEHOLDER_RETIRED' });
+      });
+
+      it('looks again at approval, in case the number gained standing while waiting', async () => {
+        const { made, placeholder } = await ready();
+        await db.query(
+          "INSERT INTO organization_memberships(organization_id,user_id,status) VALUES($1,$2,'APPROVED')",
+          [orgA, placeholder],
+        );
+        await expect(recoveries.approve(orgA, made.id, asAdmin(), notes)).rejects.toThrow(
+          'its own account',
+        );
+        expect(await userRow(otherVolunteer)).toMatchObject({ phone: subjectPhone });
+      });
+    });
+
+    describe('the old number', () => {
+      const moveAway = async () => {
+        const { made } = await ready();
+        await recoveries.approve(orgA, made.id, asAdmin(), notes);
+        return made;
+      };
+
+      it('refuses sign-in for 90 days without creating an account', async () => {
+        await moveAway();
+        const before = await db.getRepository(User).count();
+        await expect(auth.signInVerifiedPhone(subjectPhone, {})).rejects.toThrow(
+          'cannot be used right now',
+        );
+        expect(await db.getRepository(User).count()).toBe(before);
+      });
+
+      it('is free again once 90 days have passed', async () => {
+        const made = await moveAway();
+        await db.query(
+          "UPDATE phone_recovery_cases SET decided_at = now() - interval '91 days' WHERE id=$1",
+          [made.id],
+        );
+        const session = await auth.signInVerifiedPhone(subjectPhone, {});
+        expect(session.user.id).not.toBe(otherVolunteer);
+      });
+
+      it('cannot be used as someone else’s new number while held', async () => {
+        await moveAway();
+        await verifyOnRecord(memberA).catch(() => undefined);
+        await expect(
+          open(asCoordinator(), { member: '+919000000001', newPhone: subjectPhone }),
+        ).rejects.toThrow(ConflictException);
+      });
+    });
+
+    describe('undoing a move', () => {
+      it('puts the old number back, signs everyone out, and frees the new one', async () => {
+        const { made } = await ready();
+        await recoveries.approve(orgA, made.id, asAdmin(), notes);
+        const session = await auth.signInVerifiedPhone(newPhone, {});
+        expect(session.user.id).toBe(otherVolunteer);
+
+        await expect(recoveries.reverse(orgA, made.id, asAdmin(), notes)).rejects.toThrow(
+          'A Super Admin must undo',
+        );
+        await recoveries.reverse(orgA, made.id, asSuperAdmin(), notes);
+
+        expect(await userRow(otherVolunteer)).toMatchObject({ phone: subjectPhone });
+        expect(await liveSessions(otherVolunteer)).toBe(0);
+        expect((await auth.signInVerifiedPhone(subjectPhone, {})).user.id).toBe(otherVolunteer);
+        expect((await auth.signInVerifiedPhone(newPhone, {})).user.id).not.toBe(otherVolunteer);
+      });
+
+      it('refuses whoever approved the move', async () => {
+        const { made } = await ready();
+        await recoveries.approve(orgA, made.id, asSuperAdmin(), notes);
+        await expect(recoveries.reverse(orgA, made.id, asSuperAdmin(), notes)).rejects.toThrow(
+          'someone else must undo',
+        );
+      });
+
+      it('refuses once the old number is no longer held', async () => {
+        const { made } = await ready();
+        await recoveries.approve(orgA, made.id, asAdmin(), notes);
+        await db.query(
+          "UPDATE phone_recovery_cases SET decided_at = now() - interval '91 days' WHERE id=$1",
+          [made.id],
+        );
+        await expect(recoveries.reverse(orgA, made.id, asSuperAdmin(), notes)).rejects.toThrow(
+          'can no longer be undone',
+        );
+      });
+    });
+
+    describe('nominees', () => {
+      it('ends the member’s nominee if they move onto that number, keeping the record', async () => {
+        await db.query(
+          "INSERT INTO death_nominees(user_id,nominee_name,nominee_phone) VALUES($1,'Fathima Rahman',$2)",
+          [otherVolunteer, newPhone],
+        );
+        const { made } = await ready();
+        const staffView = await recoveries.detail(orgA, made.id, asAdmin());
+        expect(staffView.newNumberIsNominee).toBe(true);
+        await recoveries.approve(orgA, made.id, asAdmin(), notes);
+        const [row] = await db.query('SELECT replaced_at FROM death_nominees WHERE user_id=$1', [
+          otherVolunteer,
+        ]);
+        expect(row.replaced_at).not.toBeNull();
+        expect((await recoveries.mine(otherVolunteer)).nameNomineeAgain).toBe(true);
+        expect(JSON.stringify(await db.query('SELECT payload FROM audit_events'))).not.toContain(
+          'Fathima',
+        );
+      });
+
+      it('leaves any other nominee alone, and takes codes on the new number', async () => {
+        await db.query(
+          "INSERT INTO death_nominees(user_id,nominee_name,nominee_phone) VALUES($1,'Fathima Rahman','+919000000060')",
+          [otherVolunteer],
+        );
+        const { made } = await ready();
+        await recoveries.approve(orgA, made.id, asAdmin(), notes);
+        expect((await nominees.mine(otherVolunteer)).nominee?.phone).toBe('+919000000060');
+        expect((await recoveries.mine(otherVolunteer)).nameNomineeAgain).toBe(false);
+        await expect(nominees.remove(otherVolunteer, { idToken: subjectPhone })).rejects.toThrow(
+          ForbiddenException,
+        );
+        await nominees.remove(otherVolunteer, { idToken: newPhone });
+      });
+
+      it('refuses nominee changes while a case is open', async () => {
+        await verifyOnRecord();
+        const made = await open();
+        const set = () =>
+          nominees.set(otherVolunteer, { name: 'Thief Name', phone: '+919000000061', code: '123456' });
+        await expect(set()).rejects.toThrow('being moved to a new number');
+        await recoveries.withdraw(orgA, made.id, asCoordinator(), notes);
+        await set();
+      });
+    });
+
+    describe('with closures', () => {
+      const death = () =>
+        closures.report(orgA, asCoordinator(), {
+          kind: ClosureKind.DECEASED,
+          member: subjectPhone,
+          reason: 'Certificate seen at the office',
+          dateOfDeath: '2026-01-15',
+          evidenceType: ClosureEvidenceType.DEATH_CERTIFICATE,
+          evidenceLast4: '4821',
+        });
+
+      it('cannot open while a closure report waits', async () => {
+        await verifyOnRecord();
+        await death();
+        await expect(open()).rejects.toThrow('closure has been reported');
+      });
+
+      it('ends an open case when the account closes', async () => {
+        await verifyOnRecord();
+        const made = await open();
+        const closure = await death();
+        await closures.approve(orgA, closure.id, asAdmin(), notes);
+        expect((await recoveries.detail(orgA, made.id, asAdmin())).status).toBe('REFUSED');
+        await expect(open()).rejects.toThrow(/No member|closed/);
+      });
+    });
+
+    describe('races', () => {
+      it('lets only one of two simultaneous cases open', async () => {
+        await verifyOnRecord();
+        const outcomes = await Promise.allSettled([open(), open()]);
+        expect(outcomes.filter((o) => o.status === 'fulfilled')).toHaveLength(1);
+        const [refused] = outcomes.filter((o) => o.status === 'rejected') as PromiseRejectedResult[];
+        expect(refused!.reason).toBeInstanceOf(ConflictException);
+      });
+
+      it('moves once when two people approve together', async () => {
+        const { made } = await ready();
+        const outcomes = await Promise.allSettled([
+          recoveries.approve(orgA, made.id, asAdmin(), notes),
+          recoveries.approve(orgA, made.id, asSuperAdmin(), notes),
+        ]);
+        expect(outcomes.filter((o) => o.status === 'fulfilled')).toHaveLength(1);
+        expect(
+          await db.query("SELECT 1 FROM phone_recovery_events WHERE type='APPROVED'"),
+        ).toHaveLength(1);
+      });
+
+      it('leaves no working session for a phone signing in on the old number during approval', async () => {
+        const { made } = await ready();
+        const [signIn] = await Promise.allSettled([
+          auth.signInVerifiedPhone(subjectPhone, {}),
+          recoveries.approve(orgA, made.id, asAdmin(), notes),
+        ]);
+        expect(await userRow(otherVolunteer)).toMatchObject({ phone: newPhone });
+        expect(await liveSessions(otherVolunteer)).toBe(0);
+        if (signIn.status === 'fulfilled') {
+          await expect(
+            auth.refreshToken({ refreshToken: signIn.value.refreshToken }),
+          ).rejects.toThrow();
+        }
+      });
+
+      it('ends with the real account on the number when a first sign-in races approval', async () => {
+        await verifyOnRecord();
+        const made = await open();
+        const first = await auth.signInVerifiedPhone(newPhone, {});
+        await recoveries.confirm(first.user.id, made.id, { code: '123456' });
+        const [signIn] = await Promise.allSettled([
+          auth.signInVerifiedPhone(newPhone, {}),
+          recoveries.approve(orgA, made.id, asAdmin(), notes),
+        ]);
+        expect(await userRow(otherVolunteer)).toMatchObject({ phone: newPhone });
+        expect(await liveSessions(first.user.id)).toBe(0);
+        // Signing in just before approval is fine, as long as that session cannot carry on.
+        if (signIn.status === 'fulfilled' && signIn.value.user.id === first.user.id) {
+          await expect(
+            auth.refreshToken({ refreshToken: signIn.value.refreshToken }),
+          ).rejects.toThrow();
+        }
       });
     });
   });

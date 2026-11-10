@@ -115,6 +115,7 @@ describe('OrganizationsService', () => {
             return { id: 'generic-uuid', ...data };
           }),
           findOne: jest.fn().mockResolvedValue(null),
+          query: jest.fn().mockResolvedValue([]),
         };
         return callback(mockManager);
       });

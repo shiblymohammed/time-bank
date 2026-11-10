@@ -13,7 +13,7 @@ The pilot runs after every feature is built. M6 and M8 are built. Next: front-en
 | Step                           | Status                                                                                                         |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------- |
 | M1 Foundation                  | Built                                                                                                          |
-| M2 Identity and administration | Built; SIM-swap recovery open; nominees built                                                                  |
+| M2 Identity and administration | Built, including nominees and lost phone or SIM recovery                                                       |
 | M3 Catalogue and matching      | Built, including automatic matching, booking recovery and the push queue                                       |
 | M4 Time credits                | Built                                                                                                          |
 | M5 Team and transfer workflows | Built. See [TEAM_VISITS.md](TEAM_VISITS.md)                                                                    |
@@ -93,7 +93,7 @@ recovery.
 - MunicipalitiesModule: Super Admin provisions municipalities (D#52, FR-GOV-01)
 - RolesModule: role grants, permission checks per API operation (NFR-09, FR-GOV-03)
 - BeneficiariesModule: eligibility, review dates, caregiver authorization (FR-BEN)
-- Phone/SIM recovery (FR-IDENT-05, D#43). Not built yet, and needs a place in the order of work.
+- Phone/SIM recovery (FR-IDENT-05, D#43). See [PHONE_RECOVERY.md](PHONE_RECOVERY.md).
 - Nominee registration (FR-IDENT-06, D#44). Built in Milestone 7; see [ACCOUNT_CLOSURE.md](ACCOUNT_CLOSURE.md).
 - Permission matrix tests (NFR-16)
 - Coordinator-facing Next.js screens for registration review
@@ -157,7 +157,7 @@ API details, product policy and rollback constraints: [CREDIT_CONTROLS.md](CREDI
 
 **Release gates still open:** human ledger/authorization/migration review, CI on PostgreSQL 17, application of the new
 migration to the intended deployment, and current device-to-server validation. Credit interfaces and automatic
-matching/replacement are built. Real SMS and lost-phone/SIM recovery remain separate work. Completed development does
+matching/replacement are built, and so is lost-phone/SIM recovery. Real SMS remains separate work. Completed development does
 not imply overall production readiness.
 
 ---

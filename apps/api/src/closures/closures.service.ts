@@ -28,6 +28,11 @@ import { levelsFor } from '../complaints/complaints.service';
 import { GlobalAccountRestriction } from '../identity/entities/global-account-restriction.entity';
 import { User } from '../identity/entities/user.entity';
 import { NotificationsService } from '../notifications/notifications.service';
+import {
+  endOpenRecoveries,
+  namedSoonAfterMove,
+  numberMovedSince,
+} from '../phone-recovery/phone-history';
 import { Appeal } from '../restrictions/entities/appeal.entity';
 import { RestrictionCase } from '../restrictions/entities/restriction-case.entity';
 import { assertSuperAdminRemains, holdsSuperAdmin } from '../restrictions/platform-restriction';
@@ -235,7 +240,8 @@ export class ClosuresService {
         receiverName: found.receiver?.fullName ?? null,
         receiverPhone: found.receiver?.phoneE164 ?? null,
         receiverMatchesNominee: found.receiver
-          ? found.receiver.phoneE164 === current?.nomineePhone
+          ? Boolean(current) &&
+            (await this.isNamedNominee(manager, found.receiver, current as DeathNominee))
           : null,
         transferred: found.transferredCredits,
         lastTransferredAt: found.lastTransferredAt ?? null,
@@ -523,9 +529,9 @@ export class ClosuresService {
       const receiver = await manager.findOne(User, { where: { id: found.receiverUserId } });
       if (!receiver) throw new NotFoundException('Person not found');
       await this.assertReceiver(manager, found, receiver, context.userId);
-      if (receiver.phoneE164 !== nominee.nomineePhone && !context.isSuperAdmin) {
+      if (!context.isSuperAdmin && !(await this.isNamedNominee(manager, receiver, nominee))) {
         throw new ForbiddenException(
-          'That account’s phone is not the one the member named. A Super Admin must decide.',
+          'That account’s phone is not the one the member named, or that number has moved since. A Super Admin must decide.',
         );
       }
       const amount = await this.credits.transferEstate(manager, {
@@ -785,6 +791,7 @@ export class ClosuresService {
     const membershipIds = memberships.map((membership) => membership.id);
     await this.restrictions.stopBookingsFor(manager, membershipIds, user.id, actorId, ipAddress);
     await this.endOpenRecommendations(manager, user.id, actorId);
+    await endOpenRecoveries(manager, user.id, actorId);
 
     if (membershipIds.length > 0) {
       await manager.query(
@@ -929,7 +936,26 @@ export class ClosuresService {
     if (!nominee || !found.dateOfDeath) return false;
     const since = new Date(found.dateOfDeath);
     since.setUTCDate(since.getUTCDate() - NOMINEE_REVIEW_DAYS);
-    return nominee.createdAt >= since;
+    // Just after a move is when the proof of "the member's own phone" is at its weakest.
+    return (
+      nominee.createdAt >= since ||
+      (await namedSoonAfterMove(manager, found.subjectUserId, nominee.createdAt))
+    );
+  }
+
+  /**
+   * A number says who the nominee is only while it has stayed put. Once it has moved on or off any
+   * account, a stranger may hold it later, so it no longer lowers who can approve a transfer.
+   */
+  private async isNamedNominee(
+    manager: EntityManager,
+    receiver: User,
+    nominee: DeathNominee,
+  ): Promise<boolean> {
+    return (
+      receiver.phoneE164 === nominee.nomineePhone &&
+      !(await numberMovedSince(manager, nominee.nomineePhone, nominee.createdAt))
+    );
   }
 
   private async findPrimary(
@@ -955,7 +981,8 @@ export class ClosuresService {
     if (
       row?.status === AccountStatus.DECEASED_CLOSED ||
       row?.status === AccountStatus.DUPLICATE_CLOSED ||
-      row?.status === AccountStatus.TEST_ACCOUNT_RETIRED
+      row?.status === AccountStatus.TEST_ACCOUNT_RETIRED ||
+      row?.status === AccountStatus.RECOVERY_PLACEHOLDER_RETIRED
     ) {
       throw new ConflictException('The account that stays has itself been closed');
     }

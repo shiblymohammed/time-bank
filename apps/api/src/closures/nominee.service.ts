@@ -12,6 +12,7 @@ import { FirebaseTokenService } from '../auth/firebase-token.service';
 import { normalizeToE164 } from '../auth/utils/phone.util';
 import { User } from '../identity/entities/user.entity';
 import { cleanPersonName } from '../identity/person-name';
+import { hasOpenRecovery } from '../phone-recovery/phone-history';
 import { RemoveNomineeDto, SetNomineeDto } from './dto/closure.dto';
 import { DeathNominee } from './entities/death-nominee.entity';
 
@@ -89,6 +90,12 @@ export class NomineeService {
     if (!user) throw new NotFoundException('Person not found');
     if (user.status !== AccountStatus.ACTIVE) {
       throw new ForbiddenException('This account is restricted');
+    }
+    // The phone may be stolen with its SIM still in it, so it must not change who gets the credits.
+    if (await hasOpenRecovery(this.dataSource.manager, userId)) {
+      throw new ForbiddenException(
+        'Your account is being moved to a new number. You can change your nominee after that.',
+      );
     }
     return user;
   }

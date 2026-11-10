@@ -203,7 +203,11 @@ describe('AuthService', () => {
       let pending: Promise<unknown> = Promise.resolve();
       mockDataSource.transaction.mockImplementation((action) => {
         const next = pending.then(() =>
-          action({ getRepository: () => mockOtpRepo, query: jest.fn().mockResolvedValue([]) }),
+          action({
+            getRepository: (entity: unknown) =>
+              entity === AuthenticationSession ? mockSessionRepo : mockOtpRepo,
+            query: jest.fn().mockResolvedValue([]),
+          }),
         );
         pending = next.catch(() => undefined);
         return next;

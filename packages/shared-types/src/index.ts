@@ -46,6 +46,8 @@ export enum AccountStatus {
   DUPLICATE_CLOSED = 'DUPLICATE_CLOSED',
   /** A test or demo account closed before a pilot (scripts/retire-test-accounts.sh). */
   TEST_ACCOUNT_RETIRED = 'TEST_ACCOUNT_RETIRED',
+  /** An empty account made by signing in on a new SIM, retired when the real account moved there. */
+  RECOVERY_PLACEHOLDER_RETIRED = 'RECOVERY_PLACEHOLDER_RETIRED',
 }
 
 /**
@@ -393,6 +395,38 @@ export enum ClosureEventType {
   APPEAL_STANDS = 'APPEAL_STANDS',
   OVERTURNED = 'OVERTURNED',
   REOPENED = 'REOPENED',
+}
+
+/** Moving an account to a new phone number after a lost phone or SIM (FR-IDENT-05, D#43). */
+export enum PhoneRecoveryStatus {
+  /** Waiting for a fresh code from the new number. */
+  OPENED = 'OPENED',
+  /** The new number is proven; waiting for a decision. */
+  CONFIRMED = 'CONFIRMED',
+  COMPLETED = 'COMPLETED',
+  REFUSED = 'REFUSED',
+  WITHDRAWN = 'WITHDRAWN',
+  /** A Super Admin undid the move. */
+  REVERSED = 'REVERSED',
+}
+
+export enum PhoneRecoveryEventType {
+  OPENED = 'OPENED',
+  CONFIRMED = 'CONFIRMED',
+  /** Whoever holds the new number said this was not them. */
+  DECLINED = 'DECLINED',
+  APPROVED = 'APPROVED',
+  REFUSED = 'REFUSED',
+  WITHDRAWN = 'WITHDRAWN',
+  NOTE = 'NOTE',
+  REVERSED = 'REVERSED',
+}
+
+/** How the document staff saw compares with the one on record. Only a match skips a Super Admin. */
+export enum PhoneRecoveryDocumentResult {
+  MATCHED = 'MATCHED',
+  DIFFERENT = 'DIFFERENT',
+  NONE_ON_RECORD = 'NONE_ON_RECORD',
 }
 
 export enum AppealStatus {

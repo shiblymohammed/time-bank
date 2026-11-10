@@ -26,6 +26,7 @@ import { ReportsModule } from './reports/reports.module';
 import { RestrictionsModule } from './restrictions/restrictions.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
 import { MerchantsModule } from './merchants/merchants.module';
+import { PhoneRecoveryModule } from './phone-recovery/phone-recovery.module';
 
 /**
  * Root application module.
@@ -111,6 +112,7 @@ import { MerchantsModule } from './merchants/merchants.module';
     ReportsModule,
     LoyaltyModule,
     MerchantsModule,
+    PhoneRecoveryModule,
   ],
   providers: [{ provide: APP_GUARD, useClass: ThrottlerGuard }],
 })

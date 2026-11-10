@@ -92,9 +92,10 @@ overlapping restriction can keep restored earnings on hold. See [LOYALTY_AND_MER
 ## Not in this work
 
 - **A living member closing their own account:** not in the PRD. Check with a lawyer about India's data protection law.
-- **Lost phone or SIM recovery (FR-IDENT-05):** not built, and needs a place in the order of work.
 - **Reused phone numbers:** a closed account keeps its number. A later Super Admin action could release it.
-- **A nominee who changes phone number:** a Super Admin decides, as above. There is no separate flow.
+- **A nominee who changes phone number:** a Super Admin decides, as above, and so does a nominee whose number has moved on
+  or off any account since they were named. There is no separate flow. See
+  [lost phone or SIM recovery](PHONE_RECOVERY.md).
 
 ## Before real use
 

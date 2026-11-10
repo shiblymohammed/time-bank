@@ -34,6 +34,7 @@ import { OrganizationMembership } from '../memberships/entities/organization-mem
 import { AuditService } from '../audit/audit.service';
 import { SmsService } from './sms/sms.service';
 import { normalizeToE164, sha256 } from './utils/phone.util';
+import { HELD_NUMBER_MESSAGE, isNumberHeld, lockNumber } from '../phone-recovery/phone-history';
 import { REFRESH_OVERLAP_MS, refreshLifetimeMs } from './session-policy';
 import { RequestOtpDto } from './dto/request-otp.dto';
 import { VerifyOtpDto } from './dto/verify-otp.dto';
@@ -272,6 +273,11 @@ export class AuthService {
       });
 
       if (!existingUser) {
+        // An account moved off this number recently. Its real owner must not silently get a new
+        // empty account, because a coordinator may need to put the old one back.
+        if (await isNumberHeld(queryRunner.manager, phoneE164)) {
+          throw new ForbiddenException(HELD_NUMBER_MESSAGE);
+        }
         // Auto-provision global identity + universal wallet
         isNewUser = true;
         const newUser = userRepo.create({
@@ -382,7 +388,20 @@ export class AuthService {
       deviceInfo: dto.deviceInfo ?? {},
       expiresAt: refreshExpiresAt,
     });
-    await this.sessionRepo.save(session);
+    // Under the number's lock, so a move approved at this moment either sees this session and
+    // revokes it, or has already moved the number and this sign-in stops here. Without this a stolen
+    // phone could keep a live session on the account it just lost.
+    await this.dataSource.transaction(async (manager) => {
+      await lockNumber(manager, phoneE164);
+      const [current]: { phone_e164: string }[] = await manager.query(
+        'SELECT phone_e164 FROM users WHERE id = $1',
+        [user.id],
+      );
+      if (current && current.phone_e164 !== phoneE164) {
+        throw new ForbiddenException('Please sign in again.');
+      }
+      await manager.getRepository(AuthenticationSession).save(session);
+    });
     // The token names its sign-in, so staff powers can wait for that sign-in's email code.
     const accessToken = this.jwtService.sign({ ...jwtPayload, sid: session.id });
 

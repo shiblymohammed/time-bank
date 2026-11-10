@@ -11,7 +11,7 @@ const fixture = require('../node_modules/.cache/interface-qa/fixture.json');
 if (!/^ktb_interface_qa_[a-z0-9_]+$/.test(state.database))
   throw Error('Disposable QA database required');
 
-const API = 'http://127.0.0.1:3001/api';
+const API = `http://127.0.0.1:${state.apiPort ?? 3001}/api`;
 const ORG = fixture.org;
 const ORG_CODE = 'INTERFACE_QA';
 const SERVICE = fixture.catalogue;
@@ -1785,6 +1785,127 @@ const request = (token, minutes, notes) =>
     assert.equal(csv.status, 200, `summary CSV, got ${csv.status}`);
     assert.ok(csv.bytes.toString('utf8').includes('counts once in the total'), 'the summary lost its note');
     assertNothingPrivate(csv.bytes.toString('utf8'), await privateDetails(), 'the summary CSV');
+  });
+
+  // ─── Lost phone or SIM recovery ────────────────────────────────────────────
+  const RECOVERIES = `/organizations/${ORG}/phone-recoveries`;
+  const recoveryNumber = (digit) => `+9190004${stamp}${digit}`;
+  const openRecovery = (person, newPhone, documentNumber) =>
+    call('POST', RECOVERIES, t.coordinator, {
+      member: person.phone, newPhone, documentType: 'AADHAAR_CARD', documentNumber,
+      reason: `Journey recovery check ${stamp}`,
+    });
+  const newNumberCode = async (phone) => {
+    await db(`UPDATE otp_challenges SET created_at = now() - interval '2 minutes' WHERE created_at > now() - interval '2 minutes'`);
+    return ok(await call('POST', '/auth/otp/request', null, { phone }), 'code').devOtp ?? '123456';
+  };
+  const confirmNewNumber = async (token, phone, caseId) =>
+    ok(await call('POST', `/me/phone-recovery/${caseId}/confirm`, token, { code: await newNumberCode(phone) }), 'confirm');
+
+  await step('Lost phone: the new number confirms, someone above decides, and the same account comes back', async () => {
+    const person = await closurePerson('r1', 7, 'VOLUNTEER', recoveryNumber(1));
+    const seen = madeUpId('8');
+    ok(await checkId(person, seen), 'id check');
+    const pushes = async () =>
+      Number((await db('SELECT count(*) AS n FROM notification_outbox WHERE user_id = $1', [person.userId]))[0].n);
+    const before = await pushes();
+
+    const newPhone = recoveryNumber(2);
+    const made = ok(await openRecovery(person, newPhone, seen), 'open');
+    assert.equal(made.documentResult, 'MATCHED');
+    assert.equal(made.needsSuperAdmin, false);
+    assert.equal(await pushes(), before + 1, 'the old phone was not told');
+    ok(await call('GET', '/auth/me', person.token), 'the account stays usable until the decision');
+    const one = `${RECOVERIES}/${made.id}`;
+    const tooSoon = await call('POST', `${one}/approve`, t.municipalityAdmin, { notes: 'Seen it' });
+    assert.equal(tooSoon.status, 409, `approving before the number confirmed, got ${tooSoon.status}`);
+
+    const onNewSim = await signInAgain(newPhone);
+    const [placeholder] = await db('SELECT id FROM users WHERE phone_e164 = $1', [newPhone]);
+    const mine = ok(await call('GET', '/me/phone-recovery', onNewSim.accessToken), 'mine');
+    assert.equal(mine.pending.reference, made.reference);
+    assert.ok(!JSON.stringify(mine).includes(person.phone), 'a stranger could read the old number');
+    await newNumberCode(newPhone);
+    const wrong = await call('POST', `/me/phone-recovery/${made.id}/confirm`, onNewSim.accessToken, { code: '000000' });
+    assert.equal(wrong.status, 400, `a wrong code, got ${wrong.status}`);
+    await confirmNewNumber(onNewSim.accessToken, newPhone, made.id);
+
+    const byOpener = await call('POST', `${one}/approve`, t.coordinator, { notes: 'I opened it' });
+    assert.equal(byOpener.status, 403, `the opener approving, got ${byOpener.status}`);
+    ok(await call('POST', `${one}/approve`, t.municipalityAdmin, { notes: 'Identity seen in person' }), 'approve');
+
+    await db(`UPDATE otp_challenges SET created_at = now() - interval '2 minutes' WHERE created_at > now() - interval '2 minutes'`);
+    const code = ok(await call('POST', '/auth/otp/request', null, { phone: person.phone }), 'old number code');
+    const held = await call('POST', '/auth/otp/verify', null, { phone: person.phone, code: code.devOtp ?? '123456' });
+    assert.equal(held.status, 403, `signing in on the held number, got ${held.status}`);
+    assert.match(held.data.message, /cannot be used right now/);
+
+    const back = await signInAgain(newPhone);
+    const me = ok(await call('GET', '/auth/me', back.accessToken), 'me');
+    assert.equal(me.id, person.userId, 'a different account came back');
+    assert.equal(Number((await walletOf(person)).balance_credits), 7, 'the credits did not stay');
+    const [retired] = await db('SELECT status, phone_e164 FROM users WHERE id = $1', [placeholder.id]);
+    assert.equal(retired.status, 'RECOVERY_PLACEHOLDER_RETIRED');
+    assert.match(retired.phone_e164, /^retired-/);
+
+    const adminOne = `/admin/phone-recoveries/${made.id}`;
+    const undoByLocal = await call('POST', `${one}/reverse`, t.municipalityAdmin, { notes: 'Undo it' });
+    assert.equal(undoByLocal.status, 403, `a Municipality Admin undoing, got ${undoByLocal.status}`);
+    ok(await call('POST', `${adminOne}/reverse`, t.admin, { notes: 'This was a mistake' }), 'undo');
+    const again = await signInAgain(person.phone);
+    assert.equal(ok(await call('GET', '/auth/me', again.accessToken), 'me').id, person.userId);
+    const stale = await call('POST', '/auth/refresh', null, { refreshToken: back.refreshToken });
+    assert.ok(stale.status >= 400, `a session from before the undo refreshed, got ${stale.status}`);
+  });
+
+  await step('Lost phone: a different document needs a Super Admin, and This is not me stops the move', async () => {
+    const person = await closurePerson('r2', 0, 'VOLUNTEER', recoveryNumber(3));
+    const seen = madeUpId('9');
+    ok(await checkId(person, seen), 'id check');
+    const newPhone = recoveryNumber(4);
+
+    const differs = ok(await openRecovery(person, newPhone, `7${seen.slice(1)}`), 'open');
+    assert.equal(differs.documentResult, 'DIFFERENT');
+    assert.equal(differs.needsSuperAdmin, true);
+    const onNewSim = await signInAgain(newPhone);
+    await confirmNewNumber(onNewSim.accessToken, newPhone, differs.id);
+    const byLocal = await call('POST', `${RECOVERIES}/${differs.id}/approve`, t.municipalityAdmin, { notes: 'Looks fine' });
+    assert.equal(byLocal.status, 403, `a Municipality Admin deciding, got ${byLocal.status}`);
+    ok(await call('POST', `/admin/phone-recoveries/${differs.id}/refuse`, t.admin, { notes: 'The document differs' }), 'refuse');
+    ok(await call('GET', '/auth/me', person.token), 'a refused case changed the account');
+
+    const declined = ok(await openRecovery(person, newPhone, seen), 'open again');
+    ok(await call('POST', `/me/phone-recovery/${declined.id}/decline`, onNewSim.accessToken, {}), 'decline');
+    assert.equal(ok(await call('GET', '/me/phone-recovery', onNewSim.accessToken), 'mine').pending, null);
+    const [told] = await db(`SELECT status FROM phone_recovery_cases WHERE id = $1`, [declined.id]);
+    assert.equal(told.status, 'REFUSED');
+
+    const someoneElse = await closurePerson('r3', 0, 'VOLUNTEER', recoveryNumber(5));
+    const taken = await openRecovery(person, someoneElse.phone, seen);
+    assert.equal(taken.status, 409, `moving onto a real account, got ${taken.status}`);
+  });
+
+  await step('Lost phone: moving onto your own nominee\'s number ends that nominee', async () => {
+    const person = await closurePerson('r4', 0, 'VOLUNTEER', recoveryNumber(6));
+    const seen = madeUpId('7');
+    ok(await checkId(person, seen), 'id check');
+    const newPhone = recoveryNumber(7);
+    await nominate(person, NOMINEE_NAME, newPhone);
+
+    const made = ok(await openRecovery(person, newPhone, seen), 'open');
+    const detail = ok(await call('GET', `${RECOVERIES}/${made.id}`, t.municipalityAdmin), 'detail');
+    assert.equal(detail.newNumberIsNominee, true, 'the decider was not warned');
+    const changed = await call('PUT', '/me/nominee', person.token, {
+      name: 'Someone Else', phone: '+919000399998', code: await newNumberCode(person.phone),
+    });
+    assert.ok(changed.status >= 400, `changing the nominee during a case, got ${changed.status}`);
+
+    const onNewSim = await signInAgain(newPhone);
+    await confirmNewNumber(onNewSim.accessToken, newPhone, made.id);
+    ok(await call('POST', `${RECOVERIES}/${made.id}/approve`, t.municipalityAdmin, { notes: 'Identity seen in person' }), 'approve');
+    const back = await signInAgain(newPhone);
+    assert.equal(ok(await call('GET', '/me/phone-recovery', back.accessToken), 'mine').nameNomineeAgain, true);
+    assert.equal(ok(await call('GET', '/me/nominee', back.accessToken), 'nominee').nominee, null);
   });
 
   await step('People are told along the way (push queue)', async () => {

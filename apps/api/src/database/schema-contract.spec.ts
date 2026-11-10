@@ -25,6 +25,7 @@ import { AccountClosures1729118400021 } from './migrations/1729118400021-Account
 import { SponsorReports1729118400022 } from './migrations/1729118400022-SponsorReports';
 import { LoyaltyAndMerchants1729118400023 } from './migrations/1729118400023-LoyaltyAndMerchants';
 import { OfflineVisits1729118400024 } from './migrations/1729118400024-OfflineVisits';
+import { PhoneRecovery1729118400025 } from './migrations/1729118400025-PhoneRecovery';
 describe('entity and migration schema contract', () => {
   it('defines every mapped entity column in the migration SQL', async () => {
     const queries: string[] = [];
@@ -59,6 +60,7 @@ describe('entity and migration schema contract', () => {
       new SponsorReports1729118400022(),
       new LoyaltyAndMerchants1729118400023(),
       new OfflineVisits1729118400024(),
+      new PhoneRecovery1729118400025(),
     ]) {
       await migration.up(runner);
     }
@@ -84,7 +86,7 @@ describe('entity and migration schema contract', () => {
       entities: [path.join(__dirname, '../**/*.entity.ts')],
     });
     await (source as unknown as { buildMetadatas(): Promise<void> }).buildMetadatas();
-    expect(source.entityMetadatas).toHaveLength(45);
+    expect(source.entityMetadatas).toHaveLength(47);
     for (const entity of source.entityMetadatas) {
       expect(tables.has(entity.tableName)).toBe(true);
       for (const column of entity.columns) {

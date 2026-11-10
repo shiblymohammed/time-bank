@@ -10,6 +10,7 @@ import { RestrictionCases, useWaitingRestrictions } from '@/components/restricti
 import { Closures, useWaitingClosures } from '@/components/closures';
 import { Reports } from '@/components/reports';
 import { Loyalty } from '@/components/loyalty';
+import { PhoneRecoveries, useWaitingRecoveries } from '@/components/phone-recoveries';
 import { ServiceOperations } from '@/components/service-operations';
 import { TimeCredits } from '@/components/time-credits';
 import { ApiManagement } from '@/components/api-management';
@@ -31,6 +32,7 @@ type Tab =
   | 'closures'
   | 'reports'
   | 'loyalty'
+  | 'phone-recoveries'
   | 'audit';
 type Grant = { id: string; role: string; status: string };
 type Membership = {
@@ -243,6 +245,13 @@ const PAGES: {
     group: 'Governance',
     description: 'Figures and downloads for staff, and saved reports for sponsors',
     managersOnly: true,
+  },
+  {
+    id: 'phone-recoveries',
+    text: 'Phone number changes',
+    icon: 'phoneRecovery',
+    group: 'Governance',
+    description: 'Moving an account to a new number after a lost phone or SIM',
   },
   {
     id: 'audit',
@@ -714,6 +723,12 @@ export default function AdminDashboard(): React.JSX.Element {
     tenant === 'GLOBAL' ? null : tenant,
     revision,
   );
+  const waitingRecoveries = useWaitingRecoveries(
+    Boolean(profile) && canManageRoles,
+    isGlobal,
+    tenant === 'GLOBAL' ? null : tenant,
+    revision,
+  );
   const initialRoles = [
     ...OPERATIONS,
     ...(canManageRoles ? ['COORDINATOR'] : []),
@@ -996,6 +1011,12 @@ export default function AdminDashboard(): React.JSX.Element {
                 {item.id === 'closures' && waitingClosures > 0 && (
                   <span className="nav-alert-count" role="status">
                     {waitingClosures}
+                    <span className="sr-only"> waiting</span>
+                  </span>
+                )}
+                {item.id === 'phone-recoveries' && waitingRecoveries > 0 && (
+                  <span className="nav-alert-count" role="status">
+                    {waitingRecoveries}
                     <span className="sr-only"> waiting</span>
                   </span>
                 )}
@@ -2072,6 +2093,18 @@ export default function AdminDashboard(): React.JSX.Element {
           )}
           {tab === 'closures' && (
             <Closures
+              key={tenant}
+              organizationId={tenant === 'GLOBAL' ? null : tenant}
+              isGlobal={isGlobal}
+              canDecide={canManageRoles}
+              revision={revision}
+              pending={pending}
+              openAction={openAction}
+              onExpired={expired}
+            />
+          )}
+          {tab === 'phone-recoveries' && (
+            <PhoneRecoveries
               key={tenant}
               organizationId={tenant === 'GLOBAL' ? null : tenant}
               isGlobal={isGlobal}

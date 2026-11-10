@@ -34,6 +34,9 @@ first half of FR-OFF-01) is **not built, by decision of the project owner** on 9
 - "Waiting to send" (from the banner on any page) lists each change with its state: waiting, sent or not accepted
   (FR-OFF-02, D#99). Sent changes stay listed for a day.
 - Signing out with changes waiting asks first, because signing out deletes them.
+- When the server ends the session (signed out elsewhere, restricted, or the account
+  [moved to a new number](PHONE_RECOVERY.md)), the app deletes what it last saw but keeps waiting changes for the same
+  person's next sign-in.
 
 ## What the server checks
 

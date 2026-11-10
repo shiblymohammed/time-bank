@@ -7,17 +7,28 @@ import {
   ServiceUnavailableException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { DataSource } from 'typeorm';
+import { DataSource, EntityManager } from 'typeorm';
 import * as crypto from 'crypto';
 import {
   IdentityDocumentType,
   IdentityVerificationLevel,
   IdentityVerificationStatus,
+  PhoneRecoveryDocumentResult,
 } from '@ktb/shared-types';
 import { AuditService } from '../audit/audit.service';
 import { cleanPersonName } from './person-name';
 
 export type IdentityDecision = 'VERIFY' | 'REJECT';
+
+/** The document someone showed already proves a different person's account. */
+export class DocumentVerifiesAnotherAccount extends ConflictException {
+  constructor() {
+    super(
+      'This document already verifies another account. ' +
+        'If this is one person with two accounts, report the extra one under Account closures.',
+    );
+  }
+}
 
 /** Upper-case letters and digits only, so "1234 5678-9012" and "123456789012" match. */
 export function normalizeDocumentNumber(type: string, raw: unknown): string {
@@ -57,6 +68,42 @@ export class PeopleService {
       );
     }
     return crypto.createHmac('sha256', secret).update(`identity:${type}:${number}`).digest('hex');
+  }
+
+  /**
+   * Compares a document seen in person with the one on record for this account, for a phone
+   * recovery. Nothing is written, and the number goes no further than this.
+   */
+  async compareDocument(
+    manager: EntityManager,
+    userId: string,
+    documentType: string,
+    rawNumber: unknown,
+  ): Promise<{ documentType: string; last4: string; result: PhoneRecoveryDocumentResult }> {
+    if (!(Object.values(IdentityDocumentType) as string[]).includes(documentType)) {
+      throw new BadRequestException('Choose the kind of document you checked');
+    }
+    const number = normalizeDocumentNumber(documentType, rawNumber);
+    const fingerprint = this.fingerprint(documentType, number);
+    const [other]: unknown[] = await manager.query(
+      'SELECT 1 FROM verified_identities WHERE document_fingerprint = $1 AND user_id <> $2 LIMIT 1',
+      [fingerprint, userId],
+    );
+    if (other) throw new DocumentVerifiesAnotherAccount();
+    const [own]: { document_fingerprint: string | null }[] = await manager.query(
+      'SELECT document_fingerprint FROM verified_identities WHERE user_id = $1',
+      [userId],
+    );
+    const onRecord = own?.document_fingerprint ?? null;
+    return {
+      documentType,
+      last4: number.slice(-4),
+      result: !onRecord
+        ? PhoneRecoveryDocumentResult.NONE_ON_RECORD
+        : onRecord === fingerprint
+          ? PhoneRecoveryDocumentResult.MATCHED
+          : PhoneRecoveryDocumentResult.DIFFERENT,
+    };
   }
 
   async setOwnName(userId: string, rawName: unknown) {

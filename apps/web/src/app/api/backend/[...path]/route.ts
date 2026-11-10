@@ -45,6 +45,7 @@ const ROUTES: [methods: string, pattern: RegExp][] = [
   ['GET POST', new RegExp(`^${ORG}/restriction-cases(?:/|$)`, 'i')],
   ['GET POST', new RegExp(`^${ORG}/closures(?:/|$)`, 'i')],
   ['GET POST', new RegExp(`^${ORG}/reports(?:/|$)`, 'i')],
+  ['GET POST', new RegExp(`^${ORG}/phone-recoveries(?:/|$)`, 'i')],
   ['GET POST', new RegExp(`^${ORG}/appeals(?:/|$)`, 'i')],
   ['GET POST PATCH', /^\/catalogue\/categories(?:\/[a-f0-9-]+)?$/i],
   ['GET POST PATCH', /^\/catalogue\/global(?:\/[a-f0-9-]+)?$/i],

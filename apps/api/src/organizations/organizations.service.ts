@@ -16,6 +16,7 @@ import { OrganizationMembership } from '../memberships/entities/organization-mem
 import { MembershipRoleGrant } from '../memberships/entities/membership-role-grant.entity';
 import { MembershipApproval } from '../memberships/entities/membership-approval.entity';
 import { AuditService } from '../audit/audit.service';
+import { isNumberHeld } from '../phone-recovery/phone-history';
 import { CreateOrganizationDto } from './dto/create-organization.dto';
 import { UpdateOrganizationDto } from './dto/update-organization.dto';
 import { UpdateBrandingDto } from './dto/update-branding.dto';
@@ -124,6 +125,11 @@ export class OrganizationsService {
         });
 
         if (!adminUser) {
+          if (await isNumberHeld(manager, dto.adminPhone)) {
+            throw new ConflictException(
+              'An account moved off this number recently, so it cannot be used yet',
+            );
+          }
           adminUser = manager.create(User, {
             phoneE164: dto.adminPhone,
             primaryOrgId: savedOrg.id,
