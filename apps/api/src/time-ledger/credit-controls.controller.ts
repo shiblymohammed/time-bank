@@ -152,8 +152,10 @@ export class CreditControlsController {
   }
 
   @Get('requests/:requestId/credit-funding')
-  @Roles(UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN, UserRole.SUPER_ADMIN)
-  @ApiOperation({ summary: 'Verified service credit total and recorded voluntary funding' })
+  @ApiOperation({
+    summary:
+      'Verified service credit total and recorded voluntary funding (staff, or the member helped)',
+  })
   fundingSummary(
     @Param('id', ParseUUIDPipe) org: string,
     @CurrentUserId() actor: string,

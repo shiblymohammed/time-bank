@@ -77,7 +77,12 @@ export class CreditControlsService {
   }
 
   /** Lock current account/tenant authority; JWT claims never authorize money changes. */
-  private async authority(m: EntityManager, org: string, actor: string, roles?: UserRole[]) {
+  private async authority(
+    m: EntityManager,
+    org: string,
+    actor: string,
+    roles?: UserRole[],
+  ): Promise<{ role: string }[]> {
     const [user] = await m.query('SELECT status FROM users WHERE id=$1 FOR SHARE', [actor]);
     const [organization] = await m.query('SELECT status FROM organizations WHERE id=$1 FOR SHARE', [
       org,
@@ -105,7 +110,7 @@ export class CreditControlsService {
     const grants = staffPowersAllowed()
       ? lockedGrants
       : lockedGrants.filter((g) => !staffRoles.includes(g.role));
-    if (grants.some((g) => g.role === 'SUPER_ADMIN')) return;
+    if (grants.some((g) => g.role === 'SUPER_ADMIN')) return grants;
     const members = await m.query(
       "SELECT id FROM organization_memberships WHERE user_id=$1 AND organization_id=$2 AND status='APPROVED' FOR SHARE",
       [actor, org],
@@ -113,6 +118,20 @@ export class CreditControlsService {
     if (!members.length || (roles && !grants.some((g) => roles.includes(g.role as UserRole)))) {
       throw new ForbiddenException('Current organization authority is required');
     }
+    return grants;
+  }
+
+  /** The member who received the help, or whoever made the request for them. */
+  private async isRecipient(
+    m: EntityManager,
+    request: { beneficiary_membership_id: string; created_by_user_id: string | null },
+    actor: string,
+  ) {
+    if (request.created_by_user_id === actor) return true;
+    const [membership] = await m.query('SELECT user_id FROM organization_memberships WHERE id=$1', [
+      request.beneficiary_membership_id,
+    ]);
+    return membership?.user_id === actor;
   }
 
   private async account(m: EntityManager, walletId: string | null, poolId: string | null) {
@@ -584,14 +603,23 @@ export class CreditControlsService {
     });
   }
 
+  /** Staff, or the member who received the help (or made the request), may read this. */
   async fundingSummary(org: string, actor: string, requestId: string) {
     return this.db.transaction(async (m) => {
-      await this.authority(m, org, actor, [UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN]);
+      const grants = await this.authority(m, org, actor);
       const [request] = await m.query(
-        'SELECT request_number,status FROM service_requests WHERE id=$1 AND organization_id=$2',
+        'SELECT request_number,status,beneficiary_membership_id,created_by_user_id FROM service_requests WHERE id=$1 AND organization_id=$2',
         [requestId, org],
       );
       if (!request) throw new NotFoundException('Service request not found');
+      const staff = grants.some((g) =>
+        [UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN, UserRole.SUPER_ADMIN].includes(
+          g.role as UserRole,
+        ),
+      );
+      // A member must not learn about someone else's private request.
+      if (!staff && !(await this.isRecipient(m, request, actor)))
+        throw new NotFoundException('Service request not found');
       const [{ earned }] = await m.query(
         "SELECT COALESCE(sum(amount),0) AS earned FROM time_credit_ledger WHERE service_request_id=$1 AND tx_type='SERVICE_EARNED'",
         [requestId],
@@ -962,16 +990,10 @@ export class CreditControlsService {
       );
       if (!request) throw new NotFoundException('Service request not found');
       // Funding must not disclose someone else's private request to a member.
-      if (!dto.poolId) {
-        const [membership] = await m.query(
-          'SELECT user_id FROM organization_memberships WHERE id=$1',
-          [request.beneficiary_membership_id],
+      if (!dto.poolId && !(await this.isRecipient(m, request, actor))) {
+        throw new ForbiddenException(
+          'Only the recipient or request creator can volunteer their credits',
         );
-        if (membership?.user_id !== actor && request.created_by_user_id !== actor) {
-          throw new ForbiddenException(
-            'Only the recipient or request creator can volunteer their credits',
-          );
-        }
       }
       let walletId: string | null = null;
       if (!dto.poolId) {

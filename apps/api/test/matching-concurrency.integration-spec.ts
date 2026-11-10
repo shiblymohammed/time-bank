@@ -2533,6 +2533,31 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       expect(await balances()).toEqual({ balance: 1, frozen: 0 });
     });
 
+    it('shows what the help earned to the member helped and to staff, never to other members', async () => {
+      // A member who neither received the help nor asked for it learns nothing.
+      await expect(controls.fundingSummary(orgA, volunteer, completedRequest)).rejects.toThrow(
+        'not found',
+      );
+      expect(await controls.fundingSummary(orgA, admin, completedRequest)).toMatchObject({
+        verifiedCredits: 1,
+        funding: null,
+      });
+      await db.query('UPDATE service_requests SET created_by_user_id=$2 WHERE id=$1', [
+        completedRequest,
+        volunteer,
+      ]);
+      expect(await controls.fundingSummary(orgA, volunteer, completedRequest)).toMatchObject({
+        status: 'COMPLETED',
+        verifiedCredits: 1,
+        funding: null,
+      });
+      await controls.spend(orgA, volunteer, completedRequest, amount());
+      expect(await controls.fundingSummary(orgA, volunteer, completedRequest)).toMatchObject({
+        funding: { amount: 0.5, source: 'Voluntary member contribution' },
+      });
+      await expect(controls.fundingSummary(orgB, volunteer, completedRequest)).rejects.toThrow();
+    });
+
     it('spends donated pool credits once and never pays the volunteer twice', async () => {
       const pool = await donations.createPool(orgA, admin, { name: 'Assistance fund' });
       await donations.donate(orgA, volunteer, {
@@ -3020,8 +3045,9 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       const after = await controls.fundingSummary(orgA, coordinator, completedRequest);
       expect(after.funding).toMatchObject({ amount: 0.5, source: 'Dashboard fund' });
       expect(after.funding).not.toHaveProperty('actor_id');
+      // A member who neither received nor made the request is not told it exists.
       await expect(controls.fundingSummary(orgA, volunteer, completedRequest)).rejects.toThrow(
-        'authority',
+        'not found',
       );
     });
 

@@ -31,6 +31,22 @@ Body: `amount`, `reason`, `idempotencyKey`, and optionally `poolId`.
 Amounts are numeric values from 0.01 to 1000, with at most two decimals. Keys are 8–100 characters and reasons are
 5–1000 characters. Unknown body fields are rejected.
 
+`GET /api/organizations/:id/requests/:requestId/credit-funding` returns the request's verified service credits and any
+contribution already recorded. Coordinators and administrators can read it for any request in their organization. A
+member can read it only for a request they received help on or made; anyone else gets 404, so a private request is not
+disclosed.
+
+### In the app
+
+On a completed request, Request details offers _Give credits for this help_ to the member who received it or asked for
+it, until someone (the member or a community pool) has funded it. The offer says plainly that it is optional and the
+help is free. The amount is capped at the smallest of the member's available credits, the credits the help earned
+and 1000. The message starts as "Thank you for the help". Before sending, the app says the volunteer is not paid again
+and that this can be done only once and cannot be undone. Credits on hold cannot be given. Afterwards the page shows
+what was given and by whom; the wallet lists it as "Voluntary contribution for help". It needs a connection, like every
+credit movement. Tests: `test/help_funding_test.dart`, the database suite and the journey step "The beneficiary gives
+some credits for the help, once".
+
 ## Disputed credits and corrections
 
 All paths below start with `/api/organizations/:id`.

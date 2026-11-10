@@ -423,6 +423,31 @@ const request = (token, minutes, notes) =>
     assert.ok(rows.some((x) => Number(x.amount) === 0.5), 'the gift is not in the beneficiary wallet');
   });
 
+  await step('The beneficiary gives some credits for the help, once', async () => {
+    const path = `/organizations/${ORG}/requests/${ids.request}`;
+    const before = ok(await call('GET', `${path}/credit-funding`, t.beneficiary), 'funding');
+    assert.ok(before.verifiedCredits >= 1, `the help earned ${before.verifiedCredits}`);
+    assert.equal(before.funding, null, 'already funded');
+    // Someone who neither received nor asked for the help sees nothing.
+    const stranger = await call('GET', `${path}/credit-funding`, t.volunteer);
+    assert.equal(stranger.status, 404, `a stranger got ${stranger.status}`);
+    if (main.who !== 'new volunteer') return 'skipped giving: the beneficiary has no gifted credits';
+    const body = { amount: 0.25, reason: 'Thank you for the help', idempotencyKey: randomUUID() };
+    ok(await call('POST', `${path}/credit-spending`, t.beneficiary, body), 'give');
+    const replay = ok(await call('POST', `${path}/credit-spending`, t.beneficiary, body), 'retry');
+    assert.equal(replay.replayed, true, 'a retry gave twice');
+    const again = await call('POST', `${path}/credit-spending`, t.beneficiary, {
+      ...body,
+      idempotencyKey: randomUUID(),
+    });
+    assert.equal(again.status, 409, `a second contribution got ${again.status}`);
+    const after = ok(await call('GET', `${path}/credit-funding`, t.beneficiary), 'funding');
+    assert.equal(after.funding?.amount, 0.25);
+    const rows = list(ok(await call('GET', '/wallet/transactions?limit=10', t.beneficiary), 'wallet'));
+    assert.ok(rows.some((x) => (x.txType ?? x.tx_type) === 'ASSISTANCE_SPENT'), 'not in the wallet history');
+    return `${after.funding.amount} of ${after.verifiedCredits} credits`;
+  });
+
   // ---- side paths ----
   await step('Decline: a declined offer goes to someone else or to the coordinator', async () => {
     const r = ok(await request(t.beneficiary, 90, 'Journey decline'), 'create');
