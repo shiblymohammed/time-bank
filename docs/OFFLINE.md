@@ -67,6 +67,8 @@ Fixed with this milestone: reusing a request's idempotency key with different de
 
 ## Known limits
 
+- A visit whose finish never arrives reaches the coordinator's review list two hours after its expected end. See
+  [visits nobody finishes](SERVICE_COMPLETION.md#visits-nobody-finishes).
 - A finish saved before a safety pause that reached the server first is refused, since the visit is paused. It shows as
   Not accepted and the coordinator sorts it out.
 - Data shown offline is only what the phone saw last; offers made meanwhile appear once there is signal.

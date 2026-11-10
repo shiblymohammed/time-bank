@@ -434,8 +434,8 @@ export class RequestsService {
         `(req.below_minimum_alerted_at IS NOT NULL OR EXISTS (
           SELECT 1 FROM volunteer_assignments review
           WHERE review.service_request_id = req.id
-            AND review.review_requested_at IS NOT NULL
-            AND review.review_resolved_at IS NULL))`,
+            AND ((review.review_requested_at IS NOT NULL AND review.review_resolved_at IS NULL)
+              OR (review.status = 'IN_PROGRESS' AND review.long_visit_alerted_at IS NOT NULL))))`,
       );
     }
     if (query.urgency) {

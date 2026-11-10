@@ -42,6 +42,12 @@ export class MatchingWorker implements OnApplicationBootstrap, OnApplicationShut
       this.logger.error('Could not close stale offers', error);
     }
     try {
+      // Visits nobody finished: remind the volunteer, then tell coordinators.
+      await this.matching.remindLongVisits();
+    } catch (error) {
+      this.logger.error('Could not check for long visits', error);
+    }
+    try {
       const due = await this.matching.findRequestsDueForProgression();
       for (const request of due) {
         try {

@@ -19,6 +19,26 @@ no longer be cancelled or rescheduled, and the volunteer can no longer withdraw.
 
 Confirmation pays the volunteer's time credits for the confirmed minutes in the same transaction; see `TIME_CREDITS.md`.
 
+## Visits nobody finishes
+
+A volunteer may forget to tap Finish, or their phone may die. The matching job, which runs every 30 seconds, looks for
+visits still in progress past their expected end, not counting time paused by a safety alert. Paused visits are left to
+the safety alert.
+
+- **30 minutes past the expected end:** one push to the volunteer, "Still helping?". The app's visit card also says the
+  visit is running long.
+- **2 hours past the expected end:** one push to the community's coordinators and administrators. The visit joins their
+  **Needs review** list, and the panel shows "Running long" with the start time and expected length. The audit log
+  records `LONG_VISIT_ALERTED`.
+
+The coordinator calls the volunteer, then uses **Pay for visit** (entering the minutes) or **Not delivered**, the same
+decision used for disputes (`POST requests/:requestId/assignments/:assignmentId/resolve`). If the volunteer finishes
+first, the visit leaves the list by itself. Each message is sent once per visit, recorded in `long_visit_reminded_at`
+and `long_visit_alerted_at` (migration `1729118400026-LongVisits`).
+
+This also covers a finish saved offline that is over 12 hours old: the server refuses it and the volunteer is told to
+call their coordinator, who already has the visit on their list. See [offline use](OFFLINE.md).
+
 ## Checks
 
 - `scripts/test-matching-concurrency.ps1`: the PostgreSQL suite covers the full lifecycle and its time and minute

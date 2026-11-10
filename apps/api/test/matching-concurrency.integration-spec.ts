@@ -2,6 +2,7 @@ import { LoyaltyService } from '../src/loyalty/loyalty.service';
 import { MerchantsService } from '../src/merchants/merchants.service';
 import { LoyaltyAndMerchants1729118400023 } from '../src/database/migrations/1729118400023-LoyaltyAndMerchants';
 import { OfflineVisits1729118400024 } from '../src/database/migrations/1729118400024-OfflineVisits';
+import { LongVisits1729118400026 } from '../src/database/migrations/1729118400026-LongVisits';
 import { ClosuresService } from '../src/closures/closures.service';
 import { SafetyService } from '../src/safety/safety.service';
 import { NomineeService } from '../src/closures/nominee.service';
@@ -159,6 +160,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       LoyaltyAndMerchants1729118400023,
       OfflineVisits1729118400024,
       PhoneRecovery1729118400025,
+      LongVisits1729118400026,
     ],
     synchronize: false,
     extra: {
@@ -1633,6 +1635,134 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
     });
   });
 
+  describe('visits left running', () => {
+    const at = (iso: string) => new Date(iso);
+    const visit = (assignment: string) =>
+      db.getRepository(VolunteerAssignment).findOneByOrFail({ id: assignment });
+    const notices = (type: string) =>
+      db.query('SELECT user_id FROM notification_outbox WHERE type=$1', [type]);
+    const reviewList = async () => {
+      const staff = await authorization.evaluateOrganizationAccess(coordinator, orgA);
+      const { data } = await requests.listRequests(orgA, coordinator, staff, {
+        needsReview: true,
+      } as never);
+      return data.map((r) => r.id);
+    };
+    async function started() {
+      const req = await request('2030-01-01T10:00:00Z');
+      const assignment = await offer(req);
+      await service.acceptOffer(orgA, assignment, memberA, {});
+      await service.startAssignment(
+        orgA,
+        assignment,
+        memberA,
+        undefined,
+        at('2030-01-01T10:00:00Z'),
+      );
+      return { req, assignment };
+    }
+
+    it('reminds the volunteer, then tells coordinators once, and lists it for review', async () => {
+      const { req, assignment } = await started();
+      // An hour's visit, 29 minutes past its end: nothing yet.
+      expect(await service.remindLongVisits(at('2030-01-01T11:29:00Z'))).toEqual({
+        reminded: 0,
+        alerted: 0,
+      });
+
+      expect(await service.remindLongVisits(at('2030-01-01T11:31:00Z'))).toEqual({
+        reminded: 1,
+        alerted: 0,
+      });
+      expect((await visit(assignment)).longVisitRemindedAt?.toISOString()).toBe(
+        '2030-01-01T11:31:00.000Z',
+      );
+      expect(await notices('LONG_VISIT_REMINDER')).toEqual([{ user_id: volunteer }]);
+      expect(await reviewList()).not.toContain(req);
+
+      expect(await service.remindLongVisits(at('2030-01-01T13:01:00Z'))).toEqual({
+        reminded: 0,
+        alerted: 1,
+      });
+      expect(await notices('LONG_VISIT')).toEqual([{ user_id: coordinator }]);
+      expect(await reviewList()).toContain(req);
+      // The panel reads visits from the staff matching snapshot.
+      const snapshot = await service.getRequestMatching(orgA, req, coordinator);
+      expect(
+        snapshot.assignments.find((a) => a.id === assignment)?.longVisitAlertedAt,
+      ).toBeTruthy();
+
+      // Later runs send nothing more.
+      expect(await service.remindLongVisits(at('2030-01-01T20:00:00Z'))).toEqual({
+        reminded: 0,
+        alerted: 0,
+      });
+      expect(await notices('LONG_VISIT_REMINDER')).toHaveLength(1);
+      expect(await notices('LONG_VISIT')).toHaveLength(1);
+    });
+
+    it('leaves the review list once the volunteer finishes', async () => {
+      const { req, assignment } = await started();
+      await service.remindLongVisits(at('2030-01-01T13:01:00Z'));
+      expect(await reviewList()).toContain(req);
+      await service.finishAssignment(
+        orgA,
+        assignment,
+        memberA,
+        { minutes: 60 },
+        undefined,
+        at('2030-01-01T13:05:00Z'),
+      );
+      expect(await reviewList()).not.toContain(req);
+    });
+
+    it('a coordinator can still pay for a visit nobody finished', async () => {
+      const { req, assignment } = await started();
+      await service.remindLongVisits(at('2030-01-01T13:01:00Z'));
+      const other = await id("INSERT INTO users(phone_e164) VALUES('+919000000077') RETURNING id");
+      const otherMember = await id(
+        "INSERT INTO organization_memberships(organization_id,user_id,status) VALUES($1,$2,'APPROVED') RETURNING id",
+        [orgA, other],
+      );
+      await db.query(
+        "INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,'COORDINATOR',$2)",
+        [otherMember, coordinator],
+      );
+      const staff = await authorization.evaluateOrganizationAccess(other, orgA);
+      await requests.resolveServiceReview(
+        orgA,
+        req,
+        assignment,
+        other,
+        staff,
+        { decision: AssignmentReviewDecision.PAY, minutes: 60, notes: 'Called the volunteer' },
+        undefined,
+        at('2030-01-01T13:10:00Z'),
+      );
+      expect((await visit(assignment)).status).toBe(VolunteerAssignmentStatus.COMPLETED);
+      expect(await reviewList()).not.toContain(req);
+    });
+
+    it('leaves a paused visit to the safety alert, and does not count paused time', async () => {
+      const { assignment } = await started();
+      await db.query(
+        "UPDATE volunteer_assignments SET paused_at='2030-01-01T10:30:00Z' WHERE id=$1",
+        [assignment],
+      );
+      expect(await service.remindLongVisits(at('2030-01-01T14:00:00Z'))).toEqual({
+        reminded: 0,
+        alerted: 0,
+      });
+      // Restarted after an hour's pause: its end moves back by that hour.
+      await db.query(
+        'UPDATE volunteer_assignments SET paused_at=NULL, paused_seconds=3600 WHERE id=$1',
+        [assignment],
+      );
+      expect((await service.remindLongVisits(at('2030-01-01T12:29:00Z'))).reminded).toBe(0);
+      expect((await service.remindLongVisits(at('2030-01-01T12:31:00Z'))).reminded).toBe(1);
+    });
+  });
+
   describe('offline visits (M8)', () => {
     const scheduled = '2030-01-01T10:00:00Z';
     const at = (iso: string) => new Date(iso);
@@ -1683,6 +1813,8 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       let visit = await assignmentOf(assignment);
       expect(visit.startedAt?.toISOString()).toBe('2030-01-01T10:00:00.000Z');
       expect(visit.startReceivedAt?.toISOString()).toBe('2030-01-01T10:40:00.000Z');
+      const shown = await service.getRequestMatching(orgA, visit.serviceRequestId, coordinator);
+      expect(shown.assignments[0]?.startReceivedAt).toBeTruthy();
 
       // The phone never heard back, so it sends the same start again.
       await service.startAssignment(
@@ -5169,14 +5301,18 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         await nominate(receiverPhone, '2025-06-10');
         await moved(subjectPhone, '+919000000054', otherVolunteer, '2025-06-01');
         const made = await closedDeath();
-        expect((await closures.detail(orgA, made.id, asCoordinator())).nomineeUnderReview).toBe(true);
+        expect((await closures.detail(orgA, made.id, asCoordinator())).nomineeUnderReview).toBe(
+          true,
+        );
       });
 
       it('does not review a nominee named well after the move', async () => {
         await nominate(receiverPhone, '2025-09-10');
         await moved(subjectPhone, '+919000000054', otherVolunteer, '2025-06-01');
         const made = await closedDeath();
-        expect((await closures.detail(orgA, made.id, asCoordinator())).nomineeUnderReview).toBe(false);
+        expect((await closures.detail(orgA, made.id, asCoordinator())).nomineeUnderReview).toBe(
+          false,
+        );
       });
     });
   });
@@ -5306,10 +5442,9 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       };
       admin = await grant('+919000000088', 'MUNICIPALITY_ADMIN');
       superAdmin = await grant('+919000000089', 'SUPER_ADMIN');
-      await db.query(
-        "INSERT INTO universal_time_wallets(user_id,balance_credits) VALUES($1,5)",
-        [otherVolunteer],
-      );
+      await db.query('INSERT INTO universal_time_wallets(user_id,balance_credits) VALUES($1,5)', [
+        otherVolunteer,
+      ]);
     });
 
     it('moves the number and keeps the same account, wallet and membership', async () => {
@@ -5382,7 +5517,9 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
 
       await recoveries.approve(orgA, made.id, asAdmin(), notes);
 
-      const [redemption] = await db.query('SELECT status FROM loyalty_redemptions WHERE id=$1', [code]);
+      const [redemption] = await db.query('SELECT status FROM loyalty_redemptions WHERE id=$1', [
+        code,
+      ]);
       expect(redemption.status).toBe('CANCELLED');
       const [coins] = await db.query(
         'SELECT balance_coins::float AS balance, status FROM loyalty_wallets WHERE id=$1',
@@ -5412,9 +5549,9 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         'has not confirmed',
       );
       const session = await auth.signInVerifiedPhone(newPhone, {});
-      await expect(recoveries.confirm(session.user.id, made.id, { code: '000000' })).rejects.toThrow(
-        BadRequestException,
-      );
+      await expect(
+        recoveries.confirm(session.user.id, made.id, { code: '000000' }),
+      ).rejects.toThrow(BadRequestException);
       await expect(
         recoveries.confirm(session.user.id, made.id, { idToken: '+919000000051' }),
       ).rejects.toThrow(ForbiddenException);
@@ -5503,7 +5640,9 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         await expect(open()).rejects.toThrow('already verifies another account');
         expect(await db.query('SELECT 1 FROM phone_recovery_cases')).toHaveLength(0);
         expect(
-          await db.query("SELECT 1 FROM audit_events WHERE event_type='PHONE_RECOVERY_DOCUMENT_REFUSED'"),
+          await db.query(
+            "SELECT 1 FROM audit_events WHERE event_type='PHONE_RECOVERY_DOCUMENT_REFUSED'",
+          ),
         ).toHaveLength(1);
       });
 
@@ -5521,12 +5660,16 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         const made = await open();
         const own = staff(otherVolunteer, [UserRole.MUNICIPALITY_ADMIN]);
         await expect(recoveries.detail(orgA, made.id, own)).rejects.toThrow('Case not found');
-        await expect(recoveries.refuse(orgA, made.id, own, notes)).rejects.toThrow('Case not found');
+        await expect(recoveries.refuse(orgA, made.id, own, notes)).rejects.toThrow(
+          'Case not found',
+        );
         expect(await recoveries.list(orgA, own, true)).toHaveLength(0);
       });
 
       it('lets the only other Super Admin both open and approve for a Super Admin', async () => {
-        const second = await id("INSERT INTO users(phone_e164) VALUES('+919000000087') RETURNING id");
+        const second = await id(
+          "INSERT INTO users(phone_e164) VALUES('+919000000087') RETURNING id",
+        );
         const membership = await id(
           "INSERT INTO organization_memberships(organization_id,user_id,status) VALUES($1,$2,'APPROVED') RETURNING id",
           [orgA, second],
@@ -5574,10 +5717,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
 
       it('refuses an account that has credit history, even with no membership', async () => {
         await verifyOnRecord();
-        const other = await id(
-          'INSERT INTO users(phone_e164) VALUES($1) RETURNING id',
-          [newPhone],
-        );
+        const other = await id('INSERT INTO users(phone_e164) VALUES($1) RETURNING id', [newPhone]);
         await db.query('INSERT INTO universal_time_wallets(user_id,balance_credits) VALUES($1,1)', [
           other,
         ]);
@@ -5767,7 +5907,11 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         await verifyOnRecord();
         const made = await open();
         const set = () =>
-          nominees.set(otherVolunteer, { name: 'Thief Name', phone: '+919000000061', code: '123456' });
+          nominees.set(otherVolunteer, {
+            name: 'Thief Name',
+            phone: '+919000000061',
+            code: '123456',
+          });
         await expect(set()).rejects.toThrow('being moved to a new number');
         await recoveries.withdraw(orgA, made.id, asCoordinator(), notes);
         await set();
@@ -5806,7 +5950,9 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         await verifyOnRecord();
         const outcomes = await Promise.allSettled([open(), open()]);
         expect(outcomes.filter((o) => o.status === 'fulfilled')).toHaveLength(1);
-        const [refused] = outcomes.filter((o) => o.status === 'rejected') as PromiseRejectedResult[];
+        const [refused] = outcomes.filter(
+          (o) => o.status === 'rejected',
+        ) as PromiseRejectedResult[];
         expect(refused!.reason).toBeInstanceOf(ConflictException);
       });
 

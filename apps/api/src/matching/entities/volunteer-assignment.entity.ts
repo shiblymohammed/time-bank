@@ -111,6 +111,14 @@ export class VolunteerAssignment {
   @Column({ name: 'finish_received_at', type: 'timestamptz', nullable: true })
   finishReceivedAt?: Date | null;
 
+  /** The one reminder to the volunteer that a visit has run past its expected end. */
+  @Column({ name: 'long_visit_reminded_at', type: 'timestamptz', nullable: true })
+  longVisitRemindedAt?: Date | null;
+
+  /** The one alert to coordinators; the visit stays on their review list until it is closed. */
+  @Column({ name: 'long_visit_alerted_at', type: 'timestamptz', nullable: true })
+  longVisitAlertedAt?: Date | null;
+
   @Column({ name: 'reported_minutes', type: 'int', nullable: true })
   reportedMinutes?: number | null;
 

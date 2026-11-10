@@ -533,6 +533,47 @@ const request = (token, minutes, notes) =>
     return `finished at the tap, received ${a.finishReceivedAt}`;
   });
 
+  await step('A visit nobody finishes reminds the volunteer, then reaches the coordinator', async () => {
+    const r = ok(await request(t.beneficiary, 3, 'Journey long visit'), 'create');
+    const o = await offerFor(r.id);
+    const visit = `/organizations/${ORG}/assignments/${o.offer.id}`;
+    ok(await call('POST', `${visit}/accept`, o.token, { clientOperationId: randomUUID() }), 'accept');
+    ok(await call('POST', `${visit}/start`, o.token, { clientOperationId: randomUUID() }), 'start');
+    // An hour's visit started four hours ago and never finished.
+    await visitLasted(o.offer.id, 240);
+    const flagged = await waitFor('the long-visit alert', async () => {
+      const [row] = await db(
+        'SELECT long_visit_reminded_at, long_visit_alerted_at FROM volunteer_assignments WHERE id = $1',
+        [o.offer.id],
+      );
+      return row.long_visit_reminded_at && row.long_visit_alerted_at ? row : null;
+    }, 70);
+    const sent = await db(
+      `SELECT type, count(*)::int AS n FROM notification_outbox
+        WHERE data->>'requestId' = $1 AND type IN ('LONG_VISIT_REMINDER', 'LONG_VISIT') GROUP BY type`,
+      [r.id],
+    );
+    assert.deepEqual(Object.fromEntries(sent.map((x) => [x.type, x.n >= 1])), {
+      LONG_VISIT_REMINDER: true,
+      LONG_VISIT: true,
+    });
+    const review = list(ok(await call('GET', `/organizations/${ORG}/requests?needsReview=true&limit=50`, t.coordinator), 'review list'));
+    assert.ok(review.some((x) => x.id === r.id), 'the long visit is not on the review list');
+    const shown = ok(await call('GET', `/organizations/${ORG}/requests/${r.id}/matching`, t.coordinator), 'matching');
+    assert.ok(shown.assignments.find((a) => a.id === o.offer.id)?.longVisitAlertedAt, 'the panel is not told');
+    ok(
+      await call('POST', `/organizations/${ORG}/requests/${r.id}/assignments/${o.offer.id}/resolve`, t.coordinator, {
+        decision: 'PAY',
+        minutes: 60,
+        notes: 'Called the volunteer; it took an hour',
+      }),
+      'pay',
+    );
+    const after = list(ok(await call('GET', `/organizations/${ORG}/requests?needsReview=true&limit=50`, t.coordinator), 'review list'));
+    assert.ok(!after.some((x) => x.id === r.id), 'still on the review list after paying');
+    return `reminded and alerted at ${new Date(flagged.long_visit_alerted_at).toISOString()}, then paid`;
+  });
+
   await step('A request key reused with different details is refused, not treated as the same', async () => {
     const key = randomUUID();
     const startTime = inMinutes(300);

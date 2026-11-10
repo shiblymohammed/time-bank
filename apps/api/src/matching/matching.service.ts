@@ -83,6 +83,10 @@ import { AssignVolunteerZoneDto } from './dto/assign-volunteer-zone.dto';
 export const START_EARLY_MINUTES = 60;
 /** The longest single service a volunteer can report. */
 export const MAX_SERVICE_MINUTES = 720;
+/** A visit this long past its expected end reminds the volunteer once. */
+export const LONG_VISIT_REMINDER_MINUTES = 30;
+/** Still open this long past its expected end, coordinators are told once. */
+export const LONG_VISIT_ALERT_MINUTES = 120;
 
 /** Unfilled requests handled per worker run; the next run picks up any remainder. */
 const PROGRESSION_BATCH_SIZE = 50;
@@ -2459,6 +2463,10 @@ export class MatchingService {
           reviewOutcome: assignment.reviewOutcome ?? null,
           pausedAt: assignment.pausedAt ?? null,
           restartAllowedAt: assignment.restartAllowedAt ?? null,
+          // Set only when a phone sent the change late (M8), and when a visit ran long.
+          startReceivedAt: assignment.startReceivedAt ?? null,
+          finishReceivedAt: assignment.finishReceivedAt ?? null,
+          longVisitAlertedAt: assignment.longVisitAlertedAt ?? null,
           scheduledStartTime: assignmentSchedule(
             { ...assignment, serviceRequest: request },
             reschedules,
@@ -2786,6 +2794,76 @@ export class MatchingService {
       params,
     );
     return Number(cancelled ?? 0) + Number(timedOut ?? 0);
+  }
+
+  /**
+   * Visits still running well past their expected end, not counting time paused by a safety
+   * alert. The volunteer is reminded once; if it is still open later, coordinators are told once
+   * and it joins their review list, where they can pay for it or mark it not delivered.
+   * A paused visit is left to the safety alert.
+   */
+  async remindLongVisits(now = new Date()): Promise<{ reminded: number; alerted: number }> {
+    return this.dataSource.transaction(async (manager) => {
+      const due = (column: 'long_visit_reminded_at' | 'long_visit_alerted_at', minutes: number) =>
+        manager.query(
+          `SELECT a.id, a.volunteer_membership_id, r.id AS request_id, r.organization_id
+             FROM volunteer_assignments a
+             JOIN service_requests r ON r.id = a.service_request_id
+             JOIN organizations o ON o.id = r.organization_id AND o.status = 'ACTIVE'
+            WHERE a.status = 'IN_PROGRESS' AND a.paused_at IS NULL AND a.started_at IS NOT NULL
+              AND a.${column} IS NULL
+              AND a.started_at + make_interval(
+                    secs => r.expected_duration_minutes * 60 + a.paused_seconds + $2 * 60) < $1
+            ORDER BY a.started_at
+            LIMIT 100
+            FOR UPDATE OF a SKIP LOCKED`,
+          [now, minutes],
+        ) as Promise<
+          {
+            id: string;
+            volunteer_membership_id: string;
+            request_id: string;
+            organization_id: string;
+          }[]
+        >;
+
+      const remind = await due('long_visit_reminded_at', LONG_VISIT_REMINDER_MINUTES);
+      for (const visit of remind) {
+        await manager.update(VolunteerAssignment, visit.id, { longVisitRemindedAt: now });
+        await this.notifications.notifyMemberships(manager, [visit.volunteer_membership_id], {
+          organizationId: visit.organization_id,
+          requestId: visit.request_id,
+          type: 'LONG_VISIT_REMINDER',
+          title: 'Still helping?',
+          body: 'Tap Finish helping when you are done, so your time can be confirmed.',
+        });
+      }
+
+      const alert = await due('long_visit_alerted_at', LONG_VISIT_ALERT_MINUTES);
+      for (const visit of alert) {
+        await manager.update(VolunteerAssignment, visit.id, { longVisitAlertedAt: now });
+        await this.notifications.notifyCoordinators(manager, {
+          organizationId: visit.organization_id,
+          requestId: visit.request_id,
+          type: 'LONG_VISIT',
+          title: 'A visit has run long',
+          body: 'A volunteer has not finished a visit. Open it in the panel to check on them.',
+        });
+        await this.auditService.logEvent(
+          {
+            eventType: 'LONG_VISIT_ALERTED',
+            actorId: null,
+            targetId: visit.id,
+            targetType: 'volunteer_assignments',
+            organizationId: visit.organization_id,
+            payload: { serviceRequestId: visit.request_id },
+            ipAddress: null,
+          },
+          manager,
+        );
+      }
+      return { reminded: remind.length, alerted: alert.length };
+    });
   }
 
   async processExpiredOffers(requestId?: string, manager?: EntityManager): Promise<number> {

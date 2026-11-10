@@ -66,6 +66,8 @@ type Snapshot = {
     /** Set only when the phone had no signal and sent the change later (M8). */
     startReceivedAt?: string | null;
     finishReceivedAt?: string | null;
+    /** Set when the visit ran long and coordinators were told. */
+    longVisitAlertedAt?: string | null;
     reportedMinutes: number | null;
     completionNotes: string | null;
     confirmedAt: string | null;
@@ -777,6 +779,13 @@ export function CoordinatorRequests({
                       ? ` · Finished ${indiaTime(a.finishedAt)} · Reported ${a.reportedMinutes} minutes`
                       : ''}
                     {a.completionNotes ? ` · ${a.completionNotes}` : ''}
+                  </p>
+                )}
+                {a.status === 'IN_PROGRESS' && a.longVisitAlertedAt && (
+                  <p className="help-text" data-testid="running-long">
+                    <strong>Running long.</strong> Started {indiaTime(a.startedAt)}, expected{' '}
+                    {request?.expectedDurationMinutes} minutes, and not finished. Call the
+                    volunteer, then pay for the visit or mark it not delivered.
                   </p>
                 )}
                 {(a.startReceivedAt || a.finishReceivedAt) && (
