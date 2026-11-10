@@ -33,6 +33,29 @@ export class MembershipDocument {
   @Column({ name: 'review_status', type: 'varchar', length: 30, default: 'PENDING' })
   reviewStatus!: string;
 
+  /** For a ward NOC: the ward whose representative should have signed it. */
+  @Column({ name: 'ward_id', type: 'uuid', nullable: true })
+  wardId?: string | null;
+
+  /** Set for files uploaded to the server's private storage. */
+  @Column({ name: 'content_type', type: 'varchar', length: 100, nullable: true })
+  contentType?: string | null;
+
+  @Column({ name: 'size_bytes', type: 'integer', nullable: true })
+  sizeBytes?: number | null;
+
+  @Column({ type: 'char', length: 64, nullable: true })
+  sha256?: string | null;
+
+  @Column({ name: 'review_notes', type: 'varchar', length: 500, nullable: true })
+  reviewNotes?: string | null;
+
+  @Column({ name: 'reviewed_by_user_id', type: 'uuid', nullable: true })
+  reviewedByUserId?: string | null;
+
+  @Column({ name: 'reviewed_at', type: 'timestamptz', nullable: true })
+  reviewedAt?: Date | null;
+
   @CreateDateColumn({ name: 'created_at', type: 'timestamptz' })
   createdAt!: Date;
 }

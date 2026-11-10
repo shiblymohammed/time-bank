@@ -10,6 +10,10 @@ import { MembershipDocument } from './entities/membership-document.entity';
 
 import { MembershipsService } from './memberships.service';
 import { MembershipsController } from './memberships.controller';
+import { Ward } from '../wards/entities/ward.entity';
+import { WardsService } from '../wards/wards.service';
+import { WardNocController, WardsController } from '../wards/wards.controller';
+import { DocumentStorage } from '../wards/noc-storage';
 
 @Module({
   imports: [
@@ -20,10 +24,11 @@ import { MembershipsController } from './memberships.controller';
       MembershipRoleGrant,
       MembershipApproval,
       MembershipDocument,
+      Ward,
     ]),
   ],
-  controllers: [MembershipsController],
-  providers: [MembershipsService],
-  exports: [MembershipsService],
+  controllers: [MembershipsController, WardsController, WardNocController],
+  providers: [MembershipsService, WardsService, DocumentStorage],
+  exports: [MembershipsService, WardsService],
 })
 export class MembershipsModule {}

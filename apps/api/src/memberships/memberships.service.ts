@@ -7,7 +7,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { In, Repository } from 'typeorm';
 import {
   MembershipStatus,
   MembershipApprovalAction,
@@ -15,7 +15,10 @@ import {
   RoleGrantStatus,
   UserRole,
   OrganizationStatus,
+  DocumentReviewStatus,
 } from '@ktb/shared-types';
+import { Ward } from '../wards/entities/ward.entity';
+import { WARD_NOC, currentNoc, nocView } from '../wards/wards.service';
 
 import { Organization } from '../organizations/entities/organization.entity';
 import { User } from '../identity/entities/user.entity';
@@ -105,9 +108,14 @@ export class MembershipsService {
         existing.status === MembershipStatus.PENDING_REVIEW
       ) {
         // A pending applicant may correct what they asked for; nothing else changes.
-        if (dto.requestedRole === undefined && dto.notes === undefined && !dto.volunteer)
+        if (
+          dto.requestedRole === undefined &&
+          dto.notes === undefined &&
+          !dto.volunteer &&
+          dto.wardId === undefined
+        )
           return existing;
-        Object.assign(existing, await this.applicationFields(dto));
+        Object.assign(existing, await this.applicationFields(dto, organizationId, existing));
         return this.membershipRepo.save(existing);
       }
 
@@ -116,7 +124,7 @@ export class MembershipsService {
         existing.status = MembershipStatus.APPLIED;
         existing.appliedAt = new Date();
         existing.rejectionReason = null;
-        Object.assign(existing, await this.applicationFields(dto));
+        Object.assign(existing, await this.applicationFields(dto, organizationId, existing));
         const reApplied = await this.membershipRepo.save(existing);
 
         await this.auditService.logEvent({
@@ -142,7 +150,7 @@ export class MembershipsService {
       organizationId,
       userId,
       status: MembershipStatus.APPLIED,
-      ...(await this.applicationFields(dto)),
+      ...(await this.applicationFields(dto, organizationId)),
     });
     const saved = await this.membershipRepo.save(membership);
 
@@ -167,11 +175,17 @@ export class MembershipsService {
   }
 
   /** What the applicant asked for. Volunteer answers need the volunteer role and known skills. */
-  private async applicationFields(dto: ApplyMembershipDto): Promise<{
+  private async applicationFields(
+    dto: ApplyMembershipDto,
+    organizationId: string,
+    existing?: OrganizationMembership,
+  ): Promise<{
     requestedRole: UserRole | null;
     applicationNotes: string | null;
     applicationDetails: MembershipApplicationDetails;
+    wardId?: string | null;
   }> {
+    const wardId = await this.applicationWard(dto.wardId, organizationId, existing);
     const requestedRole = dto.requestedRole ?? null;
     if (dto.volunteer && requestedRole !== UserRole.VOLUNTEER)
       throw new BadRequestException('Volunteer details need requestedRole VOLUNTEER');
@@ -195,7 +209,41 @@ export class MembershipsService {
         skillCodes,
       };
     }
-    return { requestedRole, applicationNotes: dto.notes ?? null, applicationDetails: details };
+    return {
+      requestedRole,
+      applicationNotes: dto.notes ?? null,
+      applicationDetails: details,
+      ...(wardId !== undefined ? { wardId } : {}),
+    };
+  }
+
+  /**
+   * The ward named on an application: an active ward of this organization. Changing it after the
+   * NOC for the old ward was accepted is refused; a NOC still waiting no longer counts.
+   */
+  private async applicationWard(
+    wardId: string | undefined,
+    organizationId: string,
+    existing?: OrganizationMembership,
+  ): Promise<string | undefined> {
+    if (wardId === undefined || wardId === existing?.wardId) return undefined;
+    const ward = await this.membershipRepo.manager
+      .getRepository(Ward)
+      .findOne({ where: { id: wardId, organizationId } });
+    if (!ward || ward.status !== 'ACTIVE')
+      throw new BadRequestException('Choose one of your community’s wards');
+    if (existing) {
+      const documents = await this.documentRepo.find({ where: { membershipId: existing.id } });
+      if (currentNoc(documents)?.reviewStatus === DocumentReviewStatus.APPROVED)
+        throw new ConflictException(
+          'Your NOC has been accepted for your ward. Ask your coordinator to change your ward.',
+        );
+      await this.documentRepo.update(
+        { membershipId: existing.id, documentType: WARD_NOC, reviewStatus: 'PENDING' },
+        { reviewStatus: DocumentReviewStatus.SUPERSEDED },
+      );
+    }
+    return ward.id;
   }
 
   /** Turns a volunteer's application answers into matching preferences and unverified skills. */
@@ -207,6 +255,10 @@ export class MembershipsService {
     const existing = await availabilityRepo.findOne({
       where: { organizationId: membership.organizationId, membershipId: membership.id },
     });
+    // Matching treats the volunteer's own ward as nearby.
+    const ward = membership.wardId
+      ? await manager.getRepository(Ward).findOne({ where: { id: membership.wardId } })
+      : null;
     if (!existing)
       await availabilityRepo.save(
         availabilityRepo.create({
@@ -214,6 +266,7 @@ export class MembershipsService {
           membershipId: membership.id,
           maxTravelRadiusKm: answers.maxTravelRadiusKm,
           isAvailableImmediate: answers.availableAtShortNotice,
+          residentialWardNumber: ward?.wardNumber ?? null,
         }),
       );
     if (answers.skillCodes.length)
@@ -281,6 +334,12 @@ export class MembershipsService {
     const initialRole = dto.initialRole ?? membership.requestedRole ?? UserRole.VOLUNTEER;
     this.authorizationService.assertNoSelfEscalation(approverId, membership.userId, initialRole);
     await this.assertCanManageRole(organizationId, approverId, initialRole);
+
+    // Every new member needs a signed ward NOC that a coordinator has accepted (owner, 10 Nov 2026).
+    const documents = await this.documentRepo.find({ where: { membershipId } });
+    if (currentNoc(documents)?.reviewStatus !== DocumentReviewStatus.APPROVED) {
+      throw new ConflictException('Accept this member’s ward NOC before approving them');
+    }
 
     const org = await this.orgRepo.findOne({ where: { id: organizationId } });
     if (!org) {
@@ -427,6 +486,10 @@ export class MembershipsService {
     if (membership.userId !== userId) {
       throw new ForbiddenException('You can only submit documents for your own membership');
     }
+    // A NOC is only ever the uploaded file itself (POST :membershipId/noc), never a typed reference.
+    if (dto.documentType.trim().toUpperCase() === WARD_NOC) {
+      throw new BadRequestException('Upload the signed NOC itself as a photo or PDF');
+    }
 
     const doc = this.documentRepo.create({
       membershipId,
@@ -468,8 +531,23 @@ export class MembershipsService {
       throw new NotFoundException('Document not found in this organization');
     }
     this.authorizationService.assertNoSelfEscalation(reviewerId, doc.membership!.userId);
+    const notes = dto.notes?.trim() || null;
+    if (doc.documentType === WARD_NOC) {
+      if (doc.reviewStatus !== DocumentReviewStatus.PENDING)
+        throw new ConflictException('Only a NOC waiting for review can be decided');
+      if (
+        dto.status !== DocumentReviewStatus.APPROVED &&
+        dto.status !== DocumentReviewStatus.REJECTED
+      )
+        throw new BadRequestException('Accept or reject the NOC');
+      if (dto.status === DocumentReviewStatus.REJECTED && (notes?.length ?? 0) < 3)
+        throw new BadRequestException('Say why the NOC is not accepted, so the member can fix it');
+    }
 
     doc.reviewStatus = dto.status;
+    doc.reviewNotes = notes?.slice(0, 500) ?? null;
+    doc.reviewedByUserId = reviewerId;
+    doc.reviewedAt = new Date();
     const saved = await this.documentRepo.save(doc);
 
     await this.auditService.logEvent({
@@ -611,6 +689,7 @@ export class MembershipsService {
       .innerJoinAndSelect('m.user', 'user')
       .leftJoinAndSelect('user.verifiedIdentity', 'verifiedIdentity')
       .leftJoinAndSelect('m.roleGrants', 'roleGrants')
+      .leftJoinAndSelect('m.ward', 'ward')
       .where('m.organizationId = :organizationId', { organizationId });
 
     if (query.status) {
@@ -635,6 +714,16 @@ export class MembershipsService {
     qb.skip(query.offset ?? 0);
 
     const [memberships, total] = await qb.getManyAndCount();
+    // The current ward NOC of each member on this page, so staff can see who is missing one.
+    const documents = memberships.length
+      ? await this.documentRepo.find({
+          where: { membershipId: In(memberships.map((m) => m.id)), documentType: WARD_NOC },
+        })
+      : [];
+    for (const membership of memberships) {
+      const noc = currentNoc(documents.filter((d) => d.membershipId === membership.id));
+      Object.assign(membership, { nocStatus: noc?.reviewStatus ?? null });
+    }
     return { memberships, total };
   }
 
@@ -649,12 +738,13 @@ export class MembershipsService {
   ): Promise<OrganizationMembership> {
     const membership = await this.membershipRepo.findOne({
       where: { id: membershipId, organizationId },
-      relations: ['user', 'user.verifiedIdentity', 'roleGrants', 'approvals', 'documents'],
+      relations: ['user', 'user.verifiedIdentity', 'roleGrants', 'approvals', 'documents', 'ward'],
     });
 
     if (!membership) {
       throw new NotFoundException('Membership not found in this organization');
     }
+    Object.assign(membership, { noc: nocView(currentNoc(membership.documents)) });
 
     await this.logStaffView(
       'MEMBER_RECORD_VIEWED',

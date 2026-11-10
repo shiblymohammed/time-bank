@@ -84,9 +84,20 @@ describe('MembershipsService', () => {
 
   const mockDocumentRepo = {
     findOne: jest.fn(),
+    find: jest.fn(),
+    update: jest.fn(),
     create: jest.fn(),
     save: jest.fn(),
   };
+  // Approval needs an accepted ward NOC (owner's decision, 10 November 2026).
+  const acceptedNoc = [
+    {
+      membershipId: 'any',
+      documentType: 'WARD_NOC',
+      reviewStatus: 'APPROVED',
+      createdAt: new Date(),
+    },
+  ];
 
   const mockAuditService = {
     logEvent: jest.fn().mockResolvedValue(undefined),
@@ -110,6 +121,7 @@ describe('MembershipsService', () => {
 
   beforeEach(async () => {
     jest.clearAllMocks();
+    mockDocumentRepo.find.mockResolvedValue(acceptedNoc);
     mockUserRepo.findOne.mockResolvedValue({
       id: 'u-1',
       fullName: 'Test Person',
@@ -160,7 +172,14 @@ describe('MembershipsService', () => {
       await expect(service.getMembershipById('org-1', 'member-1')).resolves.toEqual(membership);
       expect(mockMembershipRepo.findOne).toHaveBeenCalledWith({
         where: { id: 'member-1', organizationId: 'org-1' },
-        relations: ['user', 'user.verifiedIdentity', 'roleGrants', 'approvals', 'documents'],
+        relations: [
+          'user',
+          'user.verifiedIdentity',
+          'roleGrants',
+          'approvals',
+          'documents',
+          'ward',
+        ],
       });
     });
 

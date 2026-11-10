@@ -15,6 +15,7 @@ import { Organization } from '../../organizations/entities/organization.entity';
 import { MembershipRoleGrant } from './membership-role-grant.entity';
 import { MembershipDocument } from './membership-document.entity';
 import { MembershipApproval } from './membership-approval.entity';
+import { Ward } from '../../wards/entities/ward.entity';
 
 export interface MembershipApplicationDetails {
   volunteer?: {
@@ -82,6 +83,14 @@ export class OrganizationMembership {
   /** Volunteer answers from the application: travel, timing and claimed skills. */
   @Column({ name: 'application_details', type: 'jsonb', default: () => "'{}'::jsonb" })
   applicationDetails!: MembershipApplicationDetails;
+
+  /** The ward the member lives in, chosen when joining; their NOC comes from its representative. */
+  @Column({ name: 'ward_id', type: 'uuid', nullable: true })
+  wardId?: string | null;
+
+  @ManyToOne(() => Ward, { nullable: true })
+  @JoinColumn({ name: 'ward_id' })
+  ward?: Ward | null;
 
   @OneToMany(() => MembershipRoleGrant, (grant) => grant.membership)
   roleGrants!: MembershipRoleGrant[];

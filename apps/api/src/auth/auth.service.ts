@@ -31,6 +31,7 @@ import { VerifiedIdentity } from '../identity/entities/verified-identity.entity'
 import { UniversalTimeWallet } from '../identity/entities/universal-time-wallet.entity';
 import { Organization } from '../organizations/entities/organization.entity';
 import { OrganizationMembership } from '../memberships/entities/organization-membership.entity';
+import { currentNoc, nocView, publicWard } from '../wards/wards.service';
 import { AuditService } from '../audit/audit.service';
 import { SmsService } from './sms/sms.service';
 import { normalizeToE164, sha256 } from './utils/phone.util';
@@ -672,6 +673,8 @@ export class AuthService {
         'memberships.organization',
         'memberships.organization.branding',
         'memberships.roleGrants',
+        'memberships.ward',
+        'memberships.documents',
       ],
     });
 
@@ -697,6 +700,9 @@ export class AuthService {
       appliedAt: m.appliedAt,
       approvedAt: m.approvedAt,
       requestedRole: m.requestedRole ?? null,
+      // The member's ward and the NOC they sent from its representative.
+      ward: publicWard(m.ward),
+      noc: nocView(currentNoc(m.documents)),
       roles: (m.roleGrants || [])
         .filter((g) => g.status === RoleGrantStatus.ACTIVE)
         .map((g) => g.role),

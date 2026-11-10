@@ -14,6 +14,14 @@ import { PhoneRecoveries, useWaitingRecoveries } from '@/components/phone-recove
 import { ServiceOperations } from '@/components/service-operations';
 import { TimeCredits } from '@/components/time-credits';
 import { ApiManagement } from '@/components/api-management';
+import {
+  NOC_STATUS,
+  WardNocSection,
+  WardsPanel,
+  wardLabel,
+  type Noc,
+  type Ward,
+} from '@/components/wards';
 import { BrandMark, Icon, type IconName } from '@/components/icons';
 import { api, ApiError, backend } from '@/lib/api';
 import { firebaseMessage, sendPhoneCode, type FirebaseWebConfig } from '@/lib/firebase-phone';
@@ -56,6 +64,10 @@ type Membership = {
   roleGrants: Grant[];
   rejectionReason?: string | null;
   requestedRole?: string | null;
+  /** The member's ward and current ward NOC (detail), or the NOC's status (list). */
+  ward?: Ward | null;
+  noc?: Noc | null;
+  nocStatus?: Noc['status'] | null;
   applicationNotes?: string | null;
   applicationDetails?: {
     volunteer?: {
@@ -689,7 +701,8 @@ export default function AdminDashboard(): React.JSX.Element {
     [searchText, setSearchText] = useState(''),
     [eventType, setEventType] = useState(''),
     [revision, setRevision] = useState(0),
-    [managed, setManaged] = useState<string | null>(null);
+    [managed, setManaged] = useState<string | null>(null),
+    [wardsFor, setWardsFor] = useState<{ id: string; name: string } | null>(null);
   const [loading, setLoading] = useState(false),
     [pending, setPending] = useState(false),
     [error, setError] = useState(''),
@@ -1305,6 +1318,21 @@ export default function AdminDashboard(): React.JSX.Element {
               }}
             />
           )}
+          {tab === 'organizations' && wardsFor && (
+            <WardsPanel
+              key={wardsFor.id}
+              organizationId={wardsFor.id}
+              organizationName={wardsFor.name}
+              canEdit={
+                isGlobal || (wardsFor.id === tenant && localRoles.includes('MUNICIPALITY_ADMIN'))
+              }
+              revision={revision}
+              pending={pending}
+              openAction={openAction}
+              onClose={() => setWardsFor(null)}
+              onExpired={expired}
+            />
+          )}
           {tab === 'organizations' && (
             <>
               <div className="section-heading">
@@ -1453,6 +1481,20 @@ export default function AdminDashboard(): React.JSX.Element {
                             )}
                             {(isGlobal ||
                               (organization.id === tenant &&
+                                (localRoles.includes('MUNICIPALITY_ADMIN') ||
+                                  localRoles.includes('COORDINATOR')))) && (
+                              <button
+                                className="btn btn-secondary"
+                                disabled={pending}
+                                onClick={() =>
+                                  setWardsFor({ id: organization.id, name: organization.name })
+                                }
+                              >
+                                Wards
+                              </button>
+                            )}
+                            {(isGlobal ||
+                              (organization.id === tenant &&
                                 localRoles.includes('MUNICIPALITY_ADMIN'))) && (
                               <button
                                 className="btn btn-secondary"
@@ -1550,6 +1592,7 @@ export default function AdminDashboard(): React.JSX.Element {
                           <th>Member</th>
                           <th>Status</th>
                           <th>Membership no.</th>
+                          <th>Ward and NOC</th>
                           <th>Roles</th>
                           <th>
                             <span className="sr-only">Actions</span>
@@ -1580,6 +1623,20 @@ export default function AdminDashboard(): React.JSX.Element {
                               {member.membershipNumber ?? (
                                 <span className="help-text">Not assigned</span>
                               )}
+                            </td>
+                            <td>
+                              {member.ward ? (
+                                `Ward ${member.ward.wardNumber}`
+                              ) : (
+                                <span className="help-text">No ward</span>
+                              )}
+                              <div
+                                className={member.nocStatus === 'APPROVED' ? 'help-text' : 'mono'}
+                              >
+                                {member.nocStatus
+                                  ? `NOC ${NOC_STATUS[member.nocStatus].toLowerCase()}`
+                                  : 'No NOC yet'}
+                              </div>
                             </td>
                             <td>
                               {member.roleGrants
@@ -1882,44 +1939,58 @@ export default function AdminDashboard(): React.JSX.Element {
                             );
                           })()}
                         </section>
+                        <WardNocSection
+                          organizationId={detail.membership.organizationId}
+                          ward={detail.membership.ward}
+                          noc={detail.membership.noc}
+                          canReview={
+                            detail.membership.userId !== profile?.id &&
+                            ['APPLIED', 'PENDING_REVIEW', 'REJECTED', 'APPROVED'].includes(
+                              detail.membership.status,
+                            )
+                          }
+                          openAction={openAction}
+                          onExpired={expired}
+                        />
                         <section className="drawer-section">
                           <h3>Supporting documents</h3>
-                          {detail.documents.length === 0 && (
-                            <p className="help-text">No supporting documents submitted.</p>
-                          )}
-                          {detail.documents.map((document) => (
-                            <div className="document-row" key={document.id}>
-                              <div>
-                                {label(document.documentType)}{' '}
-                                <Badge value={document.reviewStatus} />
-                                <div className="mono">{document.storageKey}</div>
+                          {detail.documents.filter((d) => d.documentType !== 'WARD_NOC').length ===
+                            0 && <p className="help-text">No supporting documents submitted.</p>}
+                          {detail.documents
+                            .filter((d) => d.documentType !== 'WARD_NOC')
+                            .map((document) => (
+                              <div className="document-row" key={document.id}>
+                                <div>
+                                  {label(document.documentType)}{' '}
+                                  <Badge value={document.reviewStatus} />
+                                  <div className="mono">{document.storageKey}</div>
+                                </div>
+                                <button
+                                  className="btn btn-sm btn-secondary"
+                                  onClick={() =>
+                                    openAction({
+                                      title: 'Review document',
+                                      fields: [
+                                        {
+                                          key: 'status',
+                                          label: 'Review decision',
+                                          options: ['APPROVED', 'REJECTED'],
+                                        },
+                                        { key: 'notes', label: 'Review notes', optional: true },
+                                      ],
+                                      submit: (values) =>
+                                        backend(
+                                          `/organizations/${detail.membership.organizationId}/memberships/documents/${document.id}/review`,
+                                          'PATCH',
+                                          values,
+                                        ),
+                                    })
+                                  }
+                                >
+                                  Review
+                                </button>
                               </div>
-                              <button
-                                className="btn btn-sm btn-secondary"
-                                onClick={() =>
-                                  openAction({
-                                    title: 'Review document',
-                                    fields: [
-                                      {
-                                        key: 'status',
-                                        label: 'Review decision',
-                                        options: ['APPROVED', 'REJECTED'],
-                                      },
-                                      { key: 'notes', label: 'Review notes', optional: true },
-                                    ],
-                                    submit: (values) =>
-                                      backend(
-                                        `/organizations/${detail.membership.organizationId}/memberships/documents/${document.id}/review`,
-                                        'PATCH',
-                                        values,
-                                      ),
-                                  })
-                                }
-                              >
-                                Review
-                              </button>
-                            </div>
-                          ))}
+                            ))}
                         </section>
                         <section className="drawer-section">
                           <div className="section-heading">
@@ -2043,14 +2114,21 @@ export default function AdminDashboard(): React.JSX.Element {
                           >
                             Reject
                           </button>
+                          {detail.membership.noc?.status !== 'APPROVED' && (
+                            <p className="help-text">
+                              Accept the member’s ward NOC before approving.
+                            </p>
+                          )}
                           <button
                             className="btn btn-success"
+                            disabled={detail.membership.noc?.status !== 'APPROVED'}
                             onClick={() =>
                               openAction({
                                 title: 'Approve membership',
                                 submitLabel: 'Approve',
-                                description:
-                                  'Choose the initial role after reviewing the application and supporting documents.',
+                                description: detail.membership.ward
+                                  ? `${wardLabel(detail.membership.ward)}. Its NOC has been accepted. Choose the initial role.`
+                                  : 'The ward NOC has been accepted. Choose the initial role.',
                                 fields: [
                                   {
                                     key: 'initialRole',

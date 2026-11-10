@@ -87,6 +87,9 @@ const FILE_TYPES = [
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   'text/csv',
+  // Ward NOCs: a photo or a scan.
+  'image/jpeg',
+  'image/png',
 ];
 export type GatewayFile = { bytes: ArrayBuffer; contentType: string; disposition: string };
 export async function upstreamFile(path: string, token: string): Promise<GatewayFile> {

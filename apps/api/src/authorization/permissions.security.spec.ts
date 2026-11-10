@@ -358,7 +358,33 @@ describe('Permission boundaries with real guards and services', () => {
     },
   );
 
+  /** Approval needs the member's ward NOC accepted first (owner's decision, 10 November 2026). */
+  const acceptNoc = () =>
+    f.documents.rows.push({
+      membershipId: f.target.id,
+      documentType: 'WARD_NOC',
+      reviewStatus: 'APPROVED',
+      createdAt: new Date(),
+    });
+
+  it('refuses approval until the ward NOC is accepted', async () => {
+    await expect(
+      f.membershipService.approveMembership(f.orgId, f.target.id, 'global-admin', {}),
+    ).rejects.toThrow('ward NOC');
+    f.documents.rows.push({
+      membershipId: f.target.id,
+      documentType: 'WARD_NOC',
+      reviewStatus: 'PENDING',
+      createdAt: new Date(),
+    });
+    await expect(
+      f.membershipService.approveMembership(f.orgId, f.target.id, 'global-admin', {}),
+    ).rejects.toThrow('ward NOC');
+    expect(f.target.status).not.toBe(MembershipStatus.APPROVED);
+  });
+
   it('allows coordinator approval of an operational role', async () => {
+    acceptNoc();
     const req = await f.authorize(MembershipsController, 'approveMembership', 'coordinator');
     await new MembershipsController(f.membershipService).approveMembership(
       f.orgId,
@@ -374,6 +400,7 @@ describe('Permission boundaries with real guards and services', () => {
   });
 
   it('allows global admin without a local membership to approve an operational member', async () => {
+    acceptNoc();
     await f.membershipService.approveMembership(f.orgId, f.target.id, 'global-admin', {});
     expect(f.target.status).toBe(MembershipStatus.APPROVED);
   });

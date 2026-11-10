@@ -8,6 +8,7 @@ import {
   IsNumber,
   IsOptional,
   IsString,
+  IsUUID,
   Length,
   Max,
   Min,
@@ -98,4 +99,10 @@ export class ApplyMembershipDto {
   @Type(() => VolunteerApplicationDto)
   @IsOptional()
   volunteer?: VolunteerApplicationDto;
+
+  /** The applicant's ward, from GET organizations/:id/wards. Their NOC comes from its representative. */
+  @ApiPropertyOptional()
+  @IsUUID()
+  @IsOptional()
+  wardId?: string;
 }

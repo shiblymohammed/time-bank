@@ -130,6 +130,12 @@ describe('MembershipsService - Role Escalation Security (Finding #1)', () => {
           provide: getRepositoryToken(MembershipDocument),
           useValue: {
             findOne: jest.fn(),
+            // Approval needs an accepted ward NOC.
+            find: jest
+              .fn()
+              .mockResolvedValue([
+                { documentType: 'WARD_NOC', reviewStatus: 'APPROVED', createdAt: new Date() },
+              ]),
           },
         },
         {

@@ -39,6 +39,9 @@ const ROUTES: [methods: string, pattern: RegExp][] = [
   ['*', /^\/admin\//],
   ['*', /^\/v1\/organizations(?:\/|$)/],
   ['*', new RegExp(`^${ORG}/memberships(?:/|$)`, 'i')],
+  ['GET POST', new RegExp(`^${ORG}/wards$`, 'i')],
+  ['GET', new RegExp(`^${ORG}/wards/manage$`, 'i')],
+  ['PATCH', new RegExp(`^${ORG}/wards/${ID}$`, 'i')],
   ['*', new RegExp(`^${ORG}/requests(?:/|$)`, 'i')],
   ['GET POST', new RegExp(`^${ORG}/safety-alerts(?:/|$)`, 'i')],
   ['GET POST', new RegExp(`^${ORG}/complaints(?:/|$)`, 'i')],
@@ -79,9 +82,9 @@ const allowed = (method: string, resource: string) =>
     ([methods, pattern]) =>
       (methods === '*' || methods.split(' ').includes(method)) && pattern.test(resource),
   );
-/** Report downloads are the one thing here that is not JSON. */
+/** Report downloads and uploaded member documents are the only things here that are not JSON. */
 const FILE_DOWNLOADS =
-  /(?:\/reports(?:\/sponsor\/[a-f0-9-]+)?\/download|\/loyalty\/achievements\/[a-f0-9-]+\/certificate)$/i;
+  /(?:\/reports(?:\/sponsor\/[a-f0-9-]+)?\/download|\/loyalty\/achievements\/[a-f0-9-]+\/certificate|\/memberships\/documents\/[a-f0-9-]+\/file)$/i;
 async function proxy(request: NextRequest, context: Context) {
   try {
     if (!['GET', 'POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method))
