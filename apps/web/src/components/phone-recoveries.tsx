@@ -117,9 +117,8 @@ export function useWaitingRecoveries(
       )
         .then((rows) =>
           setCount(
-            rows.filter(
-              (row) => row.status === 'CONFIRMED' && (isGlobal || !row.needsSuperAdmin),
-            ).length,
+            rows.filter((row) => row.status === 'CONFIRMED' && (isGlobal || !row.needsSuperAdmin))
+              .length,
           ),
         )
         // A dropped connection keeps the last count.
@@ -191,7 +190,12 @@ export function PhoneRecoveries({
     setDetail(null);
     if (!chosen) return;
     const controller = new AbortController();
-    backend<RecoveryDetail>(`${base}/phone-recoveries/${chosen}`, 'GET', undefined, controller.signal)
+    backend<RecoveryDetail>(
+      `${base}/phone-recoveries/${chosen}`,
+      'GET',
+      undefined,
+      controller.signal,
+    )
       .then(setDetail)
       .catch((cause: unknown) => {
         if (controller.signal.aborted) return;
@@ -365,8 +369,8 @@ export function PhoneRecoveries({
           </p>
           {detail.status === 'OPENED' && (
             <p role="status">
-              Read out <span className="mono">{detail.reference}</span>. They sign in to the app with
-              the new SIM, check that it is the same reference, and confirm with a code.
+              Read out <span className="mono">{detail.reference}</span>. They sign in to the app
+              with the new SIM, check that it is the same reference, and confirm with a code.
             </p>
           )}
           {detail.newNumberAccount && (
@@ -381,12 +385,15 @@ export function PhoneRecoveries({
             </p>
           )}
           {detail.nomineeEnded && (
-            <p>Their nominee had this number, so that nominee ended and they were asked to name someone else.</p>
+            <p>
+              Their nominee had this number, so that nominee ended and they were asked to name
+              someone else.
+            </p>
           )}
           {detail.status === 'COMPLETED' && (
             <p className="help-text">
-              The old number is held for 90 days, and signing in with it is refused. It can be undone
-              during that time.
+              The old number is held for 90 days, and signing in with it is refused. It can be
+              undone during that time.
             </p>
           )}
 

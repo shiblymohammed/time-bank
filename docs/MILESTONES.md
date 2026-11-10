@@ -157,8 +157,8 @@ API details, product policy and rollback constraints: [CREDIT_CONTROLS.md](CREDI
 
 **Release gates still open:** human ledger/authorization/migration review, CI on PostgreSQL 17, application of the new
 migration to the intended deployment, and current device-to-server validation. Credit interfaces and automatic
-matching/replacement are built, and so is lost-phone/SIM recovery. Real SMS remains separate work. Completed development does
-not imply overall production readiness.
+matching/replacement are built, and so is lost-phone/SIM recovery. Real SMS remains separate work. Completed development
+does not imply overall production readiness.
 
 ---
 
