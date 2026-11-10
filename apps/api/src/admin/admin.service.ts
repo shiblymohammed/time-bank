@@ -84,6 +84,35 @@ export class AdminService {
       },
     });
 
+    const now = new Date();
+    const firstMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 5, 1));
+    const monthKey = (date: Date) => date.toISOString().slice(0, 7);
+    const monthLabels = Array.from({ length: 6 }, (_, index) => {
+      const date = new Date(Date.UTC(firstMonth.getUTCFullYear(), firstMonth.getUTCMonth() + index, 1));
+      return { key: monthKey(date), label: date.toLocaleDateString('en', { month: 'short', timeZone: 'UTC' }) };
+    });
+    const countsByMonth = async <T extends User | Organization | OrganizationMembership>(repo: Repository<T>, alias: string) => {
+      const rows: { month: string; count: string }[] = await repo
+        .createQueryBuilder(alias)
+        .select(`to_char(date_trunc('month', ${alias}.createdAt), 'YYYY-MM')`, 'month')
+        .addSelect('COUNT(*)', 'count')
+        .where(`${alias}.createdAt >= :firstMonth`, { firstMonth })
+        .groupBy('month')
+        .getRawMany();
+      return new Map(rows.map((row) => [row.month, Number(row.count)]));
+    };
+    const [usersByMonth, organizationsByMonth, membershipsByMonth] = await Promise.all([
+      countsByMonth(this.userRepo, 'user'),
+      countsByMonth(this.orgRepo, 'organization'),
+      countsByMonth(this.membershipRepo, 'membership'),
+    ]);
+    const activityTrend = monthLabels.map(({ key, label }) => ({
+      month: label,
+      users: usersByMonth.get(key) ?? 0,
+      organizations: organizationsByMonth.get(key) ?? 0,
+      memberships: membershipsByMonth.get(key) ?? 0,
+    }));
+
     // Super Admin roles asked for but not yet approved by a second Super Admin.
     const [waiting, pendingSuperAdminCount] = await this.roleGrantRepo.findAndCount({
       where: { role: UserRole.SUPER_ADMIN, status: RoleGrantStatus.PENDING_APPROVAL },
@@ -99,6 +128,7 @@ export class AdminService {
       totalUniversalWallets,
       totalBalanceCredits,
       pendingMemberships,
+      activityTrend,
       pendingSuperAdminCount,
       pendingSuperAdmins: waiting.map((grant) => ({
         membershipId: grant.membershipId,

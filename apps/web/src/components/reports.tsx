@@ -99,9 +99,9 @@ function FigureTable({
   unit?: string;
 }) {
   return (
-    <div className="table-container glass-panel">
-      <table className="custom-table">
-        <caption className="help-text">{title}</caption>
+    <div className="table-container glass-panel report-table-container">
+      <table className="custom-table report-table">
+        <caption className="report-caption">{title}</caption>
         <thead>
           <tr>
             <th scope="col">Figure</th>
@@ -126,9 +126,9 @@ function VisitTable({ title, label, rows }: { title: string; label: string; rows
     return <p className="glass-panel empty-state">{title}: nothing in this period.</p>;
   }
   return (
-    <div className="table-container glass-panel">
-      <table className="custom-table">
-        <caption className="help-text">{title}</caption>
+    <div className="table-container glass-panel report-table-container">
+      <table className="custom-table report-table">
+        <caption className="report-caption">{title}</caption>
         <thead>
           <tr>
             <th scope="col">{label}</th>
@@ -240,14 +240,14 @@ export function Reports({
     });
 
   return (
-    <div className="request-workspace">
+    <div className="reports-workspace">
       <div className="section-heading">
         <h2>Reports{figures ? `: ${figures.period.label}` : ''}</h2>
         <div className="action-row">
           {FORMATS.map(({ format, label }) => (
             <button
               key={format}
-              className="btn btn-secondary"
+              className={`btn report-export report-export-${format}`}
               disabled={query === null || Boolean(downloading)}
               onClick={() => void download(`${base}/download?${query}&format=${format}`, format)}
             >
@@ -256,10 +256,11 @@ export function Reports({
           ))}
         </div>
       </div>
-      <div className="toolbar">
+      <div className="toolbar report-filters">
         <label>
           Period
           <select
+            className="form-input"
             value={choice.mode}
             onChange={(event) =>
               setChoice({ ...choice, mode: event.target.value as ReportPeriodChoice['mode'] })
@@ -273,6 +274,7 @@ export function Reports({
           <label>
             Month
             <input
+              className="form-input"
               type="month"
               value={choice.month}
               max={currentIndiaMonth(new Date())}
@@ -284,6 +286,7 @@ export function Reports({
             <label>
               From
               <input
+                className="form-input"
                 type="date"
                 value={choice.from}
                 onChange={(event) => setChoice({ ...choice, from: event.target.value })}
@@ -292,6 +295,7 @@ export function Reports({
             <label>
               To
               <input
+                className="form-input"
                 type="date"
                 value={choice.to}
                 onChange={(event) => setChoice({ ...choice, to: event.target.value })}
@@ -300,7 +304,7 @@ export function Reports({
           </>
         )}
       </div>
-      <p className="help-text">
+      <p className="help-text report-privacy-note">
         Counts only, in India time. No names, phone numbers or addresses. A count under 5 in a table
         shows as &lt;5, and &quot;hidden&quot; stops it being worked out from the total. Every
         download is recorded.
@@ -314,7 +318,7 @@ export function Reports({
       {query !== null && !figures && !error && <p role="status">Working out the figures…</p>}
       {figures && (
         <>
-          <div className="metric-grid">
+          <div className="metric-grid reports-metrics">
             {(
               [
                 ['Hours confirmed', figures.help.hoursConfirmed],
@@ -328,7 +332,7 @@ export function Reports({
                 ],
               ] as [string, Shown][]
             ).map(([label, value]) => (
-              <div className="metric-card glass-panel" key={label}>
+              <div className="metric-card glass-panel report-metric-card" key={label}>
                 <div>
                   <div className="metric-label">{label}</div>
                   <div className="metric-value">{shown(value)}</div>
@@ -337,9 +341,9 @@ export function Reports({
             ))}
           </div>
           {figures.communities && (
-            <div className="table-container glass-panel">
-              <table className="custom-table">
-                <caption className="help-text">
+            <div className="table-container glass-panel report-table-container">
+              <table className="custom-table report-table">
+                <caption className="report-caption">
                   By community. A person active in several communities counts once in the totals
                   above, so the totals can be lower than these rows added up.
                 </caption>
@@ -471,8 +475,8 @@ export function Reports({
         <p className="glass-panel empty-state">No sponsor reports yet.</p>
       )}
       {organizationId && sponsor && sponsor.length > 0 && (
-        <div className="table-container glass-panel">
-          <table className="custom-table">
+        <div className="table-container glass-panel report-table-container">
+          <table className="custom-table report-table">
             <thead>
               <tr>
                 <th scope="col">Month</th>

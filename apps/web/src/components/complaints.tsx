@@ -171,7 +171,7 @@ export function Complaints({
   return (
     <div className="request-workspace">
       <div className="section-heading">
-        <h2>Complaints</h2>
+        <div className="section-title-group"><h2>Complaints</h2><span className="record-count">{rows?.length ?? 0} {showClosed ? 'total' : 'open'}</span></div>
         <label className="inline-check">
           <input
             type="checkbox"
@@ -181,7 +181,7 @@ export function Complaints({
           Show closed complaints
         </label>
       </div>
-      <p className="help-text">
+      <p className="help-text privacy-note">
         These are confidential. You see only complaints at your level, and never one you made or one
         about a visit you were part of. Nothing here moves credits. To restrict someone, use
         Restrictions and give this complaint’s reference. A member can appeal a decision, and that
@@ -225,7 +225,7 @@ export function Complaints({
                   <td>{indiaTime(row.createdAt)}</td>
                   <td>
                     <button
-                      className="btn btn-secondary"
+                      className="btn btn-secondary btn-open"
                       aria-label={`Open ${row.reference}`}
                       onClick={() => setChosen(row)}
                     >
@@ -330,7 +330,7 @@ export function Complaints({
               </button>
               {detail.level !== 'SUPER_ADMIN' && (
                 <button
-                  className="btn btn-secondary"
+                  className="btn btn-warning"
                   disabled={pending}
                   onClick={() =>
                     openAction({
@@ -354,7 +354,7 @@ export function Complaints({
                 </button>
               )}
               <button
-                className="btn btn-secondary"
+                className="btn btn-success"
                 disabled={pending}
                 onClick={() =>
                   openAction({

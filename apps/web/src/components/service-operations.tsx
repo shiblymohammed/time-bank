@@ -66,7 +66,7 @@ function Field({
   required?: boolean;
 }) {
   return (
-    <label style={{ display: 'grid', gap: 6 }}>
+    <label className="ops-field">
       {label}
       <input
         className="form-input"
@@ -83,7 +83,7 @@ function Field({
 }
 function Select({ name, label, children }: { name: string; label: string; children: ReactNode }) {
   return (
-    <label style={{ display: 'grid', gap: 6 }}>
+    <label className="ops-field">
       {label}
       <select className="form-input" name={name} required>
         {children}
@@ -105,7 +105,7 @@ function ActionForm({
   const [formError, setFormError] = useState('');
   return (
     <form
-      style={{ display: 'grid', gap: 12, marginBlock: 24 }}
+      className="ops-form"
       onSubmit={(event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
@@ -117,8 +117,8 @@ function ActionForm({
           );
       }}
     >
-      <h3>{title}</h3>
-      {formError && <p role="alert">{formError}</p>}
+      <h3 className="ops-form-title">{title}</h3>
+      {formError && <p className="ops-form-error" role="alert">{formError}</p>}
       {children}
       <button className="btn btn-primary">{submit}</button>
     </form>
@@ -164,6 +164,12 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
   const [notice, setNotice] = useState('');
   const lock = useRef(false);
   const base = `/api/organizations/${organizationId}`;
+  const sectionDescriptions: Record<string, string> = {
+    catalogue: 'Manage shared service definitions and review community proposals.',
+    beneficiaries: 'Review service eligibility and caregiver authorizations for members.',
+    zones: 'Set up operational zones and manage volunteer coverage and skills.',
+    profile: 'View the staff account and organization access used for this session.',
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -305,6 +311,10 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
           Refresh
         </button>
       </div>
+      <div className="ops-section-heading">
+        <div><span className="ops-section-kicker">SERVICE OPERATIONS</span><h2>{section === 'zones' ? 'Zones & volunteers' : section.charAt(0).toUpperCase() + section.slice(1)}</h2><p>{sectionDescriptions[section]}</p></div>
+        <span className="ops-scope-badge">{organizationId ? 'Organization workspace' : 'Central workspace'}</span>
+      </div>
       {error && (
         <p role="alert" className="error-message">
           {error}
@@ -341,7 +351,7 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
           </button>
         </section>
       )}
-      <fieldset disabled={loading || busy} style={{ border: 0, padding: 0, minWidth: 0 }}>
+      <fieldset className="ops-content" disabled={loading || busy}>
         {section === 'catalogue' && (
           <>
             <h2>Service categories</h2>
@@ -535,7 +545,7 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
                       <option>APPROVED</option>
                       <option>REJECTED</option>
                     </Select>
-                    <label>
+                    <label className="ops-field">
                       Link approved service (optional)
                       <select className="form-input" name="service">
                         <option value="">No linked service</option>
@@ -731,7 +741,7 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
                     )
                   }
                 >
-                  <label>
+                  <label className="ops-field">
                     Available immediately{' '}
                     <select
                       name="available"

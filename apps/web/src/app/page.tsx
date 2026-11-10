@@ -129,6 +129,7 @@ type Metrics = {
     fullName: string | null;
     phoneE164: string | null;
   }[];
+  activityTrend?: { month: string; users: number; organizations: number; memberships: number }[];
 };
 type View = {
   memberships: Membership[];
@@ -156,62 +157,62 @@ const PAGES: {
     id: 'overview',
     text: 'Overview',
     icon: 'overview',
-    group: 'General',
-    description: 'Platform-wide totals across all organizations',
+    group: '',
+    description: 'Monitor participation, organization readiness and review activity across the time bank.',
     centralOnly: true,
   },
   {
     id: 'organizations',
     text: 'Organizations',
     icon: 'organizations',
-    group: 'General',
+    group: 'Staff Console',
     description: 'Organizations, their status and branding',
   },
   {
     id: 'memberships',
     text: 'Memberships',
     icon: 'memberships',
-    group: 'Community',
+    group: 'Staff Console',
     description: 'Review applications and manage member roles',
   },
   {
     id: 'requests',
-    text: 'Requests & matching',
+    text: 'Requests & Matching',
     icon: 'requests',
-    group: 'Community',
+    group: 'Staff Console',
     description: 'Help requests and volunteer matching',
   },
   {
     id: 'safety',
-    text: 'Safety alerts',
+    text: 'Safety Alerts',
     icon: 'safety',
-    group: 'Community',
+    group: 'Staff Console',
     description: 'Visits paused or ended by a safety alert',
   },
   {
     id: 'complaints',
     text: 'Complaints',
     icon: 'complaints',
-    group: 'Community',
+    group: 'Staff Console',
     description: 'Confidential complaints from members',
   },
   {
     id: 'catalogue',
-    text: 'Service catalogue',
+    text: 'Service Catalogue',
     icon: 'catalogue',
     group: 'Services',
     description: 'Services members can offer and request',
   },
   {
     id: 'operations',
-    text: 'Service operations',
+    text: 'Service Operations',
     icon: 'operations',
     group: 'Services',
     description: 'Bookings, completions and time credits',
   },
   {
     id: 'credits',
-    text: 'Time credits',
+    text: 'Time Credits',
     icon: 'wallet',
     group: 'Governance',
     description: 'Community pools, member wallets and independent credit reviews',
@@ -219,7 +220,7 @@ const PAGES: {
 
   {
     id: 'loyalty',
-    text: 'Loyalty and merchants',
+    text: 'Loyalty & Merchants',
     icon: 'wallet',
     group: 'Governance',
     description: 'Local coins, merchant-funded offers and recognition',
@@ -233,7 +234,7 @@ const PAGES: {
   },
   {
     id: 'closures',
-    text: 'Account closures',
+    text: 'Account Closures',
     icon: 'closures',
     group: 'Governance',
     description: 'Deaths, duplicate accounts and passing on credits',
@@ -248,14 +249,14 @@ const PAGES: {
   },
   {
     id: 'phone-recoveries',
-    text: 'Phone number changes',
+    text: 'Phone Number Changes',
     icon: 'phoneRecovery',
     group: 'Governance',
     description: 'Moving an account to a new number after a lost phone or SIM',
   },
   {
     id: 'audit',
-    text: 'Audit trail',
+    text: 'Audit Trail',
     icon: 'audit',
     group: 'Governance',
     description: 'Server-recorded events',
@@ -292,6 +293,162 @@ function Badge({ value }: { value: string }) {
       ? 'suspended'
       : 'pending';
   return <span className={`badge badge-${tone}`}>{label(value)}</span>;
+}
+function ActivityTrend({ points }: { points: Metrics['activityTrend'] }) {
+  if (!points?.length) {
+    return (
+      <section className="glass-panel insight-card activity-trend-card">
+        <div className="section-heading"><div><h3>Monthly activity</h3><p>New users, organizations and memberships over the last six months</p></div><Icon name="overview" /></div>
+        <p className="trend-empty">Monthly activity is not available yet. Refresh after the dashboard API has been updated.</p>
+      </section>
+    );
+  }
+  const series = [
+    { key: 'users', label: 'New users', color: '#7c3aed' },
+    { key: 'organizations', label: 'New organizations', color: '#0f9f87' },
+    { key: 'memberships', label: 'New memberships', color: '#e69a20' },
+  ] as const;
+  const max = Math.max(1, ...points.flatMap((point) => [point.users, point.organizations, point.memberships]));
+  const x = (index: number) => 46 + (index * 550) / Math.max(1, points.length - 1);
+  const y = (value: number) => 165 - (value / max) * 135;
+  return (
+    <section className="glass-panel insight-card activity-trend-card">
+      <div className="section-heading"><div><h3>Monthly activity</h3><p>New users, organizations and memberships over the last six months</p></div><Icon name="overview" /></div>
+      <div className="trend-legend">{series.map((item) => <span key={item.key}><i style={{ background: item.color }} />{item.label}</span>)}</div>
+      <div className="line-chart-wrap">
+        <svg className="line-chart" viewBox="0 0 620 210" role="img" aria-label={`Monthly activity for the last six months. ${series.map((item) => `${item.label}: ${points.map((point) => point[item.key]).join(', ')}`).join('. ')}`}>
+          {[0, 0.5, 1].map((fraction) => {
+            const value = Math.round(max * fraction);
+            const gridY = y(value);
+            return <g key={fraction}><line x1="46" x2="600" y1={gridY} y2={gridY} className="chart-gridline"/><text x="36" y={gridY + 4} textAnchor="end" className="chart-axis-label">{value}</text></g>;
+          })}
+          {series.map((item) => <g key={item.key}>
+            <polyline points={points.map((point, index) => `${x(index)},${y(point[item.key])}`).join(' ')} fill="none" stroke={item.color} strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+            {points.map((point, index) => <circle key={`${item.key}-${point.month}`} cx={x(index)} cy={y(point[item.key])} r="4" fill="white" stroke={item.color} strokeWidth="2.5"><title>{`${point.month}: ${point[item.key]} ${item.label.toLowerCase()}`}</title></circle>)}
+          </g>)}
+          {points.map((point, index) => <text key={point.month} x={x(index)} y="195" textAnchor="middle" className="chart-axis-label">{point.month}</text>)}
+        </svg>
+      </div>
+    </section>
+  );
+}
+function OrganizationScopeSelect({
+  organizations,
+  value,
+  includeGlobal,
+  disabled,
+  onChange,
+}: {
+  organizations: Organization[];
+  value: string;
+  includeGlobal: boolean;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}) {
+  const root = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const items = [
+    ...(includeGlobal ? [{ id: 'GLOBAL', name: 'All organizations', district: 'Platform-wide scope', type: '' }] : []),
+    ...organizations,
+  ];
+  const selectedIndex = Math.max(0, items.findIndex((item) => item.id === value));
+  const [open, setOpen] = useState(false);
+  const [activeIndex, setActiveIndex] = useState(selectedIndex);
+  const selected = items[selectedIndex];
+
+  useEffect(() => {
+    if (!open) return;
+    const closeOutside = (event: MouseEvent) => {
+      if (!root.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', closeOutside);
+    return () => document.removeEventListener('mousedown', closeOutside);
+  }, [open]);
+
+  function choose(index: number) {
+    const item = items[index];
+    if (!item) return;
+    onChange(item.id);
+    setActiveIndex(index);
+    setOpen(false);
+    trigger.current?.focus();
+  }
+
+  function handleKeyDown(event: React.KeyboardEvent<HTMLButtonElement>) {
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      if (!open) {
+        setActiveIndex(selectedIndex);
+        setOpen(true);
+      } else {
+        setActiveIndex((index) => (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length);
+      }
+    } else if (event.key === 'Home' && open) {
+      event.preventDefault();
+      setActiveIndex(0);
+    } else if (event.key === 'End' && open) {
+      event.preventDefault();
+      setActiveIndex(items.length - 1);
+    } else if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      if (!open) {
+        setActiveIndex(selectedIndex);
+        setOpen(true);
+      } else choose(activeIndex);
+    } else if (event.key === 'Escape' && open) {
+      event.preventDefault();
+      setOpen(false);
+    }
+  }
+
+  return (
+    <div className={`scope-select ${open ? 'is-open' : ''}`} ref={root}>
+      <button
+        id="tenant-select"
+        ref={trigger}
+        type="button"
+        role="combobox"
+        className="scope-select-trigger"
+        aria-labelledby="organization-scope-label"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-controls="tenant-options"
+        aria-activedescendant={open ? `tenant-option-${activeIndex}` : undefined}
+        disabled={disabled || items.length === 0}
+        onClick={() => {
+          setActiveIndex(selectedIndex);
+          setOpen((current) => !current);
+        }}
+        onKeyDown={handleKeyDown}
+      >
+        <span className="scope-current-icon"><Icon name="organizations" /></span>
+        <span className="scope-current-text"><strong>{selected?.name ?? 'Choose an organization'}</strong><small>{selected?.id === 'GLOBAL' ? 'Platform-wide scope' : selected ? `${selected.district} · ${label(selected.type)}` : 'No organizations available'}</small></span>
+        <span className="scope-chevron"><Icon name="chevronRight" /></span>
+      </button>
+      {open && (
+        <div className="scope-options" id="tenant-options" role="listbox" aria-label="Choose organization">
+          <div className="scope-options-label">Available organizations</div>
+          {items.map((item, index) => (
+            <button
+              key={item.id}
+              id={`tenant-option-${index}`}
+              type="button"
+              role="option"
+              aria-selected={item.id === value}
+              className={`scope-option ${item.id === value ? 'selected' : ''} ${index === activeIndex ? 'active' : ''}`}
+              onMouseEnter={() => setActiveIndex(index)}
+              onClick={() => choose(index)}
+            >
+              <span className="scope-option-mark"><Icon name="organizations" /></span>
+              <span className="scope-option-text"><strong>{item.name}</strong><small>{item.id === 'GLOBAL' ? 'View platform-wide records' : `${item.district} · ${label(item.type)}`}</small></span>
+              {item.id === value && <span className="scope-option-check"><Icon name="check" /></span>}
+            </button>
+          ))}
+          {items.length === 0 && <p className="scope-options-empty">No organizations available.</p>}
+        </div>
+      )}
+    </div>
+  );
 }
 function SignIn({ onSignedIn }: { onSignedIn: (profile: Profile) => void }) {
   const [phone, setPhone] = useState(''),
@@ -908,6 +1065,19 @@ export default function AdminDashboard(): React.JSX.Element {
     setView(empty());
     setNotice('');
   }
+  async function refreshDashboard() {
+    setPending(true);
+    setNotice('');
+    try {
+      signedIn(await api<Profile>('/api/session'));
+      setRevision((value) => value + 1);
+    } catch (cause) {
+      if (cause instanceof ApiError && [401, 403].includes(cause.status)) expired();
+      else setError(cause instanceof Error ? cause.message : 'Unable to refresh');
+    } finally {
+      setPending(false);
+    }
+  }
   function openAction(next: Action) {
     setAction(next);
     setError('');
@@ -972,13 +1142,13 @@ export default function AdminDashboard(): React.JSX.Element {
           </div>
           <div>
             <div className="brand-title">Indian Time Bank</div>
-            <div className="brand-subtitle">Administration</div>
+            <div className="brand-subtitle">Administration Workspace</div>
           </div>
         </div>
         <nav className="nav-group" aria-label="Dashboard">
           {tabs.map((item, index) => (
             <React.Fragment key={item.id}>
-              {tabs[index - 1]?.group !== item.group && (
+              {item.group && tabs[index - 1]?.group !== item.group && (
                 <div className="nav-section">{item.group}</div>
               )}
               <button
@@ -1026,7 +1196,7 @@ export default function AdminDashboard(): React.JSX.Element {
         </nav>
         <div className="sidebar-footer">
           <div className="avatar" aria-hidden="true">
-            {profile.phoneE164.slice(-2)}
+            {isGlobal ? 'CA' : isStaffScope ? 'SA' : 'ME'}
           </div>
           <div className="user-meta">
             <p>{phone(profile.phoneE164)}</p>
@@ -1064,55 +1234,34 @@ export default function AdminDashboard(): React.JSX.Element {
         </div>
       </aside>
       <div className="main-wrapper" inert={action !== null || detail !== null}>
-        <header className="top-bar">
+        {tab !== 'overview' && <header className="top-bar">
           <div className="page-title">
+            <span className="page-kicker">{page?.group && <>{page.group} <span aria-hidden="true">/</span> </>}{page?.text}</span>
             <h1>{page?.text}</h1>
             <p>{page?.description}</p>
           </div>
           <div className="top-actions">
-            {/* The overview always covers every organization. */}
-            {tab !== 'overview' && (
-              <label className="scope-label">
-                Organization
-                <select
-                  id="tenant-select"
-                  className="form-input"
+              <div className="scope-label">
+                <span id="organization-scope-label" className="scope-label-heading"><Icon name="organizations" /> Organization scope</span>
+                <OrganizationScopeSelect
+                  organizations={organizations}
                   value={tenant}
+                  includeGlobal={isGlobal}
                   disabled={pending}
-                  onChange={(event) => changeScope(event.target.value)}
-                >
-                  {isGlobal && <option value="GLOBAL">All organizations</option>}
-                  {organizations.map((organization) => (
-                    <option key={organization.id} value={organization.id}>
-                      {organization.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            )}
+                  onChange={changeScope}
+                />
+              </div>
             <button
               className="btn btn-secondary"
               title="Reload from the server"
               disabled={pending || loading}
-              onClick={async () => {
-                setPending(true);
-                setNotice('');
-                try {
-                  signedIn(await api<Profile>('/api/session'));
-                  setRevision((value) => value + 1);
-                } catch (cause) {
-                  if (cause instanceof ApiError && [401, 403].includes(cause.status)) expired();
-                  else setError(cause instanceof Error ? cause.message : 'Unable to refresh');
-                } finally {
-                  setPending(false);
-                }
-              }}
+              onClick={() => void refreshDashboard()}
             >
               <Icon name="refresh" />
-              Refresh
+              Refresh data
             </button>
           </div>
-        </header>
+        </header>}
         <main className="content-body" aria-busy={loading || pending}>
           {error && (
             <p className="error-message" role="alert">
@@ -1130,6 +1279,22 @@ export default function AdminDashboard(): React.JSX.Element {
             </p>
           )}
           {tab === 'overview' && view.metrics && (
+            <div className="overview-dashboard">
+            <div className="overview-intro">
+              <div>
+                <h2>Platform summary</h2>
+                <p>Current users, organizations, wallets and reviews across the platform.</p>
+              </div>
+              <div className="overview-tools">
+                <span className="scope-pill"><Icon name="organizations" /> All organizations</span>
+                <button className={`btn btn-refresh ${pending || loading ? 'is-loading' : ''}`} title="Reload overview data" disabled={pending || loading} onClick={() => void refreshDashboard()}>
+                  <Icon name="refresh" />
+                  Refresh overview
+                </button>
+              </div>
+            </div>
+            <section className="overview-block">
+              <div className="overview-block-heading"><div><h3>Key metrics</h3><p>Current totals across the Indian Time Bank platform</p></div></div>
             <div className="metric-grid">
               {(
                 [
@@ -1139,8 +1304,8 @@ export default function AdminDashboard(): React.JSX.Element {
                   ['Time wallets', view.metrics.totalUniversalWallets, 'wallet'],
                   ['Time credits', view.metrics.totalBalanceCredits, 'clock'],
                 ] as const
-              ).map(([name, value, icon]) => (
-                <section className="glass-panel metric-card" key={name}>
+              ).map(([name, value, icon], index) => (
+                <section className={`glass-panel metric-card metric-${['users', 'organizations', 'active', 'wallets', 'credits'][index]}`} key={name}>
                   <div>
                     <div className="metric-label">{name}</div>
                     <div className="metric-value">{value}</div>
@@ -1151,7 +1316,7 @@ export default function AdminDashboard(): React.JSX.Element {
                 </section>
               ))}
               <section
-                className={`glass-panel metric-card ${view.metrics.pendingMemberships ? 'attention' : ''}`}
+                className={`glass-panel metric-card metric-pending ${view.metrics.pendingMemberships ? 'attention' : ''}`}
               >
                 <div>
                   <div className="metric-label">Pending memberships</div>
@@ -1173,7 +1338,7 @@ export default function AdminDashboard(): React.JSX.Element {
                 </div>
               </section>
               <section
-                className={`glass-panel metric-card ${view.metrics.pendingSuperAdminCount ? 'attention' : ''}`}
+                className={`glass-panel metric-card metric-approvals ${view.metrics.pendingSuperAdminCount ? 'attention' : ''}`}
               >
                 <div>
                   <div className="metric-label">Super Admins awaiting approval</div>
@@ -1201,6 +1366,25 @@ export default function AdminDashboard(): React.JSX.Element {
                   <Icon name="inbox" />
                 </div>
               </section>
+            </div>
+            </section>
+            <section className="overview-block">
+              <div className="overview-block-heading"><div><h3>Activity and readiness</h3><p>Organization status and recent community growth</p></div></div>
+            <div className="overview-insights">
+              <section className="glass-panel insight-card">
+                <div className="section-heading"><div><h3>Organization readiness</h3><p>Active organizations compared with all registered organizations</p></div><Icon name="organizations" /></div>
+                <div className="donut-layout">
+                  <div className="donut org-donut" style={{ '--ratio': `${view.metrics.totalOrganizations ? (view.metrics.activeOrganizations / view.metrics.totalOrganizations) * 100 : 0}%` } as React.CSSProperties} role="img" aria-label={`${view.metrics.activeOrganizations} active of ${view.metrics.totalOrganizations} organizations`}><span><strong>{view.metrics.totalOrganizations ? Math.round((view.metrics.activeOrganizations / view.metrics.totalOrganizations) * 100) : 0}%</strong><small>active</small></span></div>
+                  <div className="chart-legend"><div><i className="legend-purple"/><span>Active</span><strong>{view.metrics.activeOrganizations}</strong></div><div><i className="legend-muted"/><span>Other status</span><strong>{Math.max(0, view.metrics.totalOrganizations - view.metrics.activeOrganizations)}</strong></div><p>Active organizations can support local membership and service activity.</p></div>
+                </div>
+              </section>
+              <ActivityTrend points={view.metrics.activityTrend} />
+            </div>
+            </section>
+            <section className="glass-panel overview-guidance">
+              <div><span className="guidance-icon"><Icon name="inbox" /></span><div><h3>What needs attention</h3><p>{view.metrics.pendingMemberships ? `${view.metrics.pendingMemberships} membership ${view.metrics.pendingMemberships === 1 ? 'application is' : 'applications are'} waiting for review. Timely decisions help applicants join their community and access services.` : 'There are no pending membership applications. New applications will appear here when they arrive.'}</p></div></div>
+              {view.metrics.pendingMemberships > 0 && <button className="btn btn-secondary" onClick={() => { changeTab('memberships'); setStatus('APPLIED'); }}>Review applications <span aria-hidden="true">→</span></button>}
+            </section>
             </div>
           )}
           {tab === 'requests' &&
@@ -1308,12 +1492,12 @@ export default function AdminDashboard(): React.JSX.Element {
           {tab === 'organizations' && (
             <>
               <div className="section-heading">
-                <p>
+                <span className="record-count">
                   {shownOrgs.length} organization{shownOrgs.length === 1 ? '' : 's'}
-                </p>
+                </span>
                 {isGlobal && (
                   <button
-                    className="btn btn-primary"
+                    className="btn btn-primary btn-create"
                     disabled={pending}
                     onClick={() =>
                       openAction({
@@ -1367,7 +1551,7 @@ export default function AdminDashboard(): React.JSX.Element {
                 )}
               </div>
               <div className="table-container glass-panel">
-                <table className="custom-table">
+                <table className="custom-table organization-table">
                   <thead>
                     <tr>
                       <th>Organization</th>
@@ -1383,8 +1567,10 @@ export default function AdminDashboard(): React.JSX.Element {
                     {shownOrgs.map((organization) => (
                       <tr key={organization.id}>
                         <td className="primary-cell">
-                          {organization.name}
-                          <div className="mono">{organization.code}</div>
+                          <div className="organization-identity">
+                            <span className="organization-mark" aria-hidden="true"><Icon name="organizations" /></span>
+                            <span><strong>{organization.name}</strong><span className="organization-code">{organization.code}</span></span>
+                          </div>
                         </td>
                         <td>
                           {organization.district}
@@ -1409,7 +1595,7 @@ export default function AdminDashboard(): React.JSX.Element {
                               {organization.branding.appDisplayName}
                             </div>
                           ) : (
-                            <span className="help-text">Not configured</span>
+                              <span className="branding-empty"><i />Not configured</span>
                           )}
                         </td>
                         <td>
@@ -1425,7 +1611,7 @@ export default function AdminDashboard(): React.JSX.Element {
                             )}
                             {isGlobal && (
                               <button
-                                className="btn btn-secondary"
+                                className="btn btn-warning"
                                 disabled={pending}
                                 onClick={() =>
                                   openAction({
@@ -1455,7 +1641,7 @@ export default function AdminDashboard(): React.JSX.Element {
                               (organization.id === tenant &&
                                 localRoles.includes('MUNICIPALITY_ADMIN'))) && (
                               <button
-                                className="btn btn-secondary"
+                                className="btn btn-branding"
                                 disabled={pending}
                                 onClick={() =>
                                   openAction({
@@ -1510,6 +1696,10 @@ export default function AdminDashboard(): React.JSX.Element {
                 </p>
               ) : (
                 <>
+                  <div className="list-summary">
+                    <div><h2>Member applications</h2><p>Review applications, confirm details and manage approved member roles.</p></div>
+                    <span className="record-count">{view.total.toLocaleString()} member{view.total === 1 ? '' : 's'}</span>
+                  </div>
                   <div className="toolbar">
                     <label>
                       Status
