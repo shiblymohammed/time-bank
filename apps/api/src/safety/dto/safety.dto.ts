@@ -1,5 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsEnum, IsOptional, IsString, Length, MaxLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsEnum,
+  IsISO8601,
+  IsOptional,
+  IsString,
+  Length,
+  MaxLength,
+} from 'class-validator';
 import { SafetyAlertAction } from '@ktb/shared-types';
 
 export class RaiseSafetyAlertDto {
@@ -18,6 +26,13 @@ export class RaiseSafetyAlertDto {
   @IsString()
   @Length(8, 100)
   clientOperationId?: string;
+
+  @ApiPropertyOptional({
+    description: 'When it was tapped on the phone, if it had no signal then. Defaults to now.',
+  })
+  @IsOptional()
+  @IsISO8601({ strict: true })
+  occurredAt?: string;
 }
 
 export class RespondToRestartDto {

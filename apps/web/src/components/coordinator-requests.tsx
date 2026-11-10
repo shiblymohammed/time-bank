@@ -63,6 +63,9 @@ type Snapshot = {
     scheduledStartTime: string | null;
     startedAt: string | null;
     finishedAt: string | null;
+    /** Set only when the phone had no signal and sent the change later (M8). */
+    startReceivedAt?: string | null;
+    finishReceivedAt?: string | null;
     reportedMinutes: number | null;
     completionNotes: string | null;
     confirmedAt: string | null;
@@ -774,6 +777,14 @@ export function CoordinatorRequests({
                       ? ` · Finished ${indiaTime(a.finishedAt)} · Reported ${a.reportedMinutes} minutes`
                       : ''}
                     {a.completionNotes ? ` · ${a.completionNotes}` : ''}
+                  </p>
+                )}
+                {(a.startReceivedAt || a.finishReceivedAt) && (
+                  <p className="help-text" data-testid="recorded-offline">
+                    <strong>Recorded offline.</strong> The phone had no signal, so the times above
+                    are when the volunteer tapped.
+                    {a.startReceivedAt ? ` Start received ${indiaTime(a.startReceivedAt)}.` : ''}
+                    {a.finishReceivedAt ? ` Finish received ${indiaTime(a.finishReceivedAt)}.` : ''}
                   </p>
                 )}
                 {a.reviewRequestedAt && !a.reviewResolvedAt && (

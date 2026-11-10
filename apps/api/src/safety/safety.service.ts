@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { DataSource, EntityManager, In, IsNull, Not } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, LessThanOrEqual, Not } from 'typeorm';
 import {
   AssignmentReviewReason,
   MatchingRoundStatus,
@@ -22,6 +22,7 @@ import { VolunteerAssignment } from '../matching/entities/volunteer-assignment.e
 import { MatchingRound } from '../matching/entities/matching-round.entity';
 import { pausedSecondsAt, workedMinutes } from '../matching/booking-recovery';
 import { MAX_SERVICE_MINUTES } from '../matching/matching.service';
+import { latest, phoneTime } from '../matching/visit-operations';
 import { OrganizationMembership } from '../memberships/entities/organization-membership.entity';
 import { NotificationsService } from '../notifications/notifications.service';
 import { ServiceRequest } from '../requests/entities/service-request.entity';
@@ -64,12 +65,18 @@ export class SafetyService {
         });
         if (earlier) return memberReceipt(earlier);
       }
+      // FR-OFF-05: an alert raised with no signal arrives later, with the time it was tapped.
+      const time = phoneTime(dto.occurredAt, now);
       const visits = await this.lockActiveVisits(manager, request.id);
-      const role = await this.partyRole(orgId, request, visits, context);
       if (visits.length === 0) {
-        throw new ConflictException('A safety alert can be raised only while a visit is under way');
+        if (!time.receivedLate) {
+          throw new ConflictException(
+            'A safety alert can be raised only while a visit is under way',
+          );
+        }
+        return this.lateAlertAfterVisit(manager, orgId, request, userId, context, dto, time.at);
       }
-
+      const role = await this.partyRole(orgId, request, visits, context);
       const alert = await manager.save(
         SafetyAlert,
         manager.create(SafetyAlert, {
@@ -80,6 +87,7 @@ export class SafetyService {
           action: dto.action,
           notes: dto.notes?.trim() || null,
           clientOperationId: dto.clientOperationId ?? null,
+          raisedOnPhoneAt: time.receivedLate ? time.at : null,
           status: SafetyAlertStatus.OPEN,
         }),
       );
@@ -91,9 +99,10 @@ export class SafetyService {
             ? visits.filter((visit) => visit.volunteerMembershipId === context.membershipId)
             : visits;
       const pausing = visits.filter((visit) => !ending.includes(visit));
-      await this.endVisits(manager, ending, userId, now);
+      // Work stopped when the alert was tapped, not when the signal came back.
+      await this.endVisits(manager, ending, userId, now, time.at);
       for (const visit of pausing) {
-        visit.pausedAt = visit.pausedAt ?? now;
+        visit.pausedAt = visit.pausedAt ?? latest(time.at, visit.startedAt);
         // A new alert takes back any earlier permission to restart.
         visit.restartAllowedAt = null;
         await manager.save(VolunteerAssignment, visit);
@@ -110,9 +119,56 @@ export class SafetyService {
       await this.audit(manager, 'SAFETY_ALERT_RAISED', userId, alert, ipAddress, {
         action: dto.action,
         raisedByRole: role,
+        ...(time.receivedLate ? { recordedOffline: true } : {}),
       });
       return memberReceipt(alert);
     });
+  }
+
+  /**
+   * An alert raised offline during a visit that has ended by the time it arrives. Nothing is left
+   * to pause, but staff must still hear about it, so it is never refused.
+   */
+  private async lateAlertAfterVisit(
+    manager: EntityManager,
+    orgId: string,
+    request: ServiceRequest,
+    userId: string,
+    context: EvaluatedMembershipContext,
+    dto: RaiseSafetyAlertDto,
+    at: Date,
+  ) {
+    const covering = (
+      await manager.find(VolunteerAssignment, {
+        where: { serviceRequestId: request.id, startedAt: LessThanOrEqual(at) },
+      })
+    ).filter((visit) => !visit.finishedAt || new Date(visit.finishedAt) >= at);
+    if (covering.length === 0) {
+      throw new ConflictException('A safety alert can be raised only while a visit is under way');
+    }
+    const role = await this.partyRole(orgId, request, covering, context);
+    const alert = await manager.save(
+      SafetyAlert,
+      manager.create(SafetyAlert, {
+        organizationId: orgId,
+        serviceRequestId: request.id,
+        raisedByUserId: userId,
+        raisedByRole: role,
+        action: dto.action,
+        notes: dto.notes?.trim() || null,
+        clientOperationId: dto.clientOperationId ?? null,
+        raisedOnPhoneAt: at,
+        status: SafetyAlertStatus.OPEN,
+      }),
+    );
+    await this.notifyStaff(manager, request, covering, userId);
+    await this.audit(manager, 'SAFETY_ALERT_RAISED', userId, alert, undefined, {
+      action: dto.action,
+      raisedByRole: role,
+      recordedOffline: true,
+      visitAlreadyOver: true,
+    });
+    return memberReceipt(alert);
   }
 
   /**
@@ -424,14 +480,16 @@ export class SafetyService {
     visits: VolunteerAssignment[],
     requestedBy: string,
     now: Date,
+    stoppedAt: Date = now,
   ): Promise<void> {
     for (const visit of visits) {
-      visit.pausedSeconds = pausedSecondsAt(visit, now);
+      const end = latest(stoppedAt, visit.startedAt);
+      visit.pausedSeconds = pausedSecondsAt(visit, end);
       visit.pausedAt = null;
       visit.restartAllowedAt = null;
       visit.status = VolunteerAssignmentStatus.COMPLETED;
-      visit.finishedAt = now;
-      visit.reportedMinutes = Math.min(workedMinutes(visit, now), MAX_SERVICE_MINUTES);
+      visit.finishedAt = end;
+      visit.reportedMinutes = Math.min(workedMinutes(visit, end), MAX_SERVICE_MINUTES);
       visit.reviewReason = AssignmentReviewReason.SAFETY_ALERT;
       visit.reviewRequestedAt = now;
       visit.reviewRequestedByUserId = requestedBy;
@@ -668,6 +726,8 @@ function toStaffView(alert: SafetyAlert, allVisits: VolunteerAssignment[]) {
     raisedByName: alert.raisedBy?.fullName ?? null,
     raisedByPhone: alert.raisedBy?.phoneE164 ?? null,
     createdAt: alert.createdAt,
+    // Set only when it was raised with no signal: when it was tapped, before createdAt.
+    raisedOnPhoneAt: alert.raisedOnPhoneAt ?? null,
     acknowledgedAt: alert.acknowledgedAt ?? null,
     resolvedAt: alert.resolvedAt ?? null,
     request: {

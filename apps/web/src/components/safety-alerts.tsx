@@ -26,6 +26,8 @@ type Alert = {
   raisedByName: string | null;
   raisedByPhone: string | null;
   createdAt: string;
+  /** When it was tapped, if the phone had no signal and sent it later (M8). */
+  raisedOnPhoneAt?: string | null;
   acknowledgedAt: string | null;
   resolvedAt: string | null;
   request: {
@@ -172,6 +174,13 @@ export function SafetyAlerts({
               <strong>{alert.raisedByName || 'a member'}</strong> ({role(alert.raisedByRole)}), who
               chose to {alert.action === 'END' ? 'end the visit' : 'pause the visit'}.
             </p>
+            {alert.raisedOnPhoneAt && (
+              <p data-testid="raised-offline">
+                <strong>Recorded offline.</strong> Tapped on the phone{' '}
+                {indiaTime(alert.raisedOnPhoneAt)} with no signal; it reached us{' '}
+                {indiaTime(alert.createdAt)}.
+              </p>
+            )}
             {alert.notes && <p>“{alert.notes}”</p>}
             <p>
               <strong>Call:</strong> {alert.raisedByName || 'Person who raised it'}{' '}

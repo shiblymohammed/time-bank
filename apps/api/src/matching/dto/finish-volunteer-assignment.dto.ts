@@ -1,7 +1,8 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsInt, IsOptional, IsString, Length, Max, Min } from 'class-validator';
+import { VisitOperationDto } from './visit-operation.dto';
 
-export class FinishVolunteerAssignmentDto {
+export class FinishVolunteerAssignmentDto extends VisitOperationDto {
   @ApiPropertyOptional({
     example: 75,
     description: 'Minutes of help given. Defaults to the time since the service started.',

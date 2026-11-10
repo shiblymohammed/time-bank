@@ -48,6 +48,10 @@ export class SafetyAlert {
   @Column({ type: 'text', nullable: true })
   notes?: string | null;
 
+  /** Set only when the alert was raised with no signal and sent later: when it was tapped. */
+  @Column({ name: 'raised_on_phone_at', type: 'timestamptz', nullable: true })
+  raisedOnPhoneAt?: Date | null;
+
   @Column({ name: 'client_operation_id', type: 'varchar', length: 100, nullable: true })
   clientOperationId?: string | null;
 

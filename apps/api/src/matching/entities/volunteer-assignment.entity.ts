@@ -103,6 +103,14 @@ export class VolunteerAssignment {
   @Column({ name: 'finished_at', type: 'timestamptz', nullable: true })
   finishedAt?: Date | null;
 
+  /** Set only when the start, or a team arrival, reached the server late: recorded offline. */
+  @Column({ name: 'start_received_at', type: 'timestamptz', nullable: true })
+  startReceivedAt?: Date | null;
+
+  /** Set only when the finish, or leaving early, reached the server late: recorded offline. */
+  @Column({ name: 'finish_received_at', type: 'timestamptz', nullable: true })
+  finishReceivedAt?: Date | null;
+
   @Column({ name: 'reported_minutes', type: 'int', nullable: true })
   reportedMinutes?: number | null;
 

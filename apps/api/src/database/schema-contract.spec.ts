@@ -24,6 +24,7 @@ import { RestrictionCases1729118400020 } from './migrations/1729118400020-Restri
 import { AccountClosures1729118400021 } from './migrations/1729118400021-AccountClosures';
 import { SponsorReports1729118400022 } from './migrations/1729118400022-SponsorReports';
 import { LoyaltyAndMerchants1729118400023 } from './migrations/1729118400023-LoyaltyAndMerchants';
+import { OfflineVisits1729118400024 } from './migrations/1729118400024-OfflineVisits';
 describe('entity and migration schema contract', () => {
   it('defines every mapped entity column in the migration SQL', async () => {
     const queries: string[] = [];
@@ -57,6 +58,7 @@ describe('entity and migration schema contract', () => {
       new AccountClosures1729118400021(),
       new SponsorReports1729118400022(),
       new LoyaltyAndMerchants1729118400023(),
+      new OfflineVisits1729118400024(),
     ]) {
       await migration.up(runner);
     }

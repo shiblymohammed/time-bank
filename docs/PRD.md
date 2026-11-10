@@ -450,6 +450,9 @@ Each configuration file defines tenant identity and visual branding:
 - **FR-OFF-05:** Multi-channel notifications (Push, SMS, opt-in WhatsApp); un-synced offline alerts never falsely report
   delivered status (D#48, NFR-15).
 
+> Delivery note (10 November 2026): offline registration capture by coordinators is dropped by the project owner's
+> decision, since coordinators work online in the web panel. See [OFFLINE.md](OFFLINE.md) for what M8 covers.
+
 ### FR-REPORT: Analytics and sponsor reporting
 
 - **FR-REPORT-01:** Organization-scoped dashboards and PDF/Excel/CSV exports for Municipality Admins; Super Admin views

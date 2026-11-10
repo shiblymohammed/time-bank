@@ -1,6 +1,7 @@
 import { LoyaltyService } from '../src/loyalty/loyalty.service';
 import { MerchantsService } from '../src/merchants/merchants.service';
 import { LoyaltyAndMerchants1729118400023 } from '../src/database/migrations/1729118400023-LoyaltyAndMerchants';
+import { OfflineVisits1729118400024 } from '../src/database/migrations/1729118400024-OfflineVisits';
 import { ClosuresService } from '../src/closures/closures.service';
 import { SafetyService } from '../src/safety/safety.service';
 import { NomineeService } from '../src/closures/nominee.service';
@@ -152,6 +153,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       AccountClosures1729118400021,
       SponsorReports1729118400022,
       LoyaltyAndMerchants1729118400023,
+      OfflineVisits1729118400024,
     ],
     synchronize: false,
     extra: {
@@ -1623,6 +1625,341 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
           cancellationReason: 'OTHER',
         } as any),
       ).rejects.toThrow('IN_PROGRESS');
+    });
+  });
+
+  describe('offline visits (M8)', () => {
+    const scheduled = '2030-01-01T10:00:00Z';
+    const at = (iso: string) => new Date(iso);
+    const assignmentOf = (assignment: string) =>
+      db.getRepository(VolunteerAssignment).findOneByOrFail({ id: assignment });
+    const events = async (assignment: string, type: string) =>
+      Number(
+        (
+          await db.query(
+            'SELECT count(*)::int AS n FROM audit_events WHERE target_id=$1 AND event_type=$2',
+            [assignment, type],
+          )
+        )[0].n,
+      );
+    const safetyService = () =>
+      new SafetyService(
+        db,
+        new NotificationsService(
+          db.getRepository(PushDevice),
+          db,
+          new PushSender(new ConfigService()),
+        ),
+        audit,
+        {} as never,
+      );
+
+    async function accepted() {
+      const req = await request(scheduled);
+      const assignment = await offer(req);
+      await service.acceptOffer(orgA, assignment, memberA, {});
+      return { req, assignment };
+    }
+
+    it('keeps the phone times of a visit recorded offline, and a retry does nothing twice', async () => {
+      const { assignment } = await accepted();
+      const start = {
+        clientOperationId: 'offline-start-1',
+        occurredAt: '2030-01-01T10:00:00.000Z',
+      };
+      await service.startAssignment(
+        orgA,
+        assignment,
+        memberA,
+        undefined,
+        at('2030-01-01T10:40:00Z'),
+        start,
+      );
+      let visit = await assignmentOf(assignment);
+      expect(visit.startedAt?.toISOString()).toBe('2030-01-01T10:00:00.000Z');
+      expect(visit.startReceivedAt?.toISOString()).toBe('2030-01-01T10:40:00.000Z');
+
+      // The phone never heard back, so it sends the same start again.
+      await service.startAssignment(
+        orgA,
+        assignment,
+        memberA,
+        undefined,
+        at('2030-01-01T10:41:00Z'),
+        start,
+      );
+      expect(await events(assignment, 'SERVICE_STARTED')).toBe(1);
+
+      const finish = {
+        clientOperationId: 'offline-finish-1',
+        occurredAt: '2030-01-01T10:45:00.000Z',
+        minutes: 45,
+        notes: 'Medicines collected',
+      };
+      const done = await service.finishAssignment(
+        orgA,
+        assignment,
+        memberA,
+        finish,
+        undefined,
+        at('2030-01-01T11:30:00Z'),
+      );
+      expect(done.finishedAt?.toISOString()).toBe('2030-01-01T10:45:00.000Z');
+      expect(done.finishReceivedAt?.toISOString()).toBe('2030-01-01T11:30:00.000Z');
+      expect(done.reportedMinutes).toBe(45);
+
+      const again = await service.finishAssignment(
+        orgA,
+        assignment,
+        memberA,
+        finish,
+        undefined,
+        at('2030-01-01T11:31:00Z'),
+      );
+      expect(again.status).toBe('COMPLETED');
+      expect(await events(assignment, 'SERVICE_FINISHED')).toBe(1);
+      await expect(
+        service.finishAssignment(
+          orgA,
+          assignment,
+          memberA,
+          { ...finish, minutes: 50 },
+          undefined,
+          at('2030-01-01T11:32:00Z'),
+        ),
+      ).rejects.toThrow('already sent with different details');
+
+      visit = await assignmentOf(assignment);
+      expect(visit.reportedMinutes).toBe(45);
+      const operations = await db.query(
+        'SELECT action FROM visit_operations WHERE assignment_id=$1 ORDER BY occurred_at',
+        [assignment],
+      );
+      expect(operations.map((o: { action: string }) => o.action)).toEqual(['START', 'FINISH']);
+    });
+
+    it('does not mark a visit sent straight away as recorded offline', async () => {
+      const { assignment } = await accepted();
+      await service.startAssignment(
+        orgA,
+        assignment,
+        memberA,
+        undefined,
+        at('2030-01-01T10:01:00Z'),
+        {
+          clientOperationId: 'online-start-1',
+          occurredAt: '2030-01-01T10:00:30.000Z',
+        },
+      );
+      const visit = await assignmentOf(assignment);
+      expect(visit.startedAt?.toISOString()).toBe('2030-01-01T10:00:30.000Z');
+      expect(visit.startReceivedAt).toBeNull();
+    });
+
+    it('refuses saved times that are too early or too old, and leaves the retry free to succeed', async () => {
+      const { assignment } = await accepted();
+      const op = 'offline-start-2';
+      await expect(
+        service.startAssignment(orgA, assignment, memberA, undefined, at('2030-01-01T09:10:00Z'), {
+          clientOperationId: op,
+          occurredAt: '2030-01-01T08:30:00.000Z',
+        }),
+      ).rejects.toThrow('60 minutes before');
+      await expect(
+        service.startAssignment(orgA, assignment, memberA, undefined, at('2030-01-01T22:30:00Z'), {
+          clientOperationId: op,
+          occurredAt: '2030-01-01T10:00:00.000Z',
+        }),
+      ).rejects.toThrow('more than 12 hours ago');
+      expect(
+        (
+          await db.query('SELECT count(*)::int AS n FROM visit_operations WHERE assignment_id=$1', [
+            assignment,
+          ])
+        )[0].n,
+      ).toBe(0);
+      await service.startAssignment(
+        orgA,
+        assignment,
+        memberA,
+        undefined,
+        at('2030-01-01T10:05:00Z'),
+        {
+          clientOperationId: op,
+          occurredAt: '2030-01-01T10:00:00.000Z',
+        },
+      );
+      expect((await assignmentOf(assignment)).status).toBe('IN_PROGRESS');
+    });
+
+    it('never counts a finish sent with a fast clock as later than it arrived', async () => {
+      const { assignment } = await accepted();
+      await service.startAssignment(orgA, assignment, memberA, undefined, at(scheduled));
+      const done = await service.finishAssignment(
+        orgA,
+        assignment,
+        memberA,
+        { clientOperationId: 'fast-clock-1', occurredAt: '2030-01-01T12:00:00.000Z' },
+        undefined,
+        at('2030-01-01T10:30:00Z'),
+      );
+      expect(done.finishedAt?.toISOString()).toBe('2030-01-01T10:30:00.000Z');
+      expect(done.reportedMinutes).toBe(30);
+    });
+
+    it('starts a team when the last needed member arrived, even if that arrival was sent late', async () => {
+      const req = await request(scheduled, orgA, 2);
+      await db.query('UPDATE service_requests SET min_volunteers=2 WHERE id=$1', [req]);
+      for (const member of [memberA, otherMember]) {
+        await service.coordinatorDispatch(
+          orgA,
+          req,
+          { volunteerMembershipId: member },
+          coordinator,
+        );
+      }
+      const team = await db
+        .getRepository(VolunteerAssignment)
+        .find({ where: { serviceRequestId: req } });
+      const first = team.find((a) => a.volunteerMembershipId === memberA)!.id;
+      const second = team.find((a) => a.volunteerMembershipId === otherMember)!.id;
+      await service.startAssignment(orgA, first, memberA, undefined, at('2030-01-01T10:05:00Z'));
+      await service.startAssignment(
+        orgA,
+        second,
+        otherMember,
+        undefined,
+        at('2030-01-01T10:40:00Z'),
+        {
+          clientOperationId: 'team-arrival-1',
+          occurredAt: '2030-01-01T10:10:00.000Z',
+        },
+      );
+      const one = await assignmentOf(first);
+      const two = await assignmentOf(second);
+      expect(one.status).toBe('IN_PROGRESS');
+      expect(one.startedAt?.toISOString()).toBe('2030-01-01T10:10:00.000Z');
+      expect(two.startedAt?.toISOString()).toBe('2030-01-01T10:10:00.000Z');
+      expect(one.startReceivedAt).toBeNull();
+      expect(two.startReceivedAt?.toISOString()).toBe('2030-01-01T10:40:00.000Z');
+
+      // Leaving early while offline also keeps the phone time.
+      const left = await service.leaveTeamVisit(
+        orgA,
+        second,
+        otherMember,
+        {
+          reason: 'Called home',
+          clientOperationId: 'team-leave-1',
+          occurredAt: '2030-01-01T10:40:00.000Z',
+        },
+        undefined,
+        at('2030-01-01T11:00:00Z'),
+      );
+      expect(left.finishedAt?.toISOString()).toBe('2030-01-01T10:40:00.000Z');
+      expect(left.reportedMinutes).toBe(30);
+      expect(left.finishReceivedAt?.toISOString()).toBe('2030-01-01T11:00:00.000Z');
+    });
+
+    it('pauses from when an offline alert was tapped, and refuses a finish queued behind it', async () => {
+      const { req, assignment } = await accepted();
+      await service.startAssignment(orgA, assignment, memberA, undefined, at(scheduled));
+      const context = await authorization.evaluateOrganizationAccess(volunteer, orgA);
+      const receipt = await safetyService().raiseAlert(
+        orgA,
+        req,
+        volunteer,
+        context,
+        {
+          action: SafetyAlertAction.PAUSE,
+          clientOperationId: 'offline-alert-1',
+          occurredAt: '2030-01-01T10:20:00.000Z',
+        },
+        undefined,
+        at('2030-01-01T10:50:00Z'),
+      );
+      const alert = (
+        await db.query('SELECT raised_on_phone_at FROM safety_alerts WHERE id=$1', [receipt.id])
+      )[0];
+      expect(new Date(alert.raised_on_phone_at).toISOString()).toBe('2030-01-01T10:20:00.000Z');
+      expect((await assignmentOf(assignment)).pausedAt?.toISOString()).toBe(
+        '2030-01-01T10:20:00.000Z',
+      );
+      await expect(
+        service.finishAssignment(
+          orgA,
+          assignment,
+          memberA,
+          { clientOperationId: 'queued-finish-1', occurredAt: '2030-01-01T10:30:00.000Z' },
+          undefined,
+          at('2030-01-01T10:51:00Z'),
+        ),
+      ).rejects.toThrow('paused');
+    });
+
+    it('still delivers an offline alert that arrives after the visit has ended', async () => {
+      const { req, assignment } = await accepted();
+      await service.startAssignment(orgA, assignment, memberA, undefined, at(scheduled));
+      await service.finishAssignment(
+        orgA,
+        assignment,
+        memberA,
+        {},
+        undefined,
+        at('2030-01-01T10:30:00Z'),
+      );
+      const context = await authorization.evaluateOrganizationAccess(volunteer, orgA);
+      const safety = safetyService();
+      await expect(
+        safety.raiseAlert(
+          orgA,
+          req,
+          volunteer,
+          context,
+          { action: SafetyAlertAction.PAUSE },
+          undefined,
+          at('2030-01-01T11:00:00Z'),
+        ),
+      ).rejects.toThrow('only while a visit is under way');
+      const receipt = await safety.raiseAlert(
+        orgA,
+        req,
+        volunteer,
+        context,
+        {
+          action: SafetyAlertAction.PAUSE,
+          clientOperationId: 'late-alert-1',
+          occurredAt: '2030-01-01T10:20:00.000Z',
+        },
+        undefined,
+        at('2030-01-01T11:00:00Z'),
+      );
+      const saved = (
+        await db.query('SELECT status, raised_on_phone_at FROM safety_alerts WHERE id=$1', [
+          receipt.id,
+        ])
+      )[0];
+      expect(saved.status).toBe('OPEN');
+      expect(new Date(saved.raised_on_phone_at).toISOString()).toBe('2030-01-01T10:20:00.000Z');
+      const visit = await assignmentOf(assignment);
+      expect(visit.status).toBe('COMPLETED');
+      expect(visit.reportedMinutes).toBe(30);
+      // An alert from before the visit started is not a visit alert.
+      await expect(
+        safety.raiseAlert(
+          orgA,
+          req,
+          volunteer,
+          context,
+          {
+            action: SafetyAlertAction.PAUSE,
+            clientOperationId: 'late-alert-2',
+            occurredAt: '2030-01-01T09:00:00.000Z',
+          },
+          undefined,
+          at('2030-01-01T11:00:00Z'),
+        ),
+      ).rejects.toThrow('only while a visit is under way');
     });
   });
 

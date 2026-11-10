@@ -1,7 +1,8 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Equals, IsBoolean, IsString, Length } from 'class-validator';
+import { VisitOperationDto } from './visit-operation.dto';
 
-export class LeaveTeamVisitDto {
+export class LeaveTeamVisitDto extends VisitOperationDto {
   @ApiProperty({ example: 'I have to collect my child from school.' })
   @IsString()
   @Length(3, 500)

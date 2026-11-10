@@ -207,24 +207,49 @@ describe('RequestsService', () => {
       );
     });
 
+    const retried = {
+      idempotencyKey: 'idem-1',
+      serviceCatalogId: 'cat-item-1',
+      urgency: UrgencyType.IMMEDIATE,
+      scheduledStartTime: new Date().toISOString(),
+      locationAddressText: 'Some Address',
+      locationWardNumber: '1',
+      locationPostalCode: '676503',
+    };
+    const savedFrom = (dto: typeof retried) => ({
+      id: 'existing-req',
+      idempotencyKey: dto.idempotencyKey,
+      createdByUserId: 'user-1',
+      beneficiaryMembershipId: 'ben-mem-1',
+      serviceCatalogId: dto.serviceCatalogId,
+      urgency: dto.urgency,
+      scheduledStartTime: new Date(dto.scheduledStartTime),
+      expectedDurationMinutes: 60,
+      locationAddressText: dto.locationAddressText,
+      locationWardNumber: dto.locationWardNumber,
+      locationPostalCode: dto.locationPostalCode,
+    });
+
     it('returns existing request idempotently when idempotencyKey is already present', async () => {
-      const existingReq = { id: 'existing-req', idempotencyKey: 'idem-1' };
+      const existingReq = savedFrom(retried);
       mockOrgRepo.findOne.mockResolvedValue({ id: 'org-1', code: 'KZK' });
       mockRequestRepo.findOne.mockResolvedValueOnce(existingReq);
 
-      const result = await service.createRequest('org-1', 'user-1', {
-        idempotencyKey: 'idem-1',
-        serviceCatalogId: 'cat-item-1',
-        urgency: UrgencyType.IMMEDIATE,
-        scheduledStartTime: new Date().toISOString(),
-        locationAddressText: 'Some Address',
-        locationWardNumber: '1',
-        locationPostalCode: '676503',
-      });
+      const result = await service.createRequest('org-1', 'user-1', retried);
 
       expect(result).toBe(existingReq);
       expect(mockRequestRepo.save).not.toHaveBeenCalled();
       expect(mockMatchingService.findCandidatesAndDispatchOffers).not.toHaveBeenCalled();
+    });
+
+    it('refuses a reused idempotencyKey that asks for different help (FR-OFF-03)', async () => {
+      mockOrgRepo.findOne.mockResolvedValue({ id: 'org-1', code: 'KZK' });
+      mockRequestRepo.findOne.mockResolvedValueOnce(savedFrom(retried));
+
+      await expect(
+        service.createRequest('org-1', 'user-1', { ...retried, locationAddressText: 'Elsewhere' }),
+      ).rejects.toThrow(ConflictException);
+      expect(mockRequestRepo.save).not.toHaveBeenCalled();
     });
 
     it('refuses a retry from a caregiver who has since been removed', async () => {

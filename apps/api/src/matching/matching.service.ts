@@ -62,6 +62,15 @@ import { AcceptVolunteerOfferDto } from './dto/accept-volunteer-offer.dto';
 import { DeclineVolunteerOfferDto } from './dto/decline-volunteer-offer.dto';
 import { WithdrawVolunteerAssignmentDto } from './dto/withdraw-volunteer-assignment.dto';
 import { FinishVolunteerAssignmentDto } from './dto/finish-volunteer-assignment.dto';
+import { VisitOperationDto } from './dto/visit-operation.dto';
+import {
+  alreadyDone,
+  fingerprint,
+  latest,
+  phoneTime,
+  PhoneTime,
+  recordOperation,
+} from './visit-operations';
 import { HandOverVisitDto, InviteTeammateDto, LeaveTeamVisitDto } from './dto/team-visit.dto';
 import { CoordinatorDispatchDto } from './dto/coordinator-dispatch.dto';
 import { DispatchVolunteerQueryDto } from './dto/dispatch-volunteer-query.dto';
@@ -1494,6 +1503,7 @@ export class MatchingService {
     volunteerMembershipId: string,
     ipAddress?: string,
     now = new Date(),
+    dto: VisitOperationDto = {},
   ): Promise<VolunteerAssignment> {
     return this.dataSource.transaction('READ COMMITTED', async (manager) => {
       // A banned or removed volunteer may not begin a visit at someone's home.
@@ -1504,62 +1514,111 @@ export class MatchingService {
         assignmentId,
         volunteerMembershipId,
       );
-      if (assignment.status !== VolunteerAssignmentStatus.ACCEPTED) {
-        throw new ConflictException(
-          `Only an accepted assignment can be started (current: ${assignment.status})`,
-        );
-      }
-      const isTeam = request.minVolunteers > 1;
+      const print = fingerprint({ action: 'START', assignmentId, at: dto.occurredAt ?? null });
+      const operation = dto.clientOperationId;
       if (
-        ![
-          ServiceRequestStatus.PARTIALLY_ACCEPTED,
-          ServiceRequestStatus.FULLY_MATCHED,
-          ServiceRequestStatus.IN_PROGRESS,
-          // A coordinator may still be finding the rest of a team while this one is on site.
-          ...(isTeam ? [ServiceRequestStatus.ESCALATED_TO_COORDINATOR] : []),
-        ].includes(request.status)
+        await alreadyDone(manager, volunteerMembershipId, operation, 'START', assignmentId, print)
       ) {
-        throw new ConflictException(`This request cannot be started (status: ${request.status})`);
+        return assignment;
       }
-      const start = new Date(request.scheduledStartTime).getTime();
-      if (now.getTime() < start - START_EARLY_MINUTES * 60_000) {
-        throw new ConflictException(
-          `The service can be started from ${START_EARLY_MINUTES} minutes before its scheduled time`,
-        );
-      }
-
-      // FR-TEAM-04: a team starts once its safe minimum is on site. After that, each late
-      // arrival simply starts their own timer.
-      if (isTeam && request.status !== ServiceRequestStatus.IN_PROGRESS) {
-        return this.recordTeamArrival(manager, request, assignment, ipAddress, now);
-      }
-
-      if (await this.isSafetyPaused(manager, request.id)) {
-        throw new ConflictException('This visit is paused. A coordinator will contact you.');
-      }
-      assignment.status = VolunteerAssignmentStatus.IN_PROGRESS;
-      assignment.startedAt = now;
-      const saved = await manager.save(VolunteerAssignment, assignment);
-      if (request.status !== ServiceRequestStatus.IN_PROGRESS) {
-        request.status = ServiceRequestStatus.IN_PROGRESS;
-        await manager.save(ServiceRequest, request);
-        await this.closeStaleOffers(manager, request.id);
-      }
-      if (request.belowMinimumAt) await this.clearShortageIfStaffed(manager, request);
-      await this.auditService.logEvent(
-        {
-          eventType: 'SERVICE_STARTED',
-          actorId: await this.volunteerUserId(manager, orgId, volunteerMembershipId),
-          targetId: saved.id,
-          targetType: 'volunteer_assignments',
-          organizationId: orgId,
-          payload: { serviceRequestId: request.id, volunteerMembershipId },
-          ipAddress: ipAddress ?? null,
-        },
-        manager,
-      );
+      const time = phoneTime(dto.occurredAt, now);
+      const saved = await this.beginVisit(manager, assignment, request, time, ipAddress);
+      await recordOperation(manager, {
+        organizationId: orgId,
+        membershipId: volunteerMembershipId,
+        operationId: operation,
+        action: 'START',
+        assignmentId,
+        print,
+        time,
+        now,
+      });
       return saved;
     });
+  }
+
+  /** Starts one volunteer's visit, or records their arrival at a team visit (FR-TEAM-04). */
+  private async beginVisit(
+    manager: EntityManager,
+    assignment: VolunteerAssignment,
+    request: ServiceRequest,
+    time: PhoneTime,
+    ipAddress: string | undefined,
+  ): Promise<VolunteerAssignment> {
+    const orgId = request.organizationId;
+    const volunteerMembershipId = assignment.volunteerMembershipId;
+    // A start sent late can never count from before the offer was accepted.
+    let at = time.receivedLate ? latest(time.at, assignment.acceptedAt) : time.at;
+    if (assignment.status !== VolunteerAssignmentStatus.ACCEPTED) {
+      throw new ConflictException(
+        `Only an accepted assignment can be started (current: ${assignment.status})`,
+      );
+    }
+    const isTeam = request.minVolunteers > 1;
+    if (
+      ![
+        ServiceRequestStatus.PARTIALLY_ACCEPTED,
+        ServiceRequestStatus.FULLY_MATCHED,
+        ServiceRequestStatus.IN_PROGRESS,
+        // A coordinator may still be finding the rest of a team while this one is on site.
+        ...(isTeam ? [ServiceRequestStatus.ESCALATED_TO_COORDINATOR] : []),
+      ].includes(request.status)
+    ) {
+      throw new ConflictException(`This request cannot be started (status: ${request.status})`);
+    }
+    const start = new Date(request.scheduledStartTime).getTime();
+    if (at.getTime() < start - START_EARLY_MINUTES * 60_000) {
+      throw new ConflictException(
+        `The service can be started from ${START_EARLY_MINUTES} minutes before its scheduled time`,
+      );
+    }
+
+    // FR-TEAM-04: a team starts once its safe minimum is on site. After that, each late
+    // arrival simply starts their own timer.
+    if (isTeam && request.status !== ServiceRequestStatus.IN_PROGRESS) {
+      return this.recordTeamArrival(manager, request, assignment, ipAddress, time, at);
+    }
+
+    if (await this.isSafetyPaused(manager, request.id)) {
+      throw new ConflictException('This visit is paused. A coordinator will contact you.');
+    }
+    if (isTeam) {
+      // An arrival sent late still cannot start before the team itself did.
+      const [first] = await manager.query(
+        `SELECT min(started_at) AS first FROM volunteer_assignments
+            WHERE service_request_id = $1 AND started_at IS NOT NULL`,
+        [request.id],
+      );
+      at = latest(at, first?.first ? new Date(first.first) : null);
+    }
+    assignment.status = VolunteerAssignmentStatus.IN_PROGRESS;
+    assignment.startedAt = at;
+    assignment.startReceivedAt = time.receivedLate;
+    const saved = await manager.save(VolunteerAssignment, assignment);
+    if (request.status !== ServiceRequestStatus.IN_PROGRESS) {
+      request.status = ServiceRequestStatus.IN_PROGRESS;
+      await manager.save(ServiceRequest, request);
+      await this.closeStaleOffers(manager, request.id);
+    }
+    if (request.belowMinimumAt) await this.clearShortageIfStaffed(manager, request);
+    await this.auditService.logEvent(
+      {
+        eventType: 'SERVICE_STARTED',
+        actorId: await this.volunteerUserId(manager, orgId, volunteerMembershipId),
+        targetId: saved.id,
+        targetType: 'volunteer_assignments',
+        organizationId: orgId,
+        payload: {
+          serviceRequestId: request.id,
+          volunteerMembershipId,
+          startedAt: at.toISOString(),
+          ...(time.receivedLate ? { recordedOffline: true } : {}),
+        },
+        ipAddress: ipAddress ?? null,
+      },
+      manager,
+    );
+    return saved;
   }
 
   async finishAssignment(
@@ -1577,6 +1636,20 @@ export class MatchingService {
         assignmentId,
         volunteerMembershipId,
       );
+      const print = fingerprint({
+        action: 'FINISH',
+        assignmentId,
+        at: dto.occurredAt ?? null,
+        minutes: dto.minutes ?? null,
+        notes: dto.notes?.trim() || null,
+      });
+      const operation = dto.clientOperationId;
+      if (
+        await alreadyDone(manager, volunteerMembershipId, operation, 'FINISH', assignmentId, print)
+      ) {
+        return assignment;
+      }
+      const time = phoneTime(dto.occurredAt, now);
       if (assignment.status !== VolunteerAssignmentStatus.IN_PROGRESS || !assignment.startedAt) {
         throw new ConflictException(
           `Only a started assignment can be finished (current: ${assignment.status})`,
@@ -1585,7 +1658,8 @@ export class MatchingService {
       if (assignment.pausedAt) {
         throw new ConflictException('This visit is paused. A coordinator will contact you.');
       }
-      const elapsed = workedMinutes(assignment, now);
+      const end = latest(time.at, assignment.startedAt);
+      const elapsed = workedMinutes(assignment, end);
       // A volunteer who pressed Start late may report up to the expected duration.
       const allowed = Math.min(
         MAX_SERVICE_MINUTES,
@@ -1599,7 +1673,8 @@ export class MatchingService {
       }
 
       assignment.status = VolunteerAssignmentStatus.COMPLETED;
-      assignment.finishedAt = now;
+      assignment.finishedAt = end;
+      assignment.finishReceivedAt = time.receivedLate;
       assignment.reportedMinutes = minutes;
       assignment.completionNotes = dto.notes?.trim() || null;
       const saved = await manager.save(VolunteerAssignment, assignment);
@@ -1618,11 +1693,27 @@ export class MatchingService {
           targetId: saved.id,
           targetType: 'volunteer_assignments',
           organizationId: orgId,
-          payload: { serviceRequestId: request.id, volunteerMembershipId, minutes },
+          payload: {
+            serviceRequestId: request.id,
+            volunteerMembershipId,
+            minutes,
+            finishedAt: end.toISOString(),
+            ...(time.receivedLate ? { recordedOffline: true } : {}),
+          },
           ipAddress: ipAddress ?? null,
         },
         manager,
       );
+      await recordOperation(manager, {
+        organizationId: orgId,
+        membershipId: volunteerMembershipId,
+        operationId: operation,
+        action: 'FINISH',
+        assignmentId,
+        print,
+        time,
+        now,
+      });
       return saved;
     });
   }
@@ -1633,10 +1724,14 @@ export class MatchingService {
     request: ServiceRequest,
     assignment: VolunteerAssignment,
     ipAddress: string | undefined,
-    now: Date,
+    time: PhoneTime,
+    at: Date,
   ): Promise<VolunteerAssignment> {
     const notice = { organizationId: request.organizationId, requestId: request.id };
-    assignment.arrivedAt = assignment.arrivedAt ?? now;
+    if (!assignment.arrivedAt) {
+      assignment.arrivedAt = at;
+      assignment.startReceivedAt = time.receivedLate;
+    }
     const saved = await manager.save(VolunteerAssignment, assignment);
     const arrived = await manager.find(VolunteerAssignment, {
       where: {
@@ -1665,9 +1760,11 @@ export class MatchingService {
       return saved;
     }
 
+    // The team started when the last of them arrived, even if that arrival was sent late.
+    const teamStart = latest(...arrived.map((member) => member.arrivedAt));
     for (const member of arrived) {
       member.status = VolunteerAssignmentStatus.IN_PROGRESS;
-      member.startedAt = now;
+      member.startedAt = teamStart;
       await manager.save(VolunteerAssignment, member);
       await this.auditService.logEvent(
         {
@@ -1863,6 +1960,19 @@ export class MatchingService {
         assignmentId,
         volunteerMembershipId,
       );
+      const print = fingerprint({
+        action: 'LEAVE',
+        assignmentId,
+        at: dto.occurredAt ?? null,
+        reason: dto.reason.trim(),
+      });
+      const operation = dto.clientOperationId;
+      if (
+        await alreadyDone(manager, volunteerMembershipId, operation, 'LEAVE', assignmentId, print)
+      ) {
+        return assignment;
+      }
+      const time = phoneTime(dto.occurredAt, now);
       this.assertWorking(assignment);
       const others = await manager.count(VolunteerAssignment, {
         where: {
@@ -1875,9 +1985,11 @@ export class MatchingService {
         throw new ConflictException('You are the only one here. Finish or hand over this visit.');
       }
 
+      const end = latest(time.at, assignment.startedAt);
       assignment.status = VolunteerAssignmentStatus.COMPLETED;
-      assignment.finishedAt = now;
-      assignment.reportedMinutes = Math.min(workedMinutes(assignment, now), MAX_SERVICE_MINUTES);
+      assignment.finishedAt = end;
+      assignment.finishReceivedAt = time.receivedLate;
+      assignment.reportedMinutes = Math.min(workedMinutes(assignment, end), MAX_SERVICE_MINUTES);
       assignment.withdrawalReason = dto.reason.trim();
       const saved = await manager.save(VolunteerAssignment, assignment);
 
@@ -1904,11 +2016,22 @@ export class MatchingService {
             reason: saved.withdrawalReason,
             minutes: saved.reportedMinutes,
             stillOnSite: others,
+            ...(time.receivedLate ? { recordedOffline: true } : {}),
           },
           ipAddress: ipAddress ?? null,
         },
         manager,
       );
+      await recordOperation(manager, {
+        organizationId: orgId,
+        membershipId: volunteerMembershipId,
+        operationId: operation,
+        action: 'LEAVE',
+        assignmentId,
+        print,
+        time,
+        now,
+      });
       return saved;
     });
   }

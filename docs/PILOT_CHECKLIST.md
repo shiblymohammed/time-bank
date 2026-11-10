@@ -65,7 +65,8 @@ Check these weekly with the coordinator:
 - Passing on a deceased member's credits needs legal advice first (D#44), and the nominee's phone code has not been
   tested on a real phone with real Firebase.
 - Lost phone or SIM recovery (FR-IDENT-05) is not built.
-- Offline use (Milestone 8) is not built, so volunteers need a connection.
+- [Offline use](OFFLINE.md) covers starting, finishing, leaving and safety alerts only; the rest needs a connection. SMS
+  and WhatsApp alerts are not built, and the airplane-mode phone test is still to do.
 - Load, security and accessibility reviews and Malayalam validation (Milestone 9) have not been done.
-- [Other remaining issues](FULL_APPLICATION_AUDIT_2026-11-02.md), including request-key reuse and quota month
-  boundaries.
+- [Other remaining issues](FULL_APPLICATION_AUDIT_2026-11-02.md), including quota month boundaries. Request-key reuse is
+  fixed (see [offline use](OFFLINE.md)).

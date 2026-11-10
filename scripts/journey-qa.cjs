@@ -127,6 +127,11 @@ const request = (token, minutes, notes) =>
     [fixturePhones],
   );
 
+  // Staff sign-in needs an email on file; the disposable fixture's staff have none.
+  await db(
+    `UPDATE users SET email = 'qa-' || id || '@example.test' WHERE email IS NULL AND phone_e164 = ANY($1)`,
+    [[fixture.people.coordinator.phone, fixture.people.admin.phone]],
+  );
   await step('Staff sign in with the email code', async () => {
     t.coordinator = await staffSignIn(fixture.people.coordinator.phone);
   });
@@ -488,6 +493,67 @@ const request = (token, minutes, notes) =>
     );
     const req = ok(await call('GET', `/organizations/${ORG}/requests/${r.id}`, t.coordinator), 'get');
     return `request ${req.status}`;
+  });
+
+  await step('Offline: a finish tapped with no signal counts from the tap, once, and is marked', async () => {
+    const r = ok(await request(t.beneficiary, 3, 'Journey offline'), 'create');
+    const o = await offerFor(r.id);
+    const visit = `/organizations/${ORG}/assignments/${o.offer.id}`;
+    ok(await call('POST', `${visit}/accept`, o.token, { clientOperationId: randomUUID() }), 'accept');
+    ok(await call('POST', `${visit}/start`, o.token, { clientOperationId: randomUUID() }), 'start');
+    await visitLasted(o.offer.id, 70);
+    // Saved on the phone too long ago: refused, and nothing changes.
+    const stale = await call('POST', `${visit}/finish`, o.token, {
+      minutes: 60,
+      clientOperationId: randomUUID(),
+      occurredAt: new Date(Date.now() - 13 * 3600_000).toISOString(),
+    });
+    assert.equal(stale.status, 409, `a 13-hour-old finish was ${stale.status}`);
+    assert.match(stale.data.message, /12 hours/);
+    // Tapped 10 minutes ago, sent now.
+    const tapped = new Date(Date.now() - 10 * 60_000);
+    const finish = { minutes: 60, clientOperationId: randomUUID(), occurredAt: tapped.toISOString() };
+    ok(await call('POST', `${visit}/finish`, o.token, finish), 'finish sent late');
+    ok(await call('POST', `${visit}/finish`, o.token, finish), 'the same finish sent again');
+    const changed = await call('POST', `${visit}/finish`, o.token, { ...finish, minutes: 30 });
+    assert.equal(changed.status, 409, `a reused ID with new details was ${changed.status}`);
+    const [row] = await db(
+      `SELECT finished_at, finish_received_at, reported_minutes,
+              (SELECT count(*) FROM visit_operations WHERE assignment_id = $1)::int AS operations
+         FROM volunteer_assignments WHERE id = $1`,
+      [o.offer.id],
+    );
+    assert.ok(Math.abs(new Date(row.finished_at) - tapped) < 1000, `finished at ${row.finished_at}`);
+    assert.ok(row.finish_received_at, 'not marked as received late');
+    assert.equal(row.reported_minutes, 60);
+    assert.equal(row.operations, 2, 'start and finish should be recorded once each');
+    const req = ok(await call('GET', `/organizations/${ORG}/requests/${r.id}`, t.coordinator), 'get');
+    const a = (req.assignments ?? []).find((x) => x.id === o.offer.id);
+    assert.ok(a?.finishReceivedAt, 'the coordinator view does not show it was recorded offline');
+    return `finished at the tap, received ${a.finishReceivedAt}`;
+  });
+
+  await step('A request key reused with different details is refused, not treated as the same', async () => {
+    const key = randomUUID();
+    const startTime = inMinutes(300);
+    const body = (notes) => ({
+      serviceCatalogId: SERVICE,
+      idempotencyKey: key,
+      urgency: 'SCHEDULED',
+      scheduledStartTime: startTime,
+      expectedDurationMinutes: 60,
+      locationAddressText: 'Journey QA house, near Arya Vaidya Sala',
+      locationWardNumber: '7',
+      locationPostalCode: '676503',
+      beneficiaryNotes: notes,
+    });
+    const first = ok(await call('POST', `/organizations/${ORG}/requests`, t.beneficiary, body('Journey key')), 'create');
+    const again = ok(await call('POST', `/organizations/${ORG}/requests`, t.beneficiary, body('Journey key')), 'retry');
+    assert.equal(again.id, first.id);
+    const other = await call('POST', `/organizations/${ORG}/requests`, t.beneficiary, body('Something else'));
+    assert.equal(other.status, 409, `a reused key with new details was ${other.status}`);
+    ok(await call('POST', `/organizations/${ORG}/requests/${first.id}/cancel`, t.beneficiary, { reasonCode: 'NO_LONGER_NEEDED', notes: 'Journey key test' }), 'cancel');
+    return 'same details: same request; different details: refused';
   });
 
   await step('Safety: a paused visit stops, stays confidential, and restarts only when allowed', async () => {

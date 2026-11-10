@@ -6,9 +6,9 @@ tests and documented limitations.
 
 ---
 
-## Status on 9 November 2026
+## Status on 10 November 2026
 
-The pilot runs after every feature is built. M6 is built. Next: M8, front-end polish, M9, then deploy and pilot.
+The pilot runs after every feature is built. M6 and M8 are built. Next: front-end polish, M9, then deploy and pilot.
 
 | Step                           | Status                                                                                                         |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------- |
@@ -20,7 +20,7 @@ The pilot runs after every feature is built. M6 is built. Next: M8, front-end po
 | Second-organization readiness  | See below; needed before a second organization goes live                                                       |
 | M7 Governance and reporting    | Development complete. See [M7 sign-off](M7_SIGNOFF.md) and [reports](REPORTS.md)                               |
 | M6 Loyalty and merchants       | Built in development; device review pending. See [M6 notes](LOYALTY_AND_MERCHANTS.md)                          |
-| M8 Offline reliability         | Planned                                                                                                        |
+| M8 Offline reliability         | Built in development; airplane-mode phone test pending. See [offline use](OFFLINE.md)                          |
 | M9 Production hardening        | Security review done; the rest planned                                                                         |
 | Kottakkal pilot                | Last, after all of the above. Staff second factor and restore drill built; see [checklist](PILOT_CHECKLIST.md) |
 
@@ -222,13 +222,18 @@ Development complete; validation and remaining release limits are recorded in [M
 
 **Goal:** Local secure queue, automatic sync, conflict handling, delivery states, on-device field tests.
 
-**Planned scope:**
+**Built** (see [OFFLINE.md](OFFLINE.md)):
 
-- Flutter encrypted local queue (FR-OFF-01, D#47)
-- Idempotency key / operation ID on all mutations (FR-OFF-03)
-- Sync state: pending/success/failed (FR-OFF-02, D#99)
-- Offline safety alert delivery state (FR-OFF-05, AT-22)
-- Flutter offline/low-connectivity field test suite (NFR-16)
+- Encrypted queue on the phone for start, finish, leave and safety alerts (FR-OFF-01, D#47)
+- Operation IDs checked once per volunteer on the server; a reused request key with new details is refused (FR-OFF-03)
+- Waiting / sent / not accepted states, sent by itself while the app is open (FR-OFF-02, D#99)
+- Safety alerts saved offline never show as sent (FR-OFF-05, AT-22)
+- App opens offline on what it last saw
+
+**Not built, by decision:** offline registration by coordinators (they work online in the panel), SMS and WhatsApp
+alerts (later), sending while the app is closed, and offline hand-over.
+
+**Still to do:** the airplane-mode test on a real phone (NFR-16).
 
 ---
 

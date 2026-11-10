@@ -181,6 +181,10 @@ export class RequestsService {
             throw new ForbiddenException('You can no longer book for this beneficiary');
           }
         }
+        // FR-OFF-03: a reused key is a retry only if it asks for the same help.
+        if (!sameRequestDetails(existing, dto)) {
+          throw new ConflictException('This request key was already used for a different request');
+        }
         return existing;
       }
     }
@@ -1324,4 +1328,32 @@ export class RequestsService {
     // Organization codes may be 50 characters; request_number is limited to 50.
     return `REQ-${orgCode.toUpperCase().slice(0, 15)}-${yearMonth}-${suffix}`;
   }
+}
+
+const sameCoordinate = (saved: unknown, sent: number | undefined): boolean =>
+  saved === null || saved === undefined
+    ? sent === undefined || sent === null
+    : sent !== undefined && sent !== null && Math.abs(Number(saved) - sent) < 1e-7;
+
+/**
+ * A retry repeats every detail of the first request. The start time is only compared until a
+ * reschedule has moved it, since a retry after that still means the same booking.
+ */
+export function sameRequestDetails(saved: ServiceRequest, dto: CreateServiceRequestDto): boolean {
+  return (
+    saved.serviceCatalogId === dto.serviceCatalogId &&
+    saved.urgency === dto.urgency &&
+    (!dto.beneficiaryMembershipId ||
+      saved.beneficiaryMembershipId === dto.beneficiaryMembershipId) &&
+    saved.expectedDurationMinutes === (dto.expectedDurationMinutes ?? 60) &&
+    saved.locationAddressText === dto.locationAddressText &&
+    saved.locationWardNumber === dto.locationWardNumber &&
+    (saved.locationLandmark ?? null) === (dto.locationLandmark ?? null) &&
+    saved.locationPostalCode === dto.locationPostalCode &&
+    (saved.beneficiaryNotes ?? null) === (dto.beneficiaryNotes ?? null) &&
+    sameCoordinate(saved.locationLat, dto.locationLat) &&
+    sameCoordinate(saved.locationLng, dto.locationLng) &&
+    (Boolean(saved.latestRescheduleId) ||
+      new Date(saved.scheduledStartTime).getTime() === new Date(dto.scheduledStartTime).getTime())
+  );
 }

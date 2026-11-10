@@ -104,6 +104,9 @@ export function toRequestView(
         arrivedAt: assignment.arrivedAt ?? null,
         startedAt: assignment.startedAt ?? null,
         finishedAt: assignment.finishedAt ?? null,
+        // Set only when the phone had no signal and sent it later (FR-OFF-01).
+        startReceivedAt: assignment.startReceivedAt ?? null,
+        finishReceivedAt: assignment.finishReceivedAt ?? null,
         reportedMinutes: assignment.reportedMinutes ?? null,
         completionNotes: assignment.completionNotes ?? null,
         confirmedAt: assignment.confirmedAt ?? null,

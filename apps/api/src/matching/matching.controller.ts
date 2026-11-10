@@ -22,6 +22,7 @@ import { AcceptVolunteerOfferDto } from './dto/accept-volunteer-offer.dto';
 import { DeclineVolunteerOfferDto } from './dto/decline-volunteer-offer.dto';
 import { WithdrawVolunteerAssignmentDto } from './dto/withdraw-volunteer-assignment.dto';
 import { FinishVolunteerAssignmentDto } from './dto/finish-volunteer-assignment.dto';
+import { VisitOperationDto } from './dto/visit-operation.dto';
 import {
   HandOverVisitDto,
   InviteTeammateDto,
@@ -282,6 +283,7 @@ export class MatchingController {
   async startAssignment(
     @Param('id', ParseUUIDPipe) organizationId: string,
     @Param('assignmentId', ParseUUIDPipe) assignmentId: string,
+    @Body() dto: VisitOperationDto,
     @Req() req: Request,
   ) {
     const membershipContext = (req as any).organizationMembership;
@@ -291,6 +293,8 @@ export class MatchingController {
       assignmentId,
       membershipContext.membershipId,
       ip,
+      undefined,
+      dto ?? {},
     );
   }
 
