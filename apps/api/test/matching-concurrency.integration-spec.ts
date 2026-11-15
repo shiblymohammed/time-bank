@@ -6,6 +6,13 @@ import { LongVisits1729118400026 } from '../src/database/migrations/172911840002
 import { WardsAndNoc1729118400027 } from '../src/database/migrations/1729118400027-WardsAndNoc';
 import { ProfilePhoto1729118400028 } from '../src/database/migrations/1729118400028-ProfilePhoto';
 import { Nearby1729118400029 } from '../src/database/migrations/1729118400029-Nearby';
+import { CommunityFeed1729118400030 } from '../src/database/migrations/1729118400030-CommunityFeed';
+import { CommunityReportDecisions1729118400031 } from '../src/database/migrations/1729118400031-CommunityReportDecisions';
+import { CommunityMemberSubmissions1729118400032 } from '../src/database/migrations/1729118400032-CommunityMemberSubmissions';
+import { CommunityParticipation1729118400033 } from '../src/database/migrations/1729118400033-CommunityParticipation';
+import { CommunityPostEditingAndPhotos1729118400034 } from '../src/database/migrations/1729118400034-CommunityPostEditingAndPhotos';
+import { CommunityVisibility1729118400035 } from '../src/database/migrations/1729118400035-CommunityVisibility';
+import { CommunityImpact1729118400036 } from '../src/database/migrations/1729118400036-CommunityImpact';
 import { NearbyService } from '../src/nearby/nearby.service';
 import { ProfilePhotoService } from '../src/identity/profile-photo.service';
 import { DocumentStorage } from '../src/wards/noc-storage';
@@ -171,6 +178,13 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       WardsAndNoc1729118400027,
       ProfilePhoto1729118400028,
       Nearby1729118400029,
+      CommunityFeed1729118400030,
+      CommunityReportDecisions1729118400031,
+      CommunityMemberSubmissions1729118400032,
+      CommunityParticipation1729118400033,
+      CommunityPostEditingAndPhotos1729118400034,
+      CommunityVisibility1729118400035,
+      CommunityImpact1729118400036,
     ],
     synchronize: false,
     extra: {
@@ -3386,13 +3400,17 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       // Account closures redefine the ledger's checks, so they come off first and go back last.
       const closures = new AccountClosures1729118400021();
       const coins = new LoyaltyAndMerchants1729118400023();
+      const communityParticipation = new CommunityParticipation1729118400033();
       await db.transaction(async (m) => {
+        // Achievement shares reference the loyalty ledger while it exists.
+        await communityParticipation.down(m.queryRunner!);
         await coins.down(m.queryRunner!);
         await closures.down(m.queryRunner!);
         await migration.down(m.queryRunner!);
         await migration.up(m.queryRunner!);
         await closures.up(m.queryRunner!);
         await coins.up(m.queryRunner!);
+        await communityParticipation.up(m.queryRunner!);
       });
       await open();
       await expect(db.transaction((m) => migration.down(m.queryRunner!))).rejects.toThrow(
@@ -3421,6 +3439,15 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       );
     const requireFirstAid = () =>
       db.query('UPDATE global_service_definitions SET required_skill_codes = \'["FIRST_AID"]\'');
+    const recordApprovedNoc = (membershipId: string) =>
+      db.getRepository(MembershipDocument).insert({
+        membershipId,
+        documentType: 'WARD_NOC',
+        storageKey: `test/noc/${membershipId}.pdf`,
+        reviewStatus: 'APPROVED',
+        reviewedByUserId: coordinator,
+        reviewedAt: new Date(),
+      });
 
     it('stores a volunteer application and seeds availability and unverified skills on approval', async () => {
       await requireFirstAid();
@@ -3444,6 +3471,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       expect(row.application_notes).toBe('Evenings near the market');
       expect(row.application_details.volunteer.usualDays).toEqual(['SAT', 'SUN']);
 
+      await recordApprovedNoc(applied.id);
       await memberships().approveMembership(orgA, applied.id, coordinator, {});
 
       const [grant] = await db.query(
@@ -3467,6 +3495,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
     it('grants the requested help role and leaves no volunteer profile', async () => {
       const user = await applicant();
       const applied = await memberships().apply(orgA, user, { requestedRole: 'CAREGIVER' as any });
+      await recordApprovedNoc(applied.id);
       await memberships().approveMembership(orgA, applied.id, coordinator, {});
       const [grant] = await db.query(
         'SELECT role FROM membership_role_grants WHERE membership_id=$1',
