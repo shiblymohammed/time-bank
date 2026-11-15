@@ -39,6 +39,10 @@ export class User {
   @Column({ name: 'full_name', type: 'varchar', length: 100, nullable: true })
   fullName?: string | null;
 
+  /** Private photo version. Files are only served through the authenticated owner endpoint. */
+  @Column({ name: 'profile_photo_id', type: 'uuid', nullable: true })
+  profilePhotoId?: string | null;
+
   /** Where staff sign-in codes go. Set by a Super Admin; members need none. */
   @Column({ type: 'varchar', length: 254, nullable: true })
   email?: string | null;

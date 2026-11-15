@@ -139,6 +139,51 @@ export class TimeLedgerService {
     return entry;
   }
 
+  /**
+   * Minutes come from confirmed visits, including services which earned no credits.
+   * Each helper contributes their own minutes to a team visit. Donations are
+   * recorded separately from service time and from optional funding of a visit.
+   */
+  async mySummary(userId: string) {
+    const [summary] = await this.walletRepo.manager.query(
+      `SELECT
+         COALESCE(wallet.balance_credits, 0) AS "balanceCredits",
+         COALESCE(wallet.frozen_credits, 0) AS "frozenCredits",
+         COALESCE(wallet.status, 'ACTIVE') AS status,
+         COALESCE((
+           SELECT SUM(visit.confirmed_minutes)
+           FROM organization_memberships member
+           JOIN volunteer_assignments visit ON visit.volunteer_membership_id = member.id
+           WHERE member.user_id = $1 AND visit.confirmed_at IS NOT NULL
+             AND visit.status = 'COMPLETED'
+         ), 0)::text AS "minutesGiven",
+         COALESCE((
+           SELECT SUM(visit.confirmed_minutes)
+           FROM organization_memberships member
+           JOIN service_requests request ON request.beneficiary_membership_id = member.id
+           JOIN volunteer_assignments visit ON visit.service_request_id = request.id
+           WHERE member.user_id = $1 AND visit.confirmed_at IS NOT NULL
+             AND visit.status = 'COMPLETED'
+         ), 0)::text AS "minutesReceived",
+         COALESCE((
+           SELECT SUM(-entry.amount) FROM time_credit_ledger entry
+           WHERE entry.wallet_id = wallet.id AND entry.tx_type = 'DONATION_SENT'
+         ), 0) AS "creditsDonated"
+       FROM users account
+       LEFT JOIN universal_time_wallets wallet ON wallet.user_id = account.id
+       WHERE account.id = $1`,
+      [userId],
+    );
+    return {
+      balanceCredits: Number(summary?.balanceCredits ?? 0),
+      frozenCredits: Number(summary?.frozenCredits ?? 0),
+      status: summary?.status ?? 'ACTIVE',
+      minutesGiven: Number(summary?.minutesGiven ?? 0),
+      minutesReceived: Number(summary?.minutesReceived ?? 0),
+      creditsDonated: Number(summary?.creditsDonated ?? 0),
+    };
+  }
+
   /** The signed-in user's universal wallet and newest-first credit history. */
   async listMyTransactions(userId: string, page = 1, limit = 20) {
     const wallet = await this.walletRepo.findOne({ where: { userId } });

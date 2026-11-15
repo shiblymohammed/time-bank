@@ -700,6 +700,9 @@ export class AuthService {
       appliedAt: m.appliedAt,
       approvedAt: m.approvedAt,
       requestedRole: m.requestedRole ?? null,
+      rejectionReason: m.rejectionReason ?? null,
+      applicationNotes: m.applicationNotes ?? null,
+      applicationDetails: m.applicationDetails ?? {},
       // The member's ward and the NOC they sent from its representative.
       ward: publicWard(m.ward),
       noc: nocView(currentNoc(m.documents)),
@@ -712,6 +715,7 @@ export class AuthService {
       id: user.id,
       phoneE164: user.phoneE164,
       fullName: user.fullName ?? null,
+      profilePhotoVersion: user.profilePhotoId ?? null,
       status: user.status,
       primaryOrgId: user.primaryOrgId,
       createdAt: user.createdAt,

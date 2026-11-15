@@ -27,6 +27,8 @@ import { RestrictionsModule } from './restrictions/restrictions.module';
 import { LoyaltyModule } from './loyalty/loyalty.module';
 import { MerchantsModule } from './merchants/merchants.module';
 import { PhoneRecoveryModule } from './phone-recovery/phone-recovery.module';
+import { NearbyModule } from './nearby/nearby.module';
+import { CommunityModule } from './community/community.module';
 
 /**
  * Root application module.
@@ -42,6 +44,8 @@ import { PhoneRecoveryModule } from './phone-recovery/phone-recovery.module';
  */
 @Module({
   imports: [
+    NearbyModule,
+    CommunityModule,
     // ─── Configuration ──────────────────────────────────────────────
     // NFR-04: isGlobal=true so ConfigService is injectable everywhere without
     // re-importing. expandVariables=true supports ${VAR} syntax in .env

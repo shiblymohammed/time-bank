@@ -564,6 +564,36 @@ describe('AuthService', () => {
   });
 
   describe('getMe', () => {
+    it('returns the owner’s application feedback and answers for corrections', async () => {
+      const details = { participationIntent: 'BOTH', helpFor: 'CAREGIVER' };
+      mockUserRepo.findOne.mockResolvedValueOnce({
+        id: 'u-1',
+        status: AccountStatus.ACTIVE,
+        memberships: [
+          {
+            id: 'm-1',
+            organizationId: 'org-1',
+            status: MembershipStatus.REJECTED,
+            requestedRole: UserRole.VOLUNTEER,
+            rejectionReason: 'Please correct your name.',
+            applicationNotes: 'Weekends',
+            applicationDetails: details,
+            roleGrants: [],
+          },
+        ],
+      });
+      const profile = await service.getMe('u-1');
+      expect(mockUserRepo.findOne).toHaveBeenCalledWith(
+        expect.objectContaining({ where: { id: 'u-1' } }),
+      );
+      expect(profile.memberships[0]).toMatchObject({
+        rejectionReason: 'Please correct your name.',
+        applicationNotes: 'Weekends',
+        applicationDetails: details,
+        roles: [],
+      });
+    });
+
     it('should throw NotFoundException if user does not exist', async () => {
       mockUserRepo.findOne.mockResolvedValueOnce(null);
 

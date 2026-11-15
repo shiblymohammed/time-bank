@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
+import { Controller, Get, Header, Query, UseGuards } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 
 import { TimeLedgerService } from './time-ledger.service';
@@ -11,6 +11,14 @@ import { CurrentUserId } from '../authorization/decorators/current-user.decorato
 @Controller('wallet')
 export class TimeLedgerController {
   constructor(private readonly timeLedgerService: TimeLedgerService) {}
+
+  @Get('summary')
+  @Header('Cache-Control', 'private, no-store')
+  @UseGuards(AuthGuard)
+  @ApiOperation({ summary: 'My lifetime confirmed contribution totals and current wallet balance' })
+  mySummary(@CurrentUserId() userId: string) {
+    return this.timeLedgerService.mySummary(userId);
+  }
 
   @Get('transactions')
   @UseGuards(AuthGuard)

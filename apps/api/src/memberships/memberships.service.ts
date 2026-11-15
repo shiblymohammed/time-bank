@@ -110,6 +110,8 @@ export class MembershipsService {
         // A pending applicant may correct what they asked for; nothing else changes.
         if (
           dto.requestedRole === undefined &&
+          dto.participationIntent === undefined &&
+          dto.helpFor === undefined &&
           dto.notes === undefined &&
           !dto.volunteer &&
           dto.wardId === undefined
@@ -190,6 +192,17 @@ export class MembershipsService {
     if (dto.volunteer && requestedRole !== UserRole.VOLUNTEER)
       throw new BadRequestException('Volunteer details need requestedRole VOLUNTEER');
     const details: MembershipApplicationDetails = {};
+    if (dto.participationIntent) {
+      const helping = dto.participationIntent === 'HELP' || dto.participationIntent === 'BOTH';
+      const expectedRole = dto.participationIntent === 'HELP' ? dto.helpFor : UserRole.VOLUNTEER;
+      if (requestedRole !== expectedRole || (helping ? !dto.helpFor : !!dto.helpFor)) {
+        throw new BadRequestException('Choose a consistent participation type and who needs help');
+      }
+      details.participationIntent = dto.participationIntent;
+      if (dto.helpFor) details.helpFor = dto.helpFor;
+    } else if (dto.helpFor) {
+      throw new BadRequestException('Who needs help requires a participation type');
+    }
     if (dto.volunteer) {
       const skillCodes = [...new Set(dto.volunteer.skillCodes ?? [])];
       if (skillCodes.length) {

@@ -67,6 +67,16 @@ export class VolunteerApplicationDto {
 }
 
 export class ApplyMembershipDto {
+  @ApiPropertyOptional({ enum: ['VOLUNTEER', 'HELP', 'BOTH'] })
+  @IsIn(['VOLUNTEER', 'HELP', 'BOTH'])
+  @IsOptional()
+  participationIntent?: 'VOLUNTEER' | 'HELP' | 'BOTH';
+
+  @ApiPropertyOptional({ enum: [UserRole.BENEFICIARY, UserRole.CAREGIVER] })
+  @IsIn([UserRole.BENEFICIARY, UserRole.CAREGIVER])
+  @IsOptional()
+  helpFor?: UserRole.BENEFICIARY | UserRole.CAREGIVER;
+
   @ApiPropertyOptional({
     example: 'Fathima Beevi',
     description: 'Full name, as on their ID. Required the first time someone joins anywhere.',

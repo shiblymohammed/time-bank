@@ -24,6 +24,7 @@ services:
     restart: unless-stopped
     environment:
       NODE_ENV: production
+      UPLOADS_DIR: /app/var/uploads
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       API_PORT: 3001
       API_BASE_URL: ${DASHBOARD_ORIGIN:?DASHBOARD_ORIGIN must be set in .env}
@@ -45,6 +46,8 @@ services:
       # Fixed here so that no .env value can turn test sign-in on for a public server.
       AUTH_ALLOW_MOCK_OTP: 'false'
       AUTH_ALLOW_DEV_HEADERS: 'false'
+    volumes:
+      - uploads_data:/app/var/uploads
     depends_on:
       postgres:
         condition: service_healthy
@@ -84,6 +87,7 @@ services:
 
 volumes:
   postgres_data:
+  uploads_data:
 
 networks:
   ktb_api_egress:

@@ -28,6 +28,8 @@ import { OfflineVisits1729118400024 } from './migrations/1729118400024-OfflineVi
 import { PhoneRecovery1729118400025 } from './migrations/1729118400025-PhoneRecovery';
 import { LongVisits1729118400026 } from './migrations/1729118400026-LongVisits';
 import { WardsAndNoc1729118400027 } from './migrations/1729118400027-WardsAndNoc';
+import { ProfilePhoto1729118400028 } from './migrations/1729118400028-ProfilePhoto';
+import { Nearby1729118400029 } from './migrations/1729118400029-Nearby';
 describe('entity and migration schema contract', () => {
   it('defines every mapped entity column in the migration SQL', async () => {
     const queries: string[] = [];
@@ -65,6 +67,8 @@ describe('entity and migration schema contract', () => {
       new PhoneRecovery1729118400025(),
       new LongVisits1729118400026(),
       new WardsAndNoc1729118400027(),
+      new ProfilePhoto1729118400028(),
+      new Nearby1729118400029(),
     ]) {
       await migration.up(runner);
     }

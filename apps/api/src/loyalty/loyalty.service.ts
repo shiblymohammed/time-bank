@@ -449,7 +449,12 @@ export class LoyaltyService {
         data: entries,
         achievements: wallet
           ? await m.query(
-              "SELECT id,details,created_at FROM loyalty_ledger WHERE wallet_id=$1 AND tx_type='MILESTONE_EARNED' ORDER BY created_at,id",
+              `SELECT l.id,l.details,l.created_at,o.name AS issuer,p.status AS community_share_status,
+                      (w.status='ACTIVE' AND w.verified_minutes >= (l.details->>'minutes')::bigint) AS can_share
+               FROM loyalty_ledger l JOIN loyalty_wallets w ON w.id=l.wallet_id
+               JOIN organizations o ON o.id=l.organization_id
+               LEFT JOIN community_posts p ON p.achievement_id=l.id
+               WHERE l.wallet_id=$1 AND l.tx_type='MILESTONE_EARNED' ORDER BY l.created_at,l.id`,
               [wallet.id],
             )
           : [],

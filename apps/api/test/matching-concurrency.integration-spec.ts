@@ -3,6 +3,13 @@ import { MerchantsService } from '../src/merchants/merchants.service';
 import { LoyaltyAndMerchants1729118400023 } from '../src/database/migrations/1729118400023-LoyaltyAndMerchants';
 import { OfflineVisits1729118400024 } from '../src/database/migrations/1729118400024-OfflineVisits';
 import { LongVisits1729118400026 } from '../src/database/migrations/1729118400026-LongVisits';
+import { WardsAndNoc1729118400027 } from '../src/database/migrations/1729118400027-WardsAndNoc';
+import { ProfilePhoto1729118400028 } from '../src/database/migrations/1729118400028-ProfilePhoto';
+import { Nearby1729118400029 } from '../src/database/migrations/1729118400029-Nearby';
+import { NearbyService } from '../src/nearby/nearby.service';
+import { ProfilePhotoService } from '../src/identity/profile-photo.service';
+import { DocumentStorage } from '../src/wards/noc-storage';
+import sharp from 'sharp';
 import { ClosuresService } from '../src/closures/closures.service';
 import { SafetyService } from '../src/safety/safety.service';
 import { NomineeService } from '../src/closures/nominee.service';
@@ -161,6 +168,9 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       OfflineVisits1729118400024,
       PhoneRecovery1729118400025,
       LongVisits1729118400026,
+      WardsAndNoc1729118400027,
+      ProfilePhoto1729118400028,
+      Nearby1729118400029,
     ],
     synchronize: false,
     extra: {
@@ -187,6 +197,223 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
 
   const id = async (sql: string, parameters: unknown[] = []): Promise<string> =>
     (await db.query(sql, parameters))[0].id;
+
+  describe('Optional profile photo database lifecycle', () => {
+    const files = new Map<string, Buffer>();
+    let photos: ProfilePhotoService;
+    let image: Buffer;
+    beforeEach(async () => {
+      files.clear();
+      const storage = new DocumentStorage(new ConfigService());
+      jest.spyOn(storage, 'save').mockImplementation(async (key, bytes) => {
+        files.set(key, bytes);
+      });
+      jest.spyOn(storage, 'read').mockImplementation(async (key) => files.get(key)!);
+      jest.spyOn(storage, 'remove').mockImplementation(async (key) => {
+        files.delete(key);
+      });
+      photos = new ProfilePhotoService(db, storage, audit);
+      image = await sharp({ create: { width: 64, height: 64, channels: 3, background: 'purple' } })
+        .jpeg()
+        .toBuffer();
+    });
+    it('leaves photo optional and serializes concurrent replacements', async () => {
+      expect(
+        (await db.getRepository(User).findOneByOrFail({ id: volunteer })).profilePhotoId,
+      ).toBeNull();
+      const results = await Promise.all([
+        photos.upload(volunteer, { buffer: image }),
+        photos.upload(volunteer, { buffer: image }),
+      ]);
+      const user = await db.getRepository(User).findOneByOrFail({ id: volunteer });
+      expect(results.map((r) => r.profilePhotoVersion)).toContain(user.profilePhotoId);
+      expect([...files.keys()]).toEqual([`${volunteer}/${user.profilePhotoId}.jpg`]);
+      expect(await photos.read(volunteer)).toBeDefined();
+    });
+    it('keeps database and files consistent when removal races with replacement', async () => {
+      await photos.upload(volunteer, { buffer: image });
+      await Promise.all([photos.remove(volunteer), photos.upload(volunteer, { buffer: image })]);
+      const user = await db.getRepository(User).findOneByOrFail({ id: volunteer });
+      expect([...files.keys()]).toEqual(
+        user.profilePhotoId ? [`${volunteer}/${user.profilePhotoId}.jpg`] : [],
+      );
+    });
+    it('rolls the database back and removes only the new file on an audit failure', async () => {
+      const first = await photos.upload(volunteer, { buffer: image });
+      jest.spyOn(audit, 'logEvent').mockRejectedValueOnce(new Error('Audit failure'));
+      await expect(photos.upload(volunteer, { buffer: image })).rejects.toThrow('Audit failure');
+      expect((await db.getRepository(User).findOneByOrFail({ id: volunteer })).profilePhotoId).toBe(
+        first.profilePhotoVersion,
+      );
+      expect(files.size).toBe(1);
+    });
+  });
+
+  describe('Nearby privacy and expiring availability', () => {
+    let nearby: NearbyService, areaA: string, areaB: string, session: string;
+    beforeEach(async () => {
+      nearby = new NearbyService(db, authorization, audit);
+      areaA = await id(
+        `INSERT INTO operational_zones(organization_id,code,name,ward_numbers,center_lat,center_lng,nearby_visible)
+        VALUES($1,'AREA_A','Town area','["1"]',10.9982456,75.9921456,true) RETURNING id`,
+        [orgA],
+      );
+      areaB = await id(
+        `INSERT INTO operational_zones(organization_id,code,name,ward_numbers,nearby_visible)
+        VALUES($1,'AREA_B','Other community','["1"]',true) RETURNING id`,
+        [orgB],
+      );
+      session = await id(
+        `INSERT INTO authentication_sessions(user_id,refresh_token_hash,expires_at)
+        VALUES($1,'nearby-session',now()+interval '1 day') RETURNING id`,
+        [volunteer],
+      );
+    });
+    const optIn = (areaId: string, minutes = 60) => ({ areaId, minutes, consent: true });
+    it('returns only published coarse areas and never recipient or precise request data', async () => {
+      const req = await request();
+      await db.query(
+        `UPDATE service_requests SET scheduled_start_time=now()+interval '30 minutes',location_ward_number='1',location_lat=10.9912345,location_lng=75.9912345,beneficiary_notes='PRIVATE MEDICAL NOTES' WHERE id=$1`,
+        [req],
+      );
+      await id(
+        `INSERT INTO operational_zones(organization_id,code,name,ward_numbers) VALUES($1,'HIDDEN','Private area','["1"]') RETURNING id`,
+        [orgA],
+      );
+      const result = await nearby.snapshot(orgA, volunteer);
+      expect(result.areas).toHaveLength(1);
+      expect(result.areas[0]).toMatchObject({
+        id: areaA,
+        latitude: 11,
+        longitude: 75.99,
+        requests: '1-4',
+        volunteers: '0',
+      });
+      const json = JSON.stringify(result);
+      for (const privateValue of [
+        'PRIVATE MEDICAL NOTES',
+        req,
+        beneficiaryA,
+        '10.9912345',
+        '75.9912345',
+        areaB,
+        'phone',
+        'address',
+        'userId',
+        'membershipId',
+      ])
+        expect(json).not.toContain(privateValue);
+    });
+    it('keeps opt-in membership-scoped, expires on the server, and stops idempotently', async () => {
+      await nearby.available(orgA, volunteer, session, optIn(areaA, 15));
+      await nearby.available(orgA, volunteer, session, optIn(areaA, 30));
+      expect((await db.query('SELECT * FROM nearby_availability')).length).toBe(1);
+      expect((await nearby.snapshot(orgA, otherVolunteer)).areas[0]!.volunteers).toBe('1-4');
+      await db.query(
+        `UPDATE nearby_availability SET updated_at=now()-interval '1 hour',expires_at=now()-interval '1 second'`,
+      );
+      await db.query(
+        `UPDATE organization_memberships SET updated_at=now()-interval '2 hours' WHERE id=$1`,
+        [memberA],
+      );
+      await db.query(
+        `UPDATE membership_role_grants SET granted_at=now()-interval '2 hours' WHERE membership_id=$1`,
+        [memberA],
+      );
+      await db.query(
+        `UPDATE operational_zones SET updated_at=now()-interval '2 hours' WHERE id=$1`,
+        [areaA],
+      );
+      expect((await nearby.snapshot(orgA, volunteer)).availability).toBeNull();
+      expect((await nearby.snapshot(orgA, otherVolunteer)).areas[0]!.volunteers).toBe('0');
+      await nearby.purgeExpired();
+      expect(await db.query('SELECT * FROM nearby_availability')).toHaveLength(0);
+      await nearby.stop(orgA, volunteer);
+      await nearby.stop(orgA, volunteer);
+      expect(await db.query('SELECT * FROM nearby_availability')).toHaveLength(0);
+    });
+    it('refuses cross-community areas and memberships, absent consent, and non-volunteers', async () => {
+      await expect(nearby.available(orgA, volunteer, session, optIn(areaB))).rejects.toThrow();
+      await expect(nearby.snapshot(orgB, otherVolunteer)).rejects.toThrow();
+      await expect(
+        nearby.available(orgA, volunteer, session, { ...optIn(areaA), consent: false }),
+      ).rejects.toThrow();
+      await expect(nearby.available(orgA, volunteer, session, optIn(areaA, 999))).rejects.toThrow();
+      await expect(nearby.available(orgA, volunteer, undefined, optIn(areaA))).rejects.toThrow();
+      await db.query(`UPDATE membership_role_grants SET status='REVOKED' WHERE membership_id=$1`, [
+        memberA,
+      ]);
+      await expect(nearby.available(orgA, volunteer, session, optIn(areaA))).rejects.toThrow();
+    });
+    it('withdraws availability on logout, role loss and suspended membership', async () => {
+      await nearby.available(orgA, volunteer, session, optIn(areaA));
+      await db.query('UPDATE authentication_sessions SET revoked_at=now() WHERE id=$1', [session]);
+      expect((await nearby.snapshot(orgA, otherVolunteer)).areas[0]!.volunteers).toBe('0');
+      await db.query('UPDATE authentication_sessions SET revoked_at=NULL WHERE id=$1', [session]);
+      await db.query(`UPDATE membership_role_grants SET status='REVOKED' WHERE membership_id=$1`, [
+        memberA,
+      ]);
+      expect((await nearby.snapshot(orgA, otherVolunteer)).areas[0]!.volunteers).toBe('0');
+      await db.query(`UPDATE organization_memberships SET status='SUSPENDED' WHERE id=$1`, [
+        memberA,
+      ]);
+      await expect(nearby.snapshot(orgA, volunteer)).rejects.toThrow();
+    });
+    it('requires coordinator publication, and hiding an area withdraws its availability', async () => {
+      await expect(nearby.publish(orgA, volunteer, areaA, false)).rejects.toThrow();
+      await nearby.available(orgA, volunteer, session, optIn(areaA));
+      await nearby.publish(orgA, coordinator, areaA, false);
+      expect((await nearby.snapshot(orgA, otherVolunteer)).areas).toHaveLength(0);
+      expect(await db.query('SELECT * FROM nearby_availability')).toHaveLength(0);
+      await expect(nearby.available(orgA, volunteer, session, optIn(areaA))).rejects.toThrow();
+    });
+    it('excludes globally restricted volunteers and inactive recipient needs', async () => {
+      await nearby.available(orgA, volunteer, session, optIn(areaA));
+      await db.query(
+        `INSERT INTO global_account_restrictions(user_id,restriction_type,reason_code,authorized_by)
+        VALUES($1,'TEMPORARY_SUSPENSION','NEARBY_QA',$2)`,
+        [volunteer, coordinator],
+      );
+      expect((await nearby.snapshot(orgA, otherVolunteer)).areas[0]!.volunteers).toBe('0');
+      await expect(nearby.snapshot(orgA, volunteer)).rejects.toThrow();
+      const req = await request();
+      await db.query(
+        `UPDATE service_requests SET scheduled_start_time=now()+interval '30 minutes',location_ward_number='1' WHERE id=$1`,
+        [req],
+      );
+      await db.query(
+        `UPDATE users SET status='SUSPENDED' WHERE id=(SELECT user_id FROM organization_memberships WHERE id=$1)`,
+        [beneficiaryA],
+      );
+      expect((await nearby.snapshot(orgA, otherVolunteer)).areas[0]!.requests).toBe('0');
+    });
+    it('invalidates consent after area geometry changes', async () => {
+      await nearby.available(orgA, volunteer, session, optIn(areaA));
+      await db.query(
+        `UPDATE operational_zones SET center_lat=11.2,updated_at=clock_timestamp() WHERE id=$1`,
+        [areaA],
+      );
+      expect((await nearby.snapshot(orgA, otherVolunteer)).areas[0]!.volunteers).toBe('0');
+      expect((await nearby.snapshot(orgA, volunteer)).availability).toBeNull();
+    });
+    it('does not advertise volunteers with a conflicting visit', async () => {
+      const req = await request();
+      const assignment = await offer(req, memberA);
+      await db.query(`UPDATE volunteer_assignments SET status='IN_PROGRESS' WHERE id=$1`, [
+        assignment,
+      ]);
+      await expect(nearby.available(orgA, volunteer, session, optIn(areaA))).rejects.toThrow(
+        'overlaps',
+      );
+    });
+    it('rolls back presence if auditing fails', async () => {
+      jest.spyOn(audit, 'logEvent').mockRejectedValueOnce(new Error('Audit failed'));
+      await expect(nearby.available(orgA, volunteer, session, optIn(areaA))).rejects.toThrow(
+        'Audit failed',
+      );
+      expect(await db.query('SELECT * FROM nearby_availability')).toHaveLength(0);
+    });
+  });
 
   beforeAll(async () => {
     await db.initialize();

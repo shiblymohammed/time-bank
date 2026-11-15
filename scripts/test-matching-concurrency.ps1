@@ -36,8 +36,14 @@ try {
   if ($LASTEXITCODE -ne 0) { Get-Content -LiteralPath "$serverLog.init"; throw 'Test PostgreSQL initialization failed' }
 
   $started = $true
-  & (Join-Path $PostgresBin 'pg_ctl.exe') -D $cluster -l $serverLog -o "-h 127.0.0.1 -p $port -F" -w start
-  if ($LASTEXITCODE -ne 0) { throw "Test PostgreSQL startup failed. See $serverLog" }
+  # Isolate the background server's inherited handles from a caller capturing this script's output.
+  # Wait only for pg_ctl, not its PostgreSQL descendants, and keep the helper window hidden.
+  $control = Start-Process -FilePath (Join-Path $PostgresBin 'pg_ctl.exe') -ArgumentList @(
+    '-D', "`"$cluster`"", '-l', "`"$serverLog`"", '-o', "`"-h 127.0.0.1 -p $port -F`"", '-w', 'start'
+  ) -WindowStyle Hidden -PassThru -RedirectStandardOutput "$serverLog.control-out" -RedirectStandardError "$serverLog.control-error"
+  if (-not $control.WaitForExit(60000) -or $control.ExitCode -ne 0) {
+    throw "Test PostgreSQL startup failed. See $serverLog"
+  }
   & (Join-Path $PostgresBin 'createdb.exe') -h 127.0.0.1 -p $port -U ktb_matching_test $database
   if ($LASTEXITCODE -ne 0) { throw 'Could not create the isolated test database' }
 

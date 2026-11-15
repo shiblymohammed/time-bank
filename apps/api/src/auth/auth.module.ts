@@ -22,6 +22,9 @@ import { StaffCodeService } from './staff-code.service';
 import { StaffCodeController } from './staff-code.controller';
 import { PeopleService } from '../identity/people.service';
 import { PeopleController } from '../identity/people.controller';
+import { ProfilePhotoController } from '../identity/profile-photo.controller';
+import { ProfilePhotoService } from '../identity/profile-photo.service';
+import { DocumentStorage } from '../wards/noc-storage';
 
 @Global()
 @Module({
@@ -47,7 +50,7 @@ import { PeopleController } from '../identity/people.controller';
       }),
     }),
   ],
-  controllers: [AuthController, StaffCodeController, PeopleController],
+  controllers: [AuthController, StaffCodeController, PeopleController, ProfilePhotoController],
   providers: [
     AuthService,
     AuthGuard,
@@ -56,7 +59,17 @@ import { PeopleController } from '../identity/people.controller';
     EmailService,
     StaffCodeService,
     PeopleService,
+    ProfilePhotoService,
+    DocumentStorage,
   ],
-  exports: [JwtModule, AuthGuard, AuthService, SmsService, FirebaseTokenService, PeopleService],
+  exports: [
+    JwtModule,
+    AuthGuard,
+    AuthService,
+    SmsService,
+    FirebaseTokenService,
+    PeopleService,
+    ProfilePhotoService,
+  ],
 })
 export class AuthModule {}

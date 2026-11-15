@@ -33,6 +33,7 @@ describe('AdminService', () => {
 
   const mockUserRepo = {
     count: jest.fn(),
+    createQueryBuilder: jest.fn(),
     findOne: jest.fn(),
     save: jest.fn(),
   };
@@ -52,12 +53,14 @@ describe('AdminService', () => {
 
   const mockOrgRepo = {
     count: jest.fn(),
+    createQueryBuilder: jest.fn(),
     findOne: jest.fn(),
     save: jest.fn(),
   };
 
   const mockMembershipRepo = {
     count: jest.fn(),
+    createQueryBuilder: jest.fn(),
     findOne: jest.fn(),
     create: jest.fn(),
     save: jest.fn(),
@@ -166,6 +169,17 @@ describe('AdminService', () => {
       };
       mockWalletRepo.createQueryBuilder.mockReturnValue(qb);
       mockMembershipRepo.count.mockResolvedValue(12);
+      const month = new Date().toISOString().slice(0, 7);
+      const monthlyQuery = (count: string) => ({
+        select: jest.fn().mockReturnThis(),
+        addSelect: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        getRawMany: jest.fn().mockResolvedValue([{ month, count }]),
+      });
+      mockUserRepo.createQueryBuilder.mockReturnValue(monthlyQuery('4'));
+      mockOrgRepo.createQueryBuilder.mockReturnValue(monthlyQuery('1'));
+      mockMembershipRepo.createQueryBuilder.mockReturnValue(monthlyQuery('5'));
       mockRoleGrantRepo.findAndCount.mockResolvedValueOnce([
         [
           {
@@ -188,6 +202,9 @@ describe('AdminService', () => {
       expect(res.totalUniversalWallets).toBe(150);
       expect(res.totalBalanceCredits).toBe(2540.5);
       expect(res.pendingMemberships).toBe(12);
+      expect(res.activityTrend).toHaveLength(6);
+      expect(res.activityTrend[0]).toMatchObject({ users: 0, organizations: 0, memberships: 0 });
+      expect(res.activityTrend[5]).toMatchObject({ users: 4, organizations: 1, memberships: 5 });
       expect(res.pendingSuperAdminCount).toBe(1);
       expect(res.pendingSuperAdmins).toEqual([
         {

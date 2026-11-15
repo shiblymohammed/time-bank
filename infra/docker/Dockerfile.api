@@ -45,6 +45,9 @@ WORKDIR /app
 RUN addgroup --system --gid 1001 ktb && \
     adduser --system --uid 1001 --ingroup ktb ktb
 
+# Private profile/NOC files are persisted by the uploads volume.
+RUN mkdir -p /app/var/uploads && chown ktb:ktb /app/var/uploads && chmod 700 /app/var/uploads
+
 COPY --from=builder --chown=ktb:ktb /app/apps/api/dist ./apps/api/dist
 COPY --from=builder --chown=ktb:ktb /app/apps/api/package.json ./apps/api/
 COPY --from=builder --chown=ktb:ktb /app/packages/shared-types ./packages/shared-types

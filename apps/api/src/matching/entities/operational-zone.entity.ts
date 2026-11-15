@@ -54,6 +54,10 @@ export class OperationalZone {
   @Column({ name: 'is_active', type: 'boolean', default: true })
   isActive!: boolean;
 
+  /** Explicit coordinator permission to show this coarse area in member discovery. */
+  @Column({ name: 'nearby_visible', type: 'boolean', default: false })
+  nearbyVisible!: boolean;
+
   @Column({ name: 'created_by_user_id', type: 'uuid', nullable: true })
   createdByUserId?: string | null;
 

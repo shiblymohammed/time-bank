@@ -310,6 +310,61 @@ describe('MembershipsService', () => {
       );
     });
 
+    it.each([UserRole.BENEFICIARY, UserRole.CAREGIVER] as const)(
+      'preserves both interests and help target %s without granting roles',
+      async (helpFor) => {
+        activeOrgAndNoMembership();
+        const result = await service.apply('org-1', 'u-1', {
+          participationIntent: 'BOTH',
+          helpFor,
+          requestedRole: UserRole.VOLUNTEER,
+          volunteer: { usualDays: ['SAT'] },
+        });
+        expect(result.status).toBe(MembershipStatus.APPLIED);
+        expect(result.applicationDetails).toEqual(
+          expect.objectContaining({
+            participationIntent: 'BOTH',
+            helpFor,
+            volunteer: expect.objectContaining({ usualDays: ['SAT'] }),
+          }),
+        );
+        expect(mockRoleGrantRepo.save).not.toHaveBeenCalled();
+        expect(mockApprovalRepo.save).not.toHaveBeenCalled();
+      },
+    );
+
+    it('preserves a help-only preference', async () => {
+      activeOrgAndNoMembership();
+      const result = await service.apply('org-1', 'u-1', {
+        participationIntent: 'HELP',
+        helpFor: UserRole.CAREGIVER,
+        requestedRole: UserRole.CAREGIVER,
+      });
+      expect(result.applicationDetails).toEqual({
+        participationIntent: 'HELP',
+        helpFor: 'CAREGIVER',
+      });
+    });
+
+    it.each([
+      { participationIntent: 'BOTH', requestedRole: UserRole.VOLUNTEER },
+      {
+        participationIntent: 'HELP',
+        helpFor: UserRole.CAREGIVER,
+        requestedRole: UserRole.BENEFICIARY,
+      },
+      {
+        participationIntent: 'VOLUNTEER',
+        helpFor: UserRole.BENEFICIARY,
+        requestedRole: UserRole.VOLUNTEER,
+      },
+      { helpFor: UserRole.BENEFICIARY, requestedRole: UserRole.BENEFICIARY },
+    ] as const)('rejects inconsistent participation answers: %j', async (answers) => {
+      activeOrgAndNoMembership();
+      await expect(service.apply('org-1', 'u-1', answers)).rejects.toThrow(BadRequestException);
+      expect(mockMembershipRepo.save).not.toHaveBeenCalled();
+    });
+
     it('refuses volunteer answers for someone asking for help', async () => {
       activeOrgAndNoMembership();
       await expect(

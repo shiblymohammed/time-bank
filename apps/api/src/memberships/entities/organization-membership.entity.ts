@@ -18,6 +18,9 @@ import { MembershipApproval } from './membership-approval.entity';
 import { Ward } from '../../wards/entities/ward.entity';
 
 export interface MembershipApplicationDetails {
+  /** Applicant preferences; these never grant roles or bypass approval. */
+  participationIntent?: 'VOLUNTEER' | 'HELP' | 'BOTH';
+  helpFor?: UserRole.BENEFICIARY | UserRole.CAREGIVER;
   volunteer?: {
     maxTravelRadiusKm: number;
     availableAtShortNotice: boolean;
