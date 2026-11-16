@@ -137,15 +137,15 @@ export function SafetyAlerts({
   const resolvedAlerts = alerts?.filter((a) => a.status === 'RESOLVED').length ?? 0;
 
   return (
-    <div className="request-workspace">
-      <div className="section-heading" style={{ marginBottom: '16px' }}>
+    <div className="request-workspace request-page">
+      <div className="section-heading request-page-heading">
         <div>
           <h2>Safety Alerts & Incident Response</h2>
-          <p className="section-description" style={{ margin: '4px 0 0' }}>
+          <p className="section-description">
             Real-time monitoring of paused or emergency-interrupted service visits.
           </p>
         </div>
-        <label className="coordinator-filter-checkbox">
+        <label className="coordinator-filter-checkbox inline-check">
           <input
             type="checkbox"
             checked={showClosed}

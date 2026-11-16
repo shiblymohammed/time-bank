@@ -91,13 +91,17 @@ export function CommunityReportQueue({
 
   return (
     <section
-      className="glass-panel stack"
-      style={{ padding: 22 }}
+      className="glass-panel stack community-queue-card"
       aria-busy={busy || (!queue && !problem)}
     >
-      <h2>Reported posts</h2>
-      <div>
+      <div className="community-card-heading">
+        <div>
+          <span className="community-section-kicker">MEMBER REPORTS</span>
+          <h2>Reported posts</h2>
+          <p>Review posts members have flagged for staff attention.</p>
+        </div>
         <button
+          type="button"
           className="btn btn-secondary"
           disabled={busy || (!queue && !problem)}
           onClick={() => {
@@ -126,11 +130,7 @@ export function CommunityReportQueue({
         </p>
       )}
       {queue?.items.map((report) => (
-        <article
-          key={report.id}
-          className="stack"
-          style={{ borderTop: '1px solid #ddd', paddingTop: 16 }}
-        >
+        <article key={report.id} className="stack community-moderation-item">
           <h3>{reasons[report.reason] ?? 'Reported content'}</h3>
           <p className="help-text">
             <time dateTime={report.created_at}>{new Date(report.created_at).toLocaleString()}</time>
@@ -139,17 +139,7 @@ export function CommunityReportQueue({
           {report.details && (
             <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{report.details}</p>
           )}
-          <blockquote
-            style={{
-              margin: 0,
-              paddingLeft: 14,
-              borderLeft: '3px solid #ddd',
-              whiteSpace: 'pre-wrap',
-              overflowWrap: 'anywhere',
-            }}
-          >
-            {report.post_body}
-          </blockquote>
+          <blockquote className="community-reported-content">{report.post_body}</blockquote>
           {selection?.report.id === report.id ? (
             <form
               className="stack"

@@ -34,6 +34,26 @@ export async function api<T>(
 }
 export const backend = <T>(path: string, method = 'GET', body?: unknown, signal?: AbortSignal) =>
   api<T>('/api/backend' + path, method, body, signal);
+/** Sends an authenticated multipart form through the same-origin API gateway. */
+export async function backendFormData<T>(path: string, body: FormData): Promise<T> {
+  const response = await fetch('/api/backend' + path, {
+    method: 'POST',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    body,
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok)
+    throw new ApiError(
+      typeof result.message === 'string'
+        ? result.message
+        : Array.isArray(result.message)
+          ? result.message.join('; ')
+          : 'Unable to complete the request',
+      response.status,
+    );
+  return result as T;
+}
 /** Fetches a file through the gateway and hands it to the browser to save. */
 export async function downloadFile(path: string): Promise<void> {
   const response = await fetch('/api/backend' + path, {

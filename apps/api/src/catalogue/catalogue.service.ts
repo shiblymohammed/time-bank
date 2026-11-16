@@ -489,7 +489,7 @@ export class CatalogueService {
     return this.proposalRepo.find({
       where,
       order: { createdAt: 'DESC' },
-      relations: ['category', 'proposer', 'reviewer'],
+      relations: ['category', 'proposer', 'reviewer', 'organization'],
     });
   }
 

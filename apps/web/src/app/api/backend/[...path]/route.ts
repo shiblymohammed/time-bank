@@ -120,7 +120,13 @@ async function proxy(request: NextRequest, context: Context) {
       }
       return respondFile(content, file.renewed);
     }
-    const body = request.method === 'GET' ? undefined : await request.json().catch(() => undefined);
+    const contentType = request.headers.get('content-type') ?? '';
+    const body =
+      request.method === 'GET'
+        ? undefined
+        : contentType.toLowerCase().startsWith('multipart/form-data')
+          ? await request.formData()
+          : await request.json().catch(() => undefined);
     const result = await withSession(request, (token) =>
       upstream(resource + request.nextUrl.search, {
         method: request.method,

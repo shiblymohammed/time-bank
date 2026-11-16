@@ -35,6 +35,21 @@ type Local = {
 };
 
 type Data = { services: Service[]; local: Local[] };
+type ServiceProposal = {
+  id: string;
+  organizationId: string;
+  proposedName: string;
+  categoryId: string;
+  category?: { id: string; nameEn: string };
+  description: string;
+  justification: string;
+  suggestedMinVolunteers: number;
+  isHazardousPhysical: boolean;
+  status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED';
+  rejectionReason?: string | null;
+  organization?: { name: string };
+  proposer?: { fullName?: string | null };
+};
 
 const yesNo = [
   { value: 'true', label: 'Yes' },
@@ -145,6 +160,16 @@ function getServiceVisual(service: Service) {
   };
 }
 
+function getEmbeddedServiceImage(description = '') {
+  const match =
+    description.match(/!\[.*?\]\((https?:\/\/[^\s)]+|data:image\/[^\s)]+)\)/i) ||
+    description.match(/\[img:(https?:\/\/[^\]]+|data:image\/[^\]]+)\]/i);
+  return {
+    imageUrl: match?.[1] ?? '',
+    cleanDescription: match ? description.replace(match[0], '').trim() : description,
+  };
+}
+
 function resizeImageToDataUri(file: File, maxDim = 400, quality = 0.75): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -186,6 +211,7 @@ function resizeImageToDataUri(file: File, maxDim = 400, quality = 0.75): Promise
 export function ServiceCatalogue({
   organizationId,
   isGlobal,
+  canPropose,
   revision,
   pending,
   openAction,
@@ -193,6 +219,7 @@ export function ServiceCatalogue({
 }: {
   organizationId: string | null;
   isGlobal: boolean;
+  canPropose: boolean;
   revision: number;
   pending: boolean;
   openAction: (action: Action) => void;
@@ -202,6 +229,14 @@ export function ServiceCatalogue({
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [localRevision, setLocalRevision] = useState(0);
+  const [proposals, setProposals] = useState<ServiceProposal[] | null>(null);
+  const [proposalError, setProposalError] = useState('');
+  const [showProposal, setShowProposal] = useState(false);
+  const [reviewingProposal, setReviewingProposal] = useState<ServiceProposal | null>(null);
+  const [unlinkedProposal, setUnlinkedProposal] = useState<{
+    proposal: ServiceProposal;
+    service: Service;
+  } | null>(null);
 
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('');
@@ -239,6 +274,32 @@ export function ServiceCatalogue({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [organizationId, revision, localRevision]);
 
+  useEffect(() => {
+    const path = isGlobal
+      ? '/catalogue/proposals'
+      : canPropose && organizationId
+        ? `/organizations/${organizationId}/catalogue/proposals`
+        : null;
+    if (!path) {
+      setProposals(null);
+      setProposalError('');
+      return;
+    }
+    const controller = new AbortController();
+    setProposals(null);
+    setProposalError('');
+    backend<ServiceProposal[]>(path, 'GET', undefined, controller.signal)
+      .then((result) => {
+        if (!controller.signal.aborted) setProposals(result);
+      })
+      .catch((cause: unknown) => {
+        if (controller.signal.aborted) return;
+        setProposalError(cause instanceof Error ? cause.message : 'Could not load service requests.');
+        if (cause instanceof ApiError && cause.status === 401) onExpired();
+      });
+    return () => controller.abort();
+  }, [organizationId, isGlobal, canPropose, revision, localRevision, onExpired]);
+
   const entries = new Map(data?.local.map((entry) => [entry.globalServiceId, entry]));
   const categories = [
     ...new Map(
@@ -266,6 +327,22 @@ export function ServiceCatalogue({
 
     return matchesSearch && matchesCategory && matchesSkill && matchesStatus;
   });
+
+  async function linkApprovedProposal(proposal: ServiceProposal, service: Service) {
+    try {
+      await backend(`/catalogue/proposals/${proposal.id}/review`, 'PATCH', {
+        status: 'APPROVED',
+        resultingGlobalServiceId: service.id,
+      });
+      setNotice(`“${proposal.proposedName}” was added to the shared catalogue and enabled for ${proposal.organization?.name ?? 'the proposing organization'}.`);
+      setUnlinkedProposal(null);
+      setError('');
+      setLocalRevision((value) => value + 1);
+    } catch (cause) {
+      setUnlinkedProposal({ proposal, service });
+      setError(`The service was created, but its request could not be closed. Use “Finish approval” to retry without creating a duplicate. ${cause instanceof Error ? cause.message : ''}`);
+    }
+  }
 
   async function toggleServiceActive(service: Service) {
     try {
@@ -382,6 +459,15 @@ export function ServiceCatalogue({
           </div>
         </div>
         <div className="catalogue-top-actions">
+          {organizationId && canPropose && (
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={() => setShowProposal(true)}
+            >
+              <Icon name="plus" /> Suggest a service
+            </button>
+          )}
           {isGlobal && (
             <>
               <button
@@ -404,6 +490,74 @@ export function ServiceCatalogue({
           )}
         </div>
       </div>
+
+      {(isGlobal || (organizationId && canPropose)) && (
+        <section className="service-proposals-panel" aria-label={isGlobal ? 'Municipal service proposals' : 'Your organization service proposals'}>
+          <div className="service-proposals-heading">
+            <div>
+              <h3>{isGlobal ? 'Municipal service requests' : 'Your service requests'}</h3>
+              <p>{isGlobal ? 'Review local needs and add approved services to the shared catalogue.' : 'Track suggestions sent to the central catalogue team.'}</p>
+            </div>
+            <span className="record-count">{(proposals ?? []).filter((proposal) => proposal.status === 'PENDING_REVIEW').length} awaiting review</span>
+          </div>
+          {proposalError && <p className="error-message" role="alert">{proposalError}</p>}
+          {!proposals && !proposalError && <p className="help-text">Loading service requests…</p>}
+          {proposals && proposals.length === 0 && <p className="service-proposals-empty">No service requests yet.</p>}
+          {proposals && proposals.length > 0 && (
+            <div className="service-proposals-list">
+              {proposals.map((proposal) => {
+                const proposalVisual = getServiceVisual({
+                  id: proposal.id,
+                  code: proposal.proposedName,
+                  nameEn: proposal.proposedName,
+                  nameMl: '',
+                  descriptionEn: proposal.description,
+                  isActive: true,
+                  defaultMinVolunteers: proposal.suggestedMinVolunteers,
+                  defaultPreferredVolunteers: proposal.suggestedMinVolunteers,
+                  requiresSkills: false,
+                  requiredSkillCodes: [],
+                });
+                return (
+                  <article className="service-proposal-card" key={proposal.id}>
+                    <img src={proposalVisual.url} alt="" />
+                    <div className="service-proposal-copy">
+                      <div className="service-proposal-title-row">
+                        <h4>{proposal.proposedName}</h4>
+                        <span className={`proposal-status proposal-${proposal.status.toLowerCase()}`}>
+                          {proposal.status === 'PENDING_REVIEW' ? 'Awaiting review' : proposal.status.toLowerCase()}
+                        </span>
+                      </div>
+                      <p>{proposalVisual.cleanDesc || proposal.justification}</p>
+                      <small>{proposal.organization?.name ?? proposal.category?.nameEn ?? 'Local service'}{proposal.proposer?.fullName ? ` · suggested by ${proposal.proposer.fullName}` : ''}</small>
+                      {proposal.rejectionReason && <small className="proposal-rejection">Reason: {proposal.rejectionReason}</small>}
+                      {isGlobal && proposal.status === 'PENDING_REVIEW' && (
+                        <div className="service-proposal-actions">
+                          {unlinkedProposal?.proposal.id === proposal.id ? (
+                            <button className="btn btn-primary btn-sm" onClick={() => void linkApprovedProposal(proposal, unlinkedProposal.service)}>Finish approval</button>
+                          ) : (
+                            <button className="btn btn-primary btn-sm" onClick={() => setReviewingProposal(proposal)}>Create &amp; approve</button>
+                          )}
+                          <button
+                            className="btn btn-secondary btn-sm"
+                            onClick={() => openAction({
+                              title: `Decline “${proposal.proposedName}”`,
+                              submitLabel: 'Decline request',
+                              fields: [{ key: 'rejectionReason', label: 'Reason for declining', type: 'textarea', minLength: 5, maxLength: 1000 }],
+                              submit: (values) => backend(`/catalogue/proposals/${proposal.id}/review`, 'PATCH', { status: 'REJECTED', rejectionReason: values.rejectionReason!.trim() }),
+                              successMessage: () => 'Service request declined.',
+                            })}
+                          >Decline</button>
+                        </div>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
 
       {notice && (
         <p className="success-message" role="status">
@@ -756,6 +910,44 @@ export function ServiceCatalogue({
         />
       )}
 
+      {showProposal && organizationId && (
+        <ServiceProposalModal
+          organizationId={organizationId}
+          categories={categories}
+          onClose={() => setShowProposal(false)}
+          onExpired={onExpired}
+          onSuccess={(proposal) => {
+            setShowProposal(false);
+            setNotice(`“${proposal.proposedName}” was sent to the central catalogue team.`);
+            setLocalRevision((value) => value + 1);
+          }}
+        />
+      )}
+
+      {reviewingProposal && (
+        <AddServiceModal
+          categories={categories}
+          initial={{
+            categoryId: reviewingProposal.categoryId,
+            nameEn: reviewingProposal.proposedName,
+            descriptionEn: reviewingProposal.description,
+            minVolunteers: reviewingProposal.suggestedMinVolunteers,
+            isHazardous: reviewingProposal.isHazardousPhysical,
+          }}
+          onClose={() => setReviewingProposal(null)}
+          onExpired={onExpired}
+          onSuccess={(service) => {
+            const proposal = reviewingProposal;
+            setReviewingProposal(null);
+            if (proposal) void linkApprovedProposal(proposal, service);
+          }}
+          onOpenAddCategory={() => {
+            setReviewingProposal(null);
+            setShowAddCategory(true);
+          }}
+        />
+      )}
+
       {/* DEDICATED MODAL: ADD CATEGORY */}
       {showAddCategory && (
         <AddCategoryModal
@@ -789,37 +981,172 @@ export function ServiceCatalogue({
 // ─────────────────────────────────────────────────────────────────────────────
 // COMPONENT: ADD SERVICE MODAL (With File Upload & Curated Photo Library)
 // ─────────────────────────────────────────────────────────────────────────────
+function ServiceProposalModal({
+  organizationId,
+  categories,
+  onClose,
+  onExpired,
+  onSuccess,
+}: {
+  organizationId: string;
+  categories: { id: string; nameEn: string }[];
+  onClose: () => void;
+  onExpired: () => void;
+  onSuccess: (proposal: ServiceProposal) => void;
+}) {
+  const [categoryId, setCategoryId] = useState(categories[0]?.id ?? '');
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [justification, setJustification] = useState('');
+  const [minimum, setMinimum] = useState(1);
+  const [hazardous, setHazardous] = useState(false);
+  const [imageUrl, setImageUrl] = useState(
+    CURATED_SERVICE_PHOTOS.find((photo) => photo.name === 'Community Care')?.url ?? '',
+  );
+  const [processing, setProcessing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  async function selectImage(file?: File) {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setError('Choose a JPG, PNG or WebP image.');
+      return;
+    }
+    setError('');
+    setProcessing(true);
+    try {
+      setImageUrl(await resizeImageToDataUri(file, 240, 0.58));
+    } catch {
+      setError('Could not prepare that image. Please choose another file.');
+    } finally {
+      setProcessing(false);
+    }
+  }
+
+  async function submit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!categoryId) {
+      setError('Choose a service category first.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const result = await backend<ServiceProposal>(
+        `/organizations/${organizationId}/catalogue/proposals`,
+        'POST',
+        {
+          categoryId,
+          proposedName: name.trim(),
+          description: `${imageUrl.trim() ? `[img:${imageUrl.trim()}] ` : ''}${description.trim()}`,
+          justification: justification.trim(),
+          suggestedMinVolunteers: Number(minimum),
+          isHazardousPhysical: hazardous,
+        },
+      );
+      onSuccess(result);
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 401) onExpired();
+      else setError(cause instanceof Error ? cause.message : 'Could not send this service request.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="modern-modal-backdrop" onMouseDown={(event) => event.target === event.currentTarget && !saving && onClose()}>
+      <section className="modern-modal-card proposal-modal-card" role="dialog" aria-modal="true" aria-labelledby="service-proposal-title">
+        <form onSubmit={(event) => void submit(event)}>
+          <header className="proposal-modal-header">
+            <span className="proposal-modal-kicker">LOCAL SERVICE REQUEST</span>
+            <h2 id="service-proposal-title">Suggest a service</h2>
+            <p>A Super Admin reviews suggestions before a service is added to the shared catalogue.</p>
+          </header>
+          <div className="proposal-form-grid">
+            <label>Service name<input className="form-input" required minLength={3} maxLength={150} value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Community garden support" /></label>
+            <label>Category<select className="form-input" required value={categoryId} onChange={(event) => setCategoryId(event.target.value)}><option value="" disabled>Choose a category</option>{categories.map((category) => <option key={category.id} value={category.id}>{category.nameEn}</option>)}</select></label>
+            <label className="proposal-form-wide">What will volunteers do?<textarea className="form-input" required minLength={10} maxLength={1000} rows={3} value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Describe the service in clear terms." /></label>
+            <label className="proposal-form-wide">Why does your community need this?<textarea className="form-input" required minLength={10} maxLength={1000} rows={3} value={justification} onChange={(event) => setJustification(event.target.value)} placeholder="Share the local need or gap this service addresses." /></label>
+            <label>Minimum volunteers<input className="form-input" type="number" min={1} max={100} step={1} value={minimum} onChange={(event) => setMinimum(Number(event.target.value))} /></label>
+            <label className="proposal-hazard-toggle"><input type="checkbox" checked={hazardous} onChange={(event) => setHazardous(event.target.checked)} /> This involves heavy or risky physical work</label>
+            <div className="proposal-form-wide">
+              <span className="proposal-field-label">Service image</span>
+              <div className="proposal-image-tools">
+                <button type="button" className="btn btn-secondary btn-sm" disabled={processing} onClick={() => fileInput.current?.click()}>{processing ? 'Preparing…' : 'Upload image'}</button>
+                <input ref={fileInput} hidden type="file" accept="image/*" onChange={(event) => void selectImage(event.target.files?.[0])} />
+                <input className="form-input" type="url" aria-label="Image URL" placeholder="Or paste an image link" value={imageUrl.startsWith('data:') ? '' : imageUrl} onChange={(event) => setImageUrl(event.target.value)} />
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => setImageUrl('')}>Remove</button>
+              </div>
+              <div className="proposal-photo-library" aria-label="Choose a service image">
+                {CURATED_SERVICE_PHOTOS.map((photo) => (
+                  <button key={photo.name} type="button" className={`proposal-photo-option ${imageUrl === photo.url ? 'selected' : ''}`} aria-label={`Use ${photo.name} image`} title={photo.name} onClick={() => setImageUrl(photo.url)}>
+                    <img src={photo.url} alt="" />
+                  </button>
+                ))}
+              </div>
+              {imageUrl && <img className="proposal-image-preview" src={imageUrl} alt="Service image preview" />}
+            </div>
+          </div>
+          {error && <p className="error-message" role="alert">{error}</p>}
+          <footer className="proposal-modal-footer">
+            <button type="button" className="btn btn-secondary" disabled={saving} onClick={onClose}>Cancel</button>
+            <button type="submit" className="btn btn-primary" disabled={saving || processing || !categories.length}>{saving ? 'Sending…' : 'Send suggestion'}</button>
+          </footer>
+        </form>
+      </section>
+    </div>
+  );
+}
+
 function AddServiceModal({
   categories,
+  initial,
   onClose,
   onExpired,
   onSuccess,
   onOpenAddCategory,
 }: {
   categories: { id: string; nameEn: string }[];
+  initial?: {
+    categoryId?: string;
+    nameEn?: string;
+    descriptionEn?: string;
+    minVolunteers?: number;
+    isHazardous?: boolean;
+  };
   onClose: () => void;
   onExpired: () => void;
   onSuccess: (service: Service) => void;
   onOpenAddCategory: () => void;
 }) {
-  const [categoryId, setCategoryId] = useState(categories[0]?.id || '');
-  const [code, setCode] = useState('');
+  const embedded = getEmbeddedServiceImage(initial?.descriptionEn);
+  const [categoryId, setCategoryId] = useState(initial?.categoryId || categories[0]?.id || '');
+  const [code, setCode] = useState(
+    initial?.nameEn?.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').slice(0, 32) ?? '',
+  );
   const [codeManuallyEdited, setCodeManuallyEdited] = useState(false);
-  const [nameEn, setNameEn] = useState('');
+  const [nameEn, setNameEn] = useState(initial?.nameEn ?? '');
   const [nameMl, setNameMl] = useState('');
-  const [descriptionEn, setDescriptionEn] = useState('');
+  const [descriptionEn, setDescriptionEn] = useState(embedded.cleanDescription);
   const [descriptionMl, setDescriptionMl] = useState('');
-  const [minVolunteers, setMinVolunteers] = useState(1);
-  const [preferredVolunteers, setPreferredVolunteers] = useState(1);
+  const [minVolunteers, setMinVolunteers] = useState(initial?.minVolunteers ?? 1);
+  const [preferredVolunteers, setPreferredVolunteers] = useState(initial?.minVolunteers ?? 1);
   const [requiresSkills, setRequiresSkills] = useState(false);
   const [skillCodesInput, setSkillCodesInput] = useState('');
-  const [isHazardous, setIsHazardous] = useState(false);
+  const [isHazardous, setIsHazardous] = useState(initial?.isHazardous ?? false);
   const [isEmergencyProhibited, setIsEmergencyProhibited] = useState(true);
   const [baseRate, setBaseRate] = useState(1.0);
 
   // Visual Image Upload & Selection
   const [uploadMode, setUploadMode] = useState<'upload' | 'library' | 'url'>('upload');
-  const [imageUrl, setImageUrl] = useState(CURATED_SERVICE_PHOTOS[0]?.url || '');
+  const [imageUrl, setImageUrl] = useState(
+    embedded.imageUrl ||
+      CURATED_SERVICE_PHOTOS.find((photo) => photo.name === 'Community Care')?.url ||
+      CURATED_SERVICE_PHOTOS[0]?.url ||
+      '',
+  );
   const [uploadedFileName, setUploadedFileName] = useState('');
   const [isProcessingFile, setIsProcessingFile] = useState(false);
 

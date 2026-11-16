@@ -249,8 +249,16 @@ export function Loyalty({
     ) : null;
   return (
     <div className="loyalty-workspace request-workspace">
-      <div className="action-row">
+      <div className="loyalty-page-intro">
+        <div>
+          <span className="loyalty-section-kicker">LOCAL REWARDS</span>
+          <p>
+            Local coins are separate from time credits. Merchants fund every promotion; the
+            platform makes no cash reimbursement.
+          </p>
+        </div>
         <button
+          type="button"
           className="btn btn-secondary"
           disabled={pending}
           onClick={() => {
@@ -261,10 +269,6 @@ export function Loyalty({
           Refresh loyalty
         </button>
       </div>
-      <p className="help-text">
-        Local coins are separate from time credits. Merchants fund every promotion; the platform
-        makes no cash reimbursement.
-      </p>
       {error && (
         <p role="alert" className="error-message">
           {error}
@@ -272,13 +276,21 @@ export function Loyalty({
       )}
       {notice && <p role="status">{notice}</p>}
       {isGlobal && (
-        <section className="glass-panel">
-          <h2>Central earning policy</h2>
-          <p>
-            Current version: {words(policies[0]?.version) || 'No policy yet'}. Earning starts only
-            after a central policy and the community program are enabled.
+        <section className="glass-panel loyalty-panel loyalty-policy-panel">
+          <div className="loyalty-panel-heading">
+            <div>
+              <span className="loyalty-section-kicker">PLATFORM SETTINGS</span>
+              <h2>Central earning policy</h2>
+            </div>
+            <span className="loyalty-policy-version">
+              Version {words(policies[0]?.version) || 'Not published'}
+            </span>
+          </div>
+          <p className="loyalty-policy-explanation">
+            Earning starts only after a central policy and the community program are enabled.
           </p>
           <form
+            className="loyalty-policy-form"
             onSubmit={(e) => {
               e.preventDefault();
               void run(() =>
@@ -296,7 +308,7 @@ export function Loyalty({
               );
             }}
           >
-            <label>
+            <label className="loyalty-policy-toggle">
               <input
                 type="checkbox"
                 checked={enabled}
@@ -328,9 +340,9 @@ export function Loyalty({
               value={campaignCap}
               onChange={setCampaignCap}
             />
-            <h3>Recognition milestones</h3>
+            <h3 className="loyalty-form-subheading">Recognition milestones</h3>
             {milestones.map((m, index) => (
-              <fieldset key={index}>
+              <fieldset className="loyalty-milestone-fields" key={index}>
                 <legend>Milestone {index + 1}</legend>
                 {(['name', 'hours', 'coins'] as const).map((key) => (
                   <Field
@@ -361,24 +373,32 @@ export function Loyalty({
                 </button>
               </fieldset>
             ))}
-            <button
-              className="btn btn-secondary"
-              type="button"
-              disabled={milestones.length >= 20}
-              onClick={() => setMilestones((all) => [...all, { name: '', hours: '', coins: '0' }])}
-            >
-              Add milestone
-            </button>
-            <button className="btn btn-primary" disabled={pending}>
-              Publish new policy version
-            </button>
+            <div className="loyalty-form-actions">
+              <button
+                className="btn btn-secondary"
+                type="button"
+                disabled={milestones.length >= 20}
+                onClick={() =>
+                  setMilestones((all) => [...all, { name: '', hours: '', coins: '0' }])
+                }
+              >
+                Add milestone
+              </button>
+              <button className="btn btn-primary" disabled={pending}>
+                Publish new policy version
+              </button>
+            </div>
           </form>
-          {policies.slice(0, 5).map((p) => (
-            <p key={words(p.id)}>
-              Version {words(p.version)}: {p.enabled ? 'enabled' : 'disabled'},{' '}
-              {words(p.coins_per_hour)} coins/hour
-            </p>
-          ))}
+          {policies.length > 1 && (
+            <div className="loyalty-policy-history">
+              {policies.slice(1, 5).map((p) => (
+                <p key={words(p.id)}>
+                  Version {words(p.version)}: {p.enabled ? 'enabled' : 'disabled'},{' '}
+                  {words(p.coins_per_hour)} coins/hour
+                </p>
+              ))}
+            </div>
+          )}
         </section>
       )}
       {!org ? (
@@ -388,15 +408,21 @@ export function Loyalty({
       ) : (
         <>
           {canManage && (
-            <section className="glass-panel">
-              <h2>Community program</h2>
+            <section className="glass-panel loyalty-panel loyalty-community-panel">
+              <div className="loyalty-panel-heading">
+                <div>
+                  <span className="loyalty-section-kicker">ORGANIZATION SETTINGS</span>
+                  <h2>Community program</h2>
+                </div>
+              </div>
               <form
+                className="loyalty-community-form"
                 onSubmit={(e) => {
                   e.preventDefault();
                   void run(() => post('/settings', program));
                 }}
               >
-                <label>
+                <label className="loyalty-setting-toggle">
                   <input
                     type="checkbox"
                     checked={program.enabled}
@@ -404,8 +430,7 @@ export function Loyalty({
                   />{' '}
                   Enable local loyalty earning and redemption
                 </label>
-                <br />
-                <label>
+                <label className="loyalty-setting-toggle">
                   <input
                     type="checkbox"
                     checked={program.leaderboardEnabled}
@@ -415,10 +440,11 @@ export function Loyalty({
                   />{' '}
                   Offer an opt-in community leaderboard
                 </label>
-                <br />
-                <button className="btn btn-primary" disabled={pending}>
-                  Save community settings
-                </button>
+                <div className="loyalty-form-actions">
+                  <button className="btn btn-primary" disabled={pending}>
+                    Save community settings
+                  </button>
+                </div>
               </form>
             </section>
           )}

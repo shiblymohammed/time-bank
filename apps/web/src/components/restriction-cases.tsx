@@ -458,16 +458,16 @@ export function RestrictionCases({
   const openAppeals = appeals.filter((a) => a.status === 'OPEN').length;
 
   return (
-    <div className="request-workspace">
-      <div className="section-heading" style={{ marginBottom: '16px' }}>
+    <div className="request-workspace governance-case-page restriction-case-page">
+      <div className="section-heading governance-page-heading">
         <div>
           <h2>Restrictions & Disciplinary Governance</h2>
-          <p className="section-description" style={{ margin: '4px 0 0' }}>
+          <p className="section-description">
             Account restrictions, temporary suspensions, permanent bans, and member appeals.
           </p>
         </div>
-        <div className="action-row" style={{ alignItems: 'center', gap: '10px' }}>
-          <label className="coordinator-filter-checkbox">
+        <div className="action-row governance-page-actions">
+          <label className="coordinator-filter-checkbox inline-check">
             <input
               type="checkbox"
               checked={showEnded}
@@ -476,13 +476,13 @@ export function RestrictionCases({
             Show ended and decided
           </label>
           {organizationId && (
-            <button className="btn btn-primary" disabled={pending} onClick={recommend} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <button type="button" className="btn btn-primary" disabled={pending} onClick={recommend}>
               <Icon name="plus" size={16} />
               Recommend restriction
             </button>
           )}
           {isGlobal && (
-            <button className="btn btn-secondary" disabled={pending} onClick={restrictDirectly}>
+            <button type="button" className="btn btn-secondary" disabled={pending} onClick={restrictDirectly}>
               Restrict directly
             </button>
           )}

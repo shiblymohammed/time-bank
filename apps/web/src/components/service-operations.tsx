@@ -681,10 +681,11 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
 
             {/* SUBMIT LOCAL SERVICE PROPOSAL */}
             {organizationId && (
-              <div className="ops-card">
+              <div className="ops-card local-service-proposal-card">
                 <ActionForm
                   title="Submit Local Service Proposal"
                   submit="Submit Proposal"
+                  className="local-service-proposal-form"
                   onSubmit={(data) =>
                     save(`${base}/catalogue/proposals`, {
                       categoryId: str(data, 'categoryId'),

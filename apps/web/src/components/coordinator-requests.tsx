@@ -433,21 +433,23 @@ export function CoordinatorRequests({
       ['MATCHING_ACTIVE', 'PARTIALLY_ACCEPTED', 'IN_PROGRESS'].includes(r.status),
     ).length ?? 0;
   const completedCount = list?.data.filter((r) => r.status === 'COMPLETED').length ?? 0;
+  const hasRequestFilters = Boolean(status || urgency || ward || needsReview);
 
   return (
-    <div className="request-workspace">
-      <div className="section-heading" style={{ marginBottom: '16px' }}>
+    <div className="request-workspace request-page">
+      <div className="section-heading request-page-heading">
         <div>
           <h2>Service requests</h2>
-          <p className="section-description" style={{ margin: '4px 0 0' }}>
+          <p className="section-description">
             Review local requests, volunteer staffing, and matching rounds. All times use India Standard Time (IST).
           </p>
         </div>
         <button
           className="btn btn-primary"
+          type="button"
           disabled={pending || !catalogue.length}
           onClick={() => setCreating(!creating)}
-          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
+          title={!catalogue.length ? 'Add an active service in Service Catalogue first' : undefined}
         >
           <Icon name="plus" size={16} />
           {creating ? 'Close beneficiary picker' : 'New service request'}
@@ -495,7 +497,7 @@ export function CoordinatorRequests({
           },
         ].map((kpi) => (
           <div
-            className={`modern-kpi-card kpi-tone-${kpi.tone}`}
+            className={`modern-kpi-card request-kpi-card kpi-tone-${kpi.tone}`}
             key={kpi.name}
             style={
               {
@@ -577,7 +579,7 @@ export function CoordinatorRequests({
           </div>
         </div>
         <div className="filter-right">
-          <label className="coordinator-filter-checkbox">
+          <label className="coordinator-filter-checkbox inline-check">
             <input
               type="checkbox"
               checked={needsReview}
@@ -646,9 +648,42 @@ export function CoordinatorRequests({
                   </td>
                 </tr>
               ))}
+              {!list.data.length && (
+                <tr>
+                  <td colSpan={5}>
+                    <div className="request-empty-state">
+                      <span className="request-empty-icon" aria-hidden="true">
+                        <Icon name="requests" size={20} />
+                      </span>
+                      <strong>{hasRequestFilters ? 'No requests match these filters' : 'No service requests yet'}</strong>
+                      <p>
+                        {!catalogue.length
+                          ? 'Add an active service in Service Catalogue before creating a request.'
+                          : hasRequestFilters
+                            ? 'Adjust or clear the filters to see more requests.'
+                            : 'Create a service request to start matching members with volunteers.'}
+                      </p>
+                      {hasRequestFilters && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary request-clear-filters"
+                          onClick={() => {
+                            setStatus('');
+                            setUrgency('');
+                            setWard('');
+                            setNeedsReview(false);
+                            setPage(1);
+                          }}
+                        >
+                          Clear filters
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
-          {!list.data.length && <p className="empty-state">No requests match these filters.</p>}
         </div>
       )}
 
@@ -657,9 +692,12 @@ export function CoordinatorRequests({
         <button disabled={!list || page === 1} onClick={() => setPage(page - 1)}>
           Previous requests
         </button>
-        <span>
-          Page {page}
-          {list ? ` · ${list.total} requests` : ''}
+        <span className="request-pagination-summary" aria-live="polite">
+          {list
+            ? list.total === 0
+              ? 'No requests'
+              : `Showing ${(page - 1) * 10 + 1}–${Math.min(page * 10, list.total)} of ${list.total} requests`
+            : `Page ${page}`}
         </span>
         <button disabled={!list || page * 10 >= list.total} onClick={() => setPage(page + 1)}>
           Next requests

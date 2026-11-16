@@ -259,16 +259,16 @@ export function PhoneRecoveries({
   const completedCount = rows?.filter((r) => r.status === 'COMPLETED').length ?? 0;
 
   return (
-    <div className="request-workspace">
-      <div className="section-heading" style={{ marginBottom: '16px' }}>
+    <div className="request-workspace governance-case-page phone-recovery-page">
+      <div className="section-heading governance-page-heading">
         <div>
           <h2>Phone Number Changes & Recovery</h2>
-          <p className="section-description" style={{ margin: '4px 0 0' }}>
+          <p className="section-description">
             Secure identity verification and credential transfer for lost phones or changed SIM cards.
           </p>
         </div>
-        <div className="action-row" style={{ alignItems: 'center', gap: '10px' }}>
-          <label className="coordinator-filter-checkbox">
+        <div className="action-row governance-page-actions">
+          <label className="coordinator-filter-checkbox inline-check">
             <input
               type="checkbox"
               checked={showEnded}
@@ -277,7 +277,7 @@ export function PhoneRecoveries({
             Show ended and refused
           </label>
           {organizationId && (
-            <button className="btn btn-primary" disabled={pending} onClick={openCase} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+            <button type="button" className="btn btn-primary" disabled={pending} onClick={openCase}>
               <Icon name="plus" size={16} />
               Change a phone number
             </button>

@@ -10,6 +10,8 @@ export type CreditReview = {
   resolution: string | null;
   created_at: string;
   subject_user_id?: string | null;
+  member_name?: string | null;
+  member_phone?: string | null;
   membership_number?: string | null;
   pool_name?: string | null;
   request_number?: string | null;

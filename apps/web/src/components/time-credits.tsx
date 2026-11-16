@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { backend, ApiError } from '@/lib/api';
 import type { Action, Field } from '@/lib/admin-types';
 import {
@@ -132,9 +133,11 @@ const amountField = (maximum: number): Field => ({
   step: '0.01',
 });
 const memberLabel = (member: Member) =>
-  [member.user?.fullName, member.membershipNumber || member.user?.phoneE164 || 'Member']
-    .filter(Boolean)
-    .join(' · ');
+  member.user?.fullName?.trim() || member.user?.phoneE164 || member.membershipNumber || 'Member';
+const reviewMemberLabel = (review: CreditReview) =>
+  review.subject_user_id
+    ? review.member_name || review.member_phone || review.membership_number || 'Member wallet'
+    : review.pool_name || review.member_name || review.member_phone || review.membership_number || 'Member wallet';
 
 function Feedback({ error, loading }: { error: string; loading: boolean }) {
   return (
@@ -311,6 +314,21 @@ export function TimeCredits({
   const [search, setSearch] = useState('');
   const [memberPage, setMemberPage] = useState(1);
   const [member, setMember] = useState<Member | null>(null);
+  const closeWalletDialog = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!member) return;
+    const oldOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    closeWalletDialog.current?.focus();
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMember(null);
+    };
+    document.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = oldOverflow;
+      document.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [member]);
   const [walletPage, setWalletPage] = useState(1);
   const members = useCreditData<{ memberships: Member[]; total: number }>(
     section === 'wallets'
@@ -420,7 +438,7 @@ export function TimeCredits({
     openAction({
       title: 'Record investigation',
       submitLabel: 'Record findings',
-      description: `${review.pool_name || review.membership_number || 'Member wallet'} · ${creditLabel(review.amount)} disputed credits. Findings are recorded once. A different administrator must approve the final decision.`,
+      description: `${reviewMemberLabel(review)} · ${creditLabel(review.amount)} disputed credits. Findings are recorded once. A different administrator must approve the final decision.`,
       fields: [
         {
           key: 'investigation',
@@ -713,10 +731,7 @@ export function TimeCredits({
               }}
             />
           </label>
-          <Feedback
-            error={members.error || walletHistory.error}
-            loading={members.loading || walletHistory.loading}
-          />
+          <Feedback error={members.error} loading={members.loading} />
           {members.data && (
             <section className="glass-panel detail-panel" aria-label="Member results">
               {members.data.memberships.map((row) => (
@@ -745,82 +760,83 @@ export function TimeCredits({
               />
             </section>
           )}
-          {member && walletHistory.data && (
-            <section className="glass-panel detail-panel" aria-label="Member credit history">
-              <h3>{memberLabel(member)}</h3>
-              {!wallet && <p>No time-credit wallet has been created for this member yet.</p>}
-              {wallet && (
-                <>
-                  <p>
-                    {creditLabel(wallet.balanceCredits)} available ·{' '}
-                    {creditLabel(wallet.frozenCredits)} frozen
-                  </p>
-                  <p className="help-text">
-                    Wallet: {wallet.status === 'ACTIVE' ? 'Active' : 'Frozen or closed'} · Account:{' '}
-                    {wallet.accountStatus.replaceAll('_', ' ').toLowerCase()}
-                    {wallet.restricted ? ' · Account restriction active' : ''}
-                  </p>
-                  <div className="action-row">
-                    {permissions.administer && (
-                      <button
-                        className="btn btn-secondary"
-                        disabled={
-                          pending || own || !activeWallet || wallet.releasableCredits < 0.01
-                        }
-                        onClick={releaseEarnings}
-                      >
-                        Release frozen earnings
-                      </button>
-                    )}
-                    {permissions.controlWallet && ['ACTIVE', 'FROZEN'].includes(wallet.status) && (
-                      <button
-                        className="btn btn-secondary"
-                        disabled={
-                          pending ||
-                          own ||
-                          (wallet.status === 'FROZEN' &&
-                            (wallet.accountStatus !== 'ACTIVE' || wallet.restricted))
-                        }
-                        onClick={() =>
-                          walletStatus(wallet.status === 'FROZEN' ? 'ACTIVE' : 'FROZEN')
-                        }
-                      >
-                        {wallet.status === 'FROZEN' ? 'Restore wallet' : 'Freeze wallet'}
-                      </button>
-                    )}
+          {member && createPortal(
+            <div
+              className="modal-backdrop wallet-modal-backdrop"
+              onMouseDown={(event) => {
+                if (event.target === event.currentTarget) setMember(null);
+              }}
+            >
+              <section
+                className="modal-content wallet-modal-content"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="wallet-dialog-title"
+              >
+                <div className="wallet-modal-heading">
+                  <div>
+                    <span className="wallet-modal-kicker">MEMBER ACCOUNT</span>
+                    <h2 id="wallet-dialog-title">{memberLabel(member)}’s wallet</h2>
+                    <p>Wallet balance, status and organization credit history.</p>
                   </div>
-                  {permissions.administer && (
-                    <p className="help-text">
-                      {creditLabel(wallet.releasableCredits)} frozen earnings from this organization
-                      are available for release. Disputed credits are excluded.
-                    </p>
-                  )}
-                  {own && (
-                    <p className="help-text">
-                      Another staff member must review or release your credits.
-                    </p>
-                  )}
-                  <Ledger
-                    data={walletHistory.data.data}
-                    pending={pending}
-                    own={own}
-                    openReview={(entry) =>
-                      reviewSource({
-                        id: entry.id,
-                        maximum: Number(entry.reviewable_amount),
-                        label: `${memberLabel(member)} · ${kind(entry.tx_type)}`,
-                      })
-                    }
-                  />
-                  <Pages
-                    page={walletPage}
-                    total={walletHistory.data.total}
-                    setPage={setWalletPage}
-                    pending={pending}
-                  />
-                </>
-              )}
-            </section>
+                  <button
+                    ref={closeWalletDialog}
+                    type="button"
+                    className="icon-button wallet-dialog-close"
+                    aria-label="Close member wallet"
+                    onClick={() => setMember(null)}
+                  >
+                    ×
+                  </button>
+                </div>
+                {walletHistory.error && <p className="error-message" role="alert">{walletHistory.error}</p>}
+                {walletHistory.loading && <p className="loading-line" role="status">Loading wallet history…</p>}
+                {walletHistory.data && (
+                  <>
+                    {!wallet && <p className="empty-state">No time-credit wallet has been created for this member yet.</p>}
+                    {wallet && (
+                      <>
+                        <div className="wallet-summary-card">
+                          <div><small>Available balance</small><strong>{creditLabel(wallet.balanceCredits)}</strong></div>
+                          <div><small>Frozen credits</small><strong>{creditLabel(wallet.frozenCredits)}</strong></div>
+                          <p>Wallet {wallet.status === 'ACTIVE' ? 'active' : 'frozen or closed'} · Account {wallet.accountStatus.replaceAll('_', ' ').toLowerCase()}{wallet.restricted ? ' · Restriction active' : ''}</p>
+                        </div>
+                        <div className="wallet-dialog-actions">
+                          {permissions.administer && (
+                            <button
+                              className="btn btn-secondary"
+                              disabled={pending || own || !activeWallet || wallet.releasableCredits < 0.01}
+                              onClick={releaseEarnings}
+                            >Release frozen earnings</button>
+                          )}
+                          {permissions.controlWallet && ['ACTIVE', 'FROZEN'].includes(wallet.status) && (
+                            <button
+                              className="btn btn-secondary"
+                              disabled={pending || own || (wallet.status === 'FROZEN' && (wallet.accountStatus !== 'ACTIVE' || wallet.restricted))}
+                              onClick={() => walletStatus(wallet.status === 'FROZEN' ? 'ACTIVE' : 'FROZEN')}
+                            >{wallet.status === 'FROZEN' ? 'Restore wallet' : 'Freeze wallet'}</button>
+                          )}
+                        </div>
+                        {permissions.administer && <p className="help-text">{creditLabel(wallet.releasableCredits)} frozen earnings from this organization are available for release. Disputed credits are excluded.</p>}
+                        {own && <p className="help-text">Another staff member must review or release your credits.</p>}
+                        <Ledger
+                          data={walletHistory.data.data}
+                          pending={pending}
+                          own={own}
+                          openReview={(entry) => reviewSource({
+                            id: entry.id,
+                            maximum: Number(entry.reviewable_amount),
+                            label: `${memberLabel(member)} · ${kind(entry.tx_type)}`,
+                          })}
+                        />
+                        <Pages page={walletPage} total={walletHistory.data.total} setPage={setWalletPage} pending={pending} />
+                      </>
+                    )}
+                  </>
+                )}
+              </section>
+            </div>,
+            document.body,
           )}
         </>
       )}
@@ -839,10 +855,10 @@ export function TimeCredits({
                 <section
                   key={review.id}
                   className="glass-panel detail-panel credit-review"
-                  aria-label={`Credit review for ${review.pool_name || review.membership_number || 'member wallet'}`}
+                  aria-label={`Credit review for ${reviewMemberLabel(review)}`}
                 >
                   <div className="section-heading">
-                    <h3>{review.pool_name || review.membership_number || 'Member wallet'}</h3>
+                    <h3>{reviewMemberLabel(review)}</h3>
                     <span className="badge">
                       {review.decision === 'CORRECT'
                         ? 'Corrected'

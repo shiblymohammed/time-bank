@@ -25,7 +25,8 @@ export class CreateOrgProposalDto {
   @ApiProperty({ example: 'Cleaning community drainage channels before monsoon' })
   @IsString()
   @IsNotEmpty()
-  @Length(10, 1000)
+  // Description may contain a resized JPEG data URI for the proposed service image.
+  @Length(10, 100_000)
   description!: string;
 
   @ApiProperty({ example: 'High demand in ward 4 due to seasonal flood risk' })

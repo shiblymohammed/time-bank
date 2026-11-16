@@ -161,8 +161,10 @@ export class CommunityService {
       throw new ForbiddenException('A volunteer or recipient role is required to submit a post');
     if (!staff && dto.postType === 'ANNOUNCEMENT')
       throw new ForbiddenException('Announcements are reserved for community staff');
-    if (photo && !['STORY', 'OPPORTUNITY'].includes(dto.postType))
-      throw new BadRequestException('Photos are supported on community stories and opportunities');
+    if (photo && !['ANNOUNCEMENT', 'STORY', 'OPPORTUNITY'].includes(dto.postType))
+      throw new BadRequestException(
+        'Photos are supported on announcements, stories and opportunities',
+      );
     const body = dto.body.trim();
     const insertParameters = [
       org,

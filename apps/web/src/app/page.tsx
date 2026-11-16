@@ -167,6 +167,9 @@ const PAGES: {
   icon: IconName;
   group: string;
   description: string;
+  /** Coordinator-facing wording where the task is narrower than administration. */
+  coordinatorText?: string;
+  coordinatorDescription?: string;
   centralOnly?: boolean;
   /** Municipality Admins and Super Admins. */
   managersOnly?: boolean;
@@ -186,62 +189,65 @@ const PAGES: {
     icon: 'organizations',
     group: 'Staff Console',
     description: 'Organizations, their status and branding',
+    coordinatorText: 'My Municipality',
+    coordinatorDescription: 'View your municipality and its wards',
   },
   {
     id: 'memberships',
     text: 'Memberships',
     icon: 'memberships',
     group: 'Staff Console',
-    description: 'Review applications and manage member roles',
+    description: 'Review membership applications and manage member access',
+    coordinatorDescription: 'Review applications and member eligibility for your municipality',
   },
   {
     id: 'requests',
     text: 'Requests & Matching',
     icon: 'requests',
     group: 'Staff Console',
-    description: 'Help requests and volunteer matching',
+    description: 'Review help requests and match members with volunteers',
   },
   {
     id: 'community',
     text: 'Community Updates',
     icon: 'organizations',
     group: 'Staff Console',
-    description: 'Publish announcements and moderate community posts',
+    description: 'Publish local announcements and moderate community posts',
   },
   {
     id: 'safety',
     text: 'Safety Alerts',
     icon: 'safety',
     group: 'Staff Console',
-    description: 'Visits paused or ended by a safety alert',
+    description: 'Respond to safety alerts and visits paused or ended for safety',
   },
   {
     id: 'complaints',
     text: 'Complaints',
     icon: 'complaints',
     group: 'Staff Console',
-    description: 'Confidential complaints from members',
+    description: 'Handle confidential complaints assigned to your municipality',
   },
   {
     id: 'catalogue',
     text: 'Service Catalogue',
     icon: 'catalogue',
     group: 'Services',
-    description: 'Services members can offer and request',
+    description: 'Manage services members can offer and request locally',
   },
   {
     id: 'operations',
     text: 'Service Operations',
     icon: 'operations',
     group: 'Services',
-    description: 'Bookings, completions and time credits',
+    description: 'Track service bookings, completions and the resulting time credits',
   },
   {
     id: 'credits',
     text: 'Time Credits',
     icon: 'wallet',
     group: 'Governance',
-    description: 'Community pools, member wallets and independent credit reviews',
+    description: 'Review member wallets, local credit activity and community pools',
   },
 
   {
@@ -249,21 +255,25 @@ const PAGES: {
     text: 'Loyalty & Merchants',
     icon: 'wallet',
     group: 'Governance',
-    description: 'Local coins, merchant-funded offers and recognition',
+    description: 'Manage local merchants, offers and community recognition',
   },
   {
     id: 'restrictions',
     text: 'Restrictions',
     icon: 'restrictions',
     group: 'Governance',
-    description: 'Suspensions, bans, reinstatement and appeals',
+    description: 'Review restriction cases, reinstatement requests and appeals',
+    coordinatorText: 'Restriction Recommendations',
+    coordinatorDescription: 'Recommend a restriction for Municipality Admin review; recommendations do not take effect until approved',
   },
   {
     id: 'closures',
     text: 'Account Closures',
     icon: 'closures',
     group: 'Governance',
-    description: 'Deaths, duplicate accounts and passing on credits',
+    description: 'Report deaths or duplicate accounts and recommend what happens to remaining credits',
+    coordinatorText: 'Closure Reports',
+    coordinatorDescription: 'Report a death or duplicate account and recommend a credit transfer for admin review',
   },
   {
     id: 'reports',
@@ -278,7 +288,9 @@ const PAGES: {
     text: 'Phone Number Changes',
     icon: 'phoneRecovery',
     group: 'Governance',
-    description: 'Moving an account to a new number after a lost phone or SIM',
+    description: 'Help members recover an account after losing a phone or SIM',
+    coordinatorText: 'Phone Recovery',
+    coordinatorDescription: 'Review lost-phone or SIM recovery cases; higher-risk changes need Super Admin approval',
   },
   {
     id: 'audit',
@@ -869,6 +881,7 @@ export default function AdminDashboard(): React.JSX.Element {
   const [menuOpen, setMenuOpen] = useState(false);
   const mobileMenu = useRef<HTMLButtonElement>(null);
   const [organizations, setOrganizations] = useState<Organization[]>([]),
+    [wardCounts, setWardCounts] = useState<Record<string, number | null>>({}),
     [view, setView] = useState<View>(empty);
   const [offset, setOffset] = useState(0),
     [status, setStatus] = useState(''),
@@ -933,6 +946,14 @@ export default function AdminDashboard(): React.JSX.Element {
       (isStaffScope || page.id === 'loyalty') &&
       (isGlobal || !page.centralOnly) &&
       (canManageRoles || !page.managersOnly),
+  ).map((page) =>
+    isCoordinatorOnly
+      ? {
+          ...page,
+          text: page.coordinatorText ?? page.text,
+          description: page.coordinatorDescription ?? page.description,
+        }
+      : page,
   );
   const selectedOrg = organizations.find((organization) => organization.id === tenant);
   const page = tabs.find((item) => item.id === tab);
@@ -1092,6 +1113,25 @@ export default function AdminDashboard(): React.JSX.Element {
       });
     return () => controller.abort();
   }, [profile, tab, tenant, offset, status, search, eventType, revision, isGlobal]);
+  useEffect(() => {
+    if (tab !== 'organizations' || !profile || organizations.length === 0) return;
+    let active = true;
+    Promise.all(
+      organizations.map(async (organization) => {
+        try {
+          const wards = await backend<Ward[]>(`/organizations/${organization.id}/wards/manage`);
+          return [organization.id, wards.length] as const;
+        } catch {
+          return [organization.id, null] as const;
+        }
+      }),
+    ).then((results) => {
+      if (active) setWardCounts((current) => ({ ...current, ...Object.fromEntries(results) }));
+    });
+    return () => {
+      active = false;
+    };
+  }, [tab, profile, organizations, revision]);
   // Search once typing pauses, not on every letter.
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -1236,6 +1276,7 @@ export default function AdminDashboard(): React.JSX.Element {
                 id={`nav-${item.id}`}
                 className={`nav-item ${tab === item.id ? 'active' : ''}`}
                 aria-current={tab === item.id ? 'page' : undefined}
+                title={`${item.text}: ${item.description}`}
                 disabled={pending}
                 onClick={() => changeTab(item.id)}
               >
@@ -1276,10 +1317,8 @@ export default function AdminDashboard(): React.JSX.Element {
           ))}
         </nav>
         <div className="sidebar-footer modern-sidebar-footer">
-          <div className="footer-phone-icon" aria-hidden="true">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
-            </svg>
+          <div className="footer-account-icon" aria-hidden="true">
+            <Icon name="users" size={17} />
           </div>
           <div className="user-meta footer-meta-info">
             <p className="footer-phone-number">{phone(profile.phoneE164)}</p>
@@ -1292,8 +1331,9 @@ export default function AdminDashboard(): React.JSX.Element {
             </p>
           </div>
           <button
-            className="icon-button footer-action-arrow"
-            title="Sign out"
+            type="button"
+            className="footer-logout-button"
+            title={pending ? 'Signing out' : 'Sign out'}
             aria-label="Sign out"
             disabled={pending}
             onClick={async () => {
@@ -1312,7 +1352,8 @@ export default function AdminDashboard(): React.JSX.Element {
               }
             }}
           >
-            <Icon name="arrowRight" />
+            <Icon name="logout" size={15} />
+            <span className="sr-only">{pending ? 'Signing out' : 'Sign out'}</span>
           </button>
         </div>
 
@@ -1326,7 +1367,9 @@ export default function AdminDashboard(): React.JSX.Element {
       </aside>
       <div className="main-wrapper" inert={action !== null || detail !== null}>
         {tab !== 'overview' && (
-          <header className="top-bar">
+          <header
+            className={`top-bar ${['restrictions', 'closures', 'phone-recoveries'].includes(tab) ? 'governance-topbar' : ''}`}
+          >
             <div className="top-bar-inner">
               <div className="page-title">
                 <span className="page-kicker">
@@ -1708,6 +1751,7 @@ export default function AdminDashboard(): React.JSX.Element {
               key={tenant}
               organizationId={tenant === 'GLOBAL' ? null : tenant}
               isGlobal={isGlobal}
+              canPropose={isStaffScope && tenant !== 'GLOBAL'}
               revision={revision}
               pending={pending}
               openAction={openAction}
@@ -1801,13 +1845,17 @@ export default function AdminDashboard(): React.JSX.Element {
                     pill: 'Draft or suspended',
                   },
                   {
-                    name: 'Districts Covered',
-                    val: new Set(shownOrgs.map((o) => o.district).filter(Boolean)).size,
-                    icon: 'catalogue',
+                    name: 'Total Wards',
+                    val:
+                      shownOrgs.length > 0 &&
+                      shownOrgs.every((organization) => wardCounts[organization.id] !== undefined && wardCounts[organization.id] !== null)
+                        ? shownOrgs.reduce((total, organization) => total + (wardCounts[organization.id] ?? 0), 0)
+                        : '—',
+                    icon: 'organizations',
                     color: '#7C3AED',
                     glow: 'rgba(124, 58, 237, 0.08)',
                     tone: 'purple',
-                    pill: 'Geographic coverage',
+                    pill: tenant === 'GLOBAL' ? 'Across listed organizations' : 'In this organization',
                   },
                 ].map((kpi) => (
                   <div
@@ -2294,18 +2342,29 @@ export default function AdminDashboard(): React.JSX.Element {
                       }}
                     >
                       <div className="drawer-header">
-                        <div>
-                          <h2 id="membership-title">
-                            {detail.membership.user?.fullName ??
-                              phone(detail.membership.user?.phoneE164) ??
-                              'Membership'}
-                          </h2>
-                          <p>
-                            <Badge value={detail.membership.status} />{' '}
-                            {detail.membership.membershipNumber}
-                            {detail.membership.user?.fullName &&
-                              ` · ${phone(detail.membership.user.phoneE164)}`}
-                          </p>
+                        <div className="membership-profile-summary">
+                          <span className="membership-profile-avatar"><Icon name="users" /></span>
+                          <div className="membership-profile-copy">
+                            <span className="membership-review-kicker">MEMBERSHIP REVIEW</span>
+                            <h2 id="membership-title">
+                              {detail.membership.user?.fullName ??
+                                phone(detail.membership.user?.phoneE164) ??
+                                'Membership'}
+                            </h2>
+                            <div className="membership-profile-meta">
+                              <Badge value={detail.membership.status} />
+                              {detail.membership.membershipNumber && (
+                                <span className="membership-number-chip">
+                                  Member no. {detail.membership.membershipNumber}
+                                </span>
+                              )}
+                              {detail.membership.user?.fullName && (
+                                <span className="membership-phone-chip">
+                                  {phone(detail.membership.user.phoneE164)}
+                                </span>
+                              )}
+                            </div>
+                          </div>
                         </div>
                         <button
                           className="icon-button"
@@ -2505,7 +2564,7 @@ export default function AdminDashboard(): React.JSX.Element {
                                   Only the last 4 digits are kept. Verified members can receive
                                   gifted credits.
                                 </p>
-                                <div className="section-heading">
+                                <div className="section-heading membership-identity-actions">
                                   <button
                                     className="btn btn-sm btn-primary"
                                     onClick={() =>
@@ -2657,8 +2716,8 @@ export default function AdminDashboard(): React.JSX.Element {
                           {detail.membership.roleGrants
                             .filter((grant) => grant.status === 'ACTIVE')
                             .map((grant) => (
-                              <div className="document-row" key={grant.id}>
-                                {label(grant.role)}
+                              <div className="document-row membership-role-row" key={grant.id}>
+                                <span className="membership-role-label">{label(grant.role)}</span>
                                 {canManageRoles &&
                                   grant.role !== 'SUPER_ADMIN' &&
                                   (isGlobal || grant.role !== 'MUNICIPALITY_ADMIN') && (
@@ -2685,15 +2744,13 @@ export default function AdminDashboard(): React.JSX.Element {
                           {detail.membership.roleGrants
                             .filter((grant) => grant.status === 'PENDING_APPROVAL')
                             .map((grant) => (
-                              <div className="document-row" key={grant.id}>
-                                <span>
-                                  {label(grant.role)}{' '}
-                                  <span className="help-text">
-                                    · waiting for a second Super Admin
-                                  </span>
-                                </span>
+                              <div className="document-row membership-role-row pending-role-row" key={grant.id}>
+                                <div className="membership-pending-role-copy">
+                                  <span className="membership-role-label">{label(grant.role)}</span>
+                                  <span className="membership-role-pending-note">Waiting for approval by another Super Admin</span>
+                                </div>
                                 {isGlobal && (
-                                  <span>
+                                  <div className="membership-role-actions">
                                     <button
                                       className="btn btn-sm btn-success"
                                       onClick={() =>
@@ -2732,7 +2789,7 @@ export default function AdminDashboard(): React.JSX.Element {
                                     >
                                       Cancel
                                     </button>
-                                  </span>
+                                  </div>
                                 )}
                               </div>
                             ))}

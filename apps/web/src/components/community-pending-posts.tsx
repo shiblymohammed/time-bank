@@ -88,10 +88,15 @@ export function CommunityPendingPosts({
 
   const loading = !queue && !loadError;
   return (
-    <section className="glass-panel stack" style={{ padding: 22 }} aria-busy={loading || saving}>
-      <h2>Pending posts</h2>
-      <div>
+    <section className="glass-panel stack community-queue-card" aria-busy={loading || saving}>
+      <div className="community-card-heading">
+        <div>
+          <span className="community-section-kicker">MODERATION QUEUE</span>
+          <h2>Pending posts</h2>
+          <p>Review community posts before they appear in the member feed.</p>
+        </div>
         <button
+          type="button"
           className="btn btn-secondary"
           disabled={loading || saving}
           onClick={() => {
@@ -119,8 +124,7 @@ export function CommunityPendingPosts({
       {queue?.items.map((post) => (
         <article
           key={post.id}
-          className="stack"
-          style={{ borderTop: '1px solid #ddd', paddingTop: 16 }}
+          className="stack community-moderation-item"
         >
           <h3>{postTypes[post.post_type] ?? 'Community update'}</h3>
           <p className="help-text">

@@ -106,12 +106,21 @@ export class CommunityController {
     return this.community.announcements(org, user, before);
   }
   @Post('announcements')
-  publishAnnouncement(
+  @UseInterceptors(postPhotoUpload)
+  async publishAnnouncement(
     @Param('id', ParseUUIDPipe) org: string,
     @CurrentUserId() user: string,
     @Body() dto: AnnouncementDto,
+    @UploadedFile() file?: { buffer: Buffer },
   ) {
-    return this.community.create(org, user, { postType: 'ANNOUNCEMENT', body: dto.body }, true);
+    const photo = file ? await prepareProfilePhoto(file.buffer, true) : undefined;
+    return this.community.create(
+      org,
+      user,
+      { postType: 'ANNOUNCEMENT', body: dto.body },
+      true,
+      photo,
+    );
   }
   @Delete('announcements/:postId')
   removeAnnouncement(

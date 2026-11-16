@@ -51,16 +51,19 @@ export async function upstream(
   path: string,
   options: { method?: string; body?: unknown; token?: string } = {},
 ) {
+  const multipart = options.body instanceof FormData;
   let response: Response;
   try {
     response = await fetch(`${origin}/api${path}`, {
       method: options.method ?? 'GET',
       headers: {
-        'content-type': 'application/json',
+        ...(!multipart ? { 'content-type': 'application/json' } : {}),
         ...(await forwardedFor()),
         ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
       },
-      ...(options.body !== undefined ? { body: JSON.stringify(options.body) } : {}),
+      ...(options.body !== undefined
+        ? { body: multipart ? (options.body as FormData) : JSON.stringify(options.body) }
+        : {}),
       cache: 'no-store',
       signal: AbortSignal.timeout(20000),
       redirect: 'error',

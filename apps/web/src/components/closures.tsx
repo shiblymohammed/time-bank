@@ -379,16 +379,16 @@ export function Closures({
   const transfersWaiting = rows?.filter((r) => r.transferWaiting).length ?? 0;
 
   return (
-    <div className="request-workspace">
-      <div className="section-heading" style={{ marginBottom: '16px' }}>
+    <div className="request-workspace governance-case-page closure-case-page">
+      <div className="section-heading governance-page-heading">
         <div>
           <h2>Account Closures & Deceased Estates</h2>
-          <p className="section-description" style={{ margin: '4px 0 0' }}>
+          <p className="section-description">
             Process deceased estates, duplicate account resolutions, and credit nominee transfers.
           </p>
         </div>
-        <div className="action-row" style={{ alignItems: 'center', gap: '10px' }}>
-          <label className="coordinator-filter-checkbox">
+        <div className="action-row governance-page-actions">
+          <label className="coordinator-filter-checkbox inline-check">
             <input
               type="checkbox"
               checked={showEnded}
@@ -398,11 +398,11 @@ export function Closures({
           </label>
           {organizationId && (
             <>
-              <button className="btn btn-primary" disabled={pending} onClick={reportDeath} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <button type="button" className="btn btn-primary" disabled={pending} onClick={reportDeath}>
                 <Icon name="plus" size={16} />
                 Report a death
               </button>
-              <button className="btn btn-secondary" disabled={pending} onClick={reportDuplicate}>
+              <button type="button" className="btn btn-secondary" disabled={pending} onClick={reportDuplicate}>
                 Report a duplicate
               </button>
             </>

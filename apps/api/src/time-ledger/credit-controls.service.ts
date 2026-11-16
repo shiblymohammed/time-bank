@@ -481,18 +481,22 @@ export class CreditControlsService {
       await this.authority(m, org, actor, [UserRole.COORDINATOR, UserRole.MUNICIPALITY_ADMIN]);
       const data = await m.query(
         `SELECT r.*, w.user_id AS subject_user_id, pool.name AS pool_name,
+          COALESCE(NULLIF(BTRIM(subject.full_name),''),NULLIF(BTRIM(recipient_user.full_name),'')) AS member_name,
+          COALESCE(subject.phone_e164,recipient_user.phone_e164) AS member_phone,
           COALESCE(member.membership_number,recipient.membership_number) AS membership_number,
           req.request_number,
           (SELECT count(*)::int FROM credit_reviews child WHERE child.parent_review_id=r.id AND child.decision IS NULL) AS pending_children,
           GREATEST(0,r.amount-r.held_amount-COALESCE((SELECT sum(child.amount) FROM credit_reviews child WHERE child.parent_review_id=r.id),0)) AS unallocated_amount
          FROM credit_reviews r
          LEFT JOIN universal_time_wallets w ON w.id=r.wallet_id
+         LEFT JOIN users subject ON subject.id=w.user_id
          LEFT JOIN community_credit_pools pool ON pool.id=r.pool_id
          LEFT JOIN organization_memberships member ON member.user_id=w.user_id AND member.organization_id=r.organization_id
          JOIN time_credit_ledger source ON source.id=r.source_entry_id
          LEFT JOIN service_requests req ON req.id=source.service_request_id
          LEFT JOIN credit_donations donation ON donation.id=source.donation_id
          LEFT JOIN organization_memberships recipient ON recipient.id=donation.recipient_membership_id
+         LEFT JOIN users recipient_user ON recipient_user.id=recipient.user_id
          WHERE r.organization_id=$1 ORDER BY r.created_at DESC,r.id DESC LIMIT $2 OFFSET $3`,
         [org, Math.min(limit, 100), (page - 1) * limit],
       );
