@@ -74,7 +74,10 @@ before(async () => {
     }
     if (req.url === '/api/auth/refresh') {
       if (revoked.has(body.refreshToken)) return send(401, { message: 'Session revoked' });
-      return send(200, { accessToken: body.refreshToken.replace('refresh-', 'access-') });
+      return send(200, {
+        accessToken: body.refreshToken.replace('refresh-', 'access-'),
+        refreshToken: `rotated-${body.refreshToken}`,
+      });
     }
     if (req.url === '/api/auth/logout') {
       if (failLogout) return send(503, { message: 'Logout service unavailable' });
@@ -83,6 +86,8 @@ before(async () => {
     }
     if (req.url === '/api/admin/unavailable')
       return send(503, { message: 'Temporary API failure' });
+    if (req.url === '/api/organizations/abc-123/memberships/unauthorized')
+      return send(401, { message: 'This membership action is not authorized' });
     const actor = req.headers.authorization?.replace('Bearer access-', '');
     if (!['admin', 'coordinator', 'volunteer', 'merchant'].includes(actor))
       return send(401, { message: 'Expired access token' });
@@ -260,13 +265,29 @@ test('gateway preserves tenant paths and queries without forwarding impersonatio
   );
   assert.equal(calls.at(-1).headers['x-user-id'], undefined);
 });
-test('expired access is refreshed and only the access cookie is renewed', async () => {
+test('expired access is refreshed and both rotated session cookies are renewed', async () => {
   const response = await session.GET(
     request('GET', undefined, 'ktb_admin_access=expired; ktb_admin_refresh=refresh-admin'),
   );
   assert.equal(response.status, 200);
   assert.equal(response.cookies.get('ktb_admin_access').value, 'access-admin');
-  assert.equal(response.cookies.get('ktb_admin_refresh'), undefined);
+  assert.equal(response.cookies.get('ktb_admin_refresh').value, 'rotated-refresh-admin');
+});
+test('a feature 401 after a successful refresh keeps the admin session active', async () => {
+  const signed = await login();
+  const response = await proxy.GET(
+    request('GET', undefined, jar(signed)),
+    {
+      params: Promise.resolve({
+        path: ['organizations', 'abc-123', 'memberships', 'unauthorized'],
+      }),
+    },
+  );
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).message, 'This membership action is not authorized');
+  assert.equal(response.cookies.get('ktb_admin_access')?.value, 'access-admin');
+  assert.equal(response.cookies.get('ktb_admin_refresh')?.value, 'rotated-refresh-admin');
+  assert.equal((await session.GET(request('GET', undefined, jar(response)))).status, 200);
 });
 test('coordinators remain subject to backend authorization', async () => {
   const signed = await login('coordinator');

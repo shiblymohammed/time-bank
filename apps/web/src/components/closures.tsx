@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { ApiError, backend } from '@/lib/api';
 import type { Action } from '@/lib/admin-types';
+import { Icon } from '@/components/icons';
 import { indiaTime } from '@/lib/request-utils';
 
 type ClosureStatus = 'REPORTED' | 'REFUSED' | 'CLOSED' | 'REOPENED' | 'OVERTURNED';
@@ -372,12 +373,22 @@ export function Closures({
   const closureBase = detail && `${base}/closures/${detail.id}`;
   const canDecideThis = (row: ClosureSummary) => isGlobal || (canDecide && !row.needsSuperAdmin);
 
+  const totalClosures = rows?.length ?? 0;
+  const pendingClosures = rows?.filter((r) => r.status === 'REPORTED').length ?? 0;
+  const closedAccounts = rows?.filter((r) => r.status === 'CLOSED').length ?? 0;
+  const transfersWaiting = rows?.filter((r) => r.transferWaiting).length ?? 0;
+
   return (
     <div className="request-workspace">
-      <div className="section-heading">
-        <h2>Account closures</h2>
-        <div className="action-row">
-          <label className="inline-check">
+      <div className="section-heading" style={{ marginBottom: '16px' }}>
+        <div>
+          <h2>Account Closures & Deceased Estates</h2>
+          <p className="section-description" style={{ margin: '4px 0 0' }}>
+            Process deceased estates, duplicate account resolutions, and credit nominee transfers.
+          </p>
+        </div>
+        <div className="action-row" style={{ alignItems: 'center', gap: '10px' }}>
+          <label className="coordinator-filter-checkbox">
             <input
               type="checkbox"
               checked={showEnded}
@@ -387,7 +398,8 @@ export function Closures({
           </label>
           {organizationId && (
             <>
-              <button className="btn btn-primary" disabled={pending} onClick={reportDeath}>
+              <button className="btn btn-primary" disabled={pending} onClick={reportDeath} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                <Icon name="plus" size={16} />
                 Report a death
               </button>
               <button className="btn btn-secondary" disabled={pending} onClick={reportDuplicate}>
@@ -397,11 +409,88 @@ export function Closures({
           )}
         </div>
       </div>
-      <p className="help-text">
-        A coordinator reports and a Municipality Admin decides. Someone in several communities goes
-        to a Super Admin. Nobody acts on their own case, and whoever reported it cannot also decide.
-        Nothing is merged or deleted.
-      </p>
+
+      {/* KPI Stat Cards */}
+      <div className="coordinator-kpi-row">
+        {[
+          {
+            name: 'Total Cases',
+            val: totalClosures,
+            icon: 'closures',
+            color: '#2563EB',
+            glow: 'rgba(37, 99, 235, 0.08)',
+            tone: 'blue',
+            pill: 'Closure records',
+          },
+          {
+            name: 'Pending Decisions',
+            val: pendingClosures,
+            icon: 'clock',
+            color: '#D97706',
+            glow: 'rgba(217, 119, 6, 0.08)',
+            tone: 'amber',
+            pill: 'Awaiting admin decision',
+          },
+          {
+            name: 'Closed Accounts',
+            val: closedAccounts,
+            icon: 'check',
+            color: '#059669',
+            glow: 'rgba(5, 150, 105, 0.08)',
+            tone: 'emerald',
+            pill: 'Settled accounts',
+          },
+          {
+            name: 'Transfers Waiting',
+            val: transfersWaiting,
+            icon: 'wallet',
+            color: '#7C3AED',
+            glow: 'rgba(124, 58, 237, 0.08)',
+            tone: 'purple',
+            pill: 'Nominee disbursements',
+          },
+        ].map((kpi) => (
+          <div
+            className={`modern-kpi-card kpi-tone-${kpi.tone}`}
+            key={kpi.name}
+            style={
+              {
+                '--kpi-color': kpi.color,
+                '--kpi-glow': kpi.glow,
+              } as React.CSSProperties
+            }
+          >
+            <div className="kpi-card-header">
+              <span className="kpi-card-label">{kpi.name}</span>
+              <div className="kpi-card-icon" aria-hidden="true">
+                <Icon name={kpi.icon as any} size={18} />
+              </div>
+            </div>
+            <div className="kpi-card-body">
+              <strong className="kpi-card-value">{kpi.val}</strong>
+            </div>
+            <div className="kpi-card-footer">
+              <span className="kpi-card-pill">
+                <span className="kpi-pill-dot" aria-hidden="true" />
+                {kpi.pill}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Governance Banner */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '14px 16px', background: 'rgba(37, 99, 235, 0.05)', border: '1px solid rgba(37, 99, 235, 0.15)', borderRadius: '12px', marginBottom: '18px' }}>
+        <div style={{ color: '#2563eb', flexShrink: 0, marginTop: '2px' }}>
+          <Icon name="closures" size={20} />
+        </div>
+        <div style={{ fontSize: '0.80rem', lineHeight: '1.45', color: '#334155' }}>
+          <strong style={{ color: '#1e3a8a', display: 'block', marginBottom: '2px' }}>
+            Account Succession & Closure Protocol
+          </strong>
+          A coordinator reports and a Municipality Administrator decides. Someone in several communities escalates to a Super Admin. Nobody acts on their own case, and whoever reported it cannot also decide. Nothing is permanently purged from the audit log.
+        </div>
+      </div>
       {error && (
         <p role="alert" className="error-message">
           {error}

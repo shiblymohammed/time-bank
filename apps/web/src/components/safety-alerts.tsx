@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { ApiError, backend } from '@/lib/api';
 import type { Action } from '@/lib/admin-types';
+import { Icon } from '@/components/icons';
 import { indiaTime } from '@/lib/request-utils';
 
 type Visit = {
@@ -130,98 +131,256 @@ export function SafetyAlerts({
       submit: (values) => backend(`${base}/${alert.id}/${path}`, 'POST', { notes: values.notes }),
     });
 
+  const totalAlerts = alerts?.length ?? 0;
+  const openAlerts = alerts?.filter((a) => a.status === 'OPEN').length ?? 0;
+  const acknowledgedAlerts = alerts?.filter((a) => a.status === 'ACKNOWLEDGED').length ?? 0;
+  const resolvedAlerts = alerts?.filter((a) => a.status === 'RESOLVED').length ?? 0;
+
   return (
     <div className="request-workspace">
-      <div className="section-heading">
-        <h2>Safety alerts</h2>
-        <label className="inline-check">
+      <div className="section-heading" style={{ marginBottom: '16px' }}>
+        <div>
+          <h2>Safety Alerts & Incident Response</h2>
+          <p className="section-description" style={{ margin: '4px 0 0' }}>
+            Real-time monitoring of paused or emergency-interrupted service visits.
+          </p>
+        </div>
+        <label className="coordinator-filter-checkbox">
           <input
             type="checkbox"
             checked={showClosed}
             onChange={(event) => setShowClosed(event.target.checked)}
-          />{' '}
+          />
           Show closed alerts
         </label>
       </div>
-      <p className="help-text">
-        These are confidential. The other person on the visit is told only that it is paused or
-        ended, never who raised the alert or why. This list refreshes every 30 seconds.
-      </p>
+
+      {/* KPI Stat Cards */}
+      <div className="coordinator-kpi-row">
+        {[
+          {
+            name: 'Active Alerts',
+            val: openAlerts,
+            icon: 'safety',
+            color: '#E11D48',
+            glow: 'rgba(225, 29, 72, 0.08)',
+            tone: 'rose',
+            pill: 'Immediate attention',
+          },
+          {
+            name: 'Being Handled',
+            val: acknowledgedAlerts,
+            icon: 'clock',
+            color: '#D97706',
+            glow: 'rgba(217, 119, 6, 0.08)',
+            tone: 'amber',
+            pill: 'Staff investigating',
+          },
+          {
+            name: 'Resolved Alerts',
+            val: resolvedAlerts,
+            icon: 'check',
+            color: '#059669',
+            glow: 'rgba(5, 150, 105, 0.08)',
+            tone: 'emerald',
+            pill: 'Resolved & cleared',
+          },
+          {
+            name: 'Total Incidents',
+            val: totalAlerts,
+            icon: 'operations',
+            color: '#2563EB',
+            glow: 'rgba(37, 99, 235, 0.08)',
+            tone: 'blue',
+            pill: showClosed ? 'All recorded' : 'Active queue',
+          },
+        ].map((kpi) => (
+          <div
+            className={`modern-kpi-card kpi-tone-${kpi.tone}`}
+            key={kpi.name}
+            style={
+              {
+                '--kpi-color': kpi.color,
+                '--kpi-glow': kpi.glow,
+              } as React.CSSProperties
+            }
+          >
+            <div className="kpi-card-header">
+              <span className="kpi-card-label">{kpi.name}</span>
+              <div className="kpi-card-icon" aria-hidden="true">
+                <Icon name={kpi.icon as any} size={18} />
+              </div>
+            </div>
+            <div className="kpi-card-body">
+              <strong className="kpi-card-value">{kpi.val}</strong>
+            </div>
+            <div className="kpi-card-footer">
+              <span className="kpi-card-pill">
+                <span className="kpi-pill-dot" aria-hidden="true" />
+                {kpi.pill}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Emergency Protocol Banner */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '14px 16px', background: 'rgba(225, 29, 72, 0.05)', border: '1px solid rgba(225, 29, 72, 0.18)', borderRadius: '12px', marginBottom: '18px' }}>
+        <div style={{ color: '#e11d48', flexShrink: 0, marginTop: '2px' }}>
+          <Icon name="safety" size={20} />
+        </div>
+        <div style={{ fontSize: '0.80rem', lineHeight: '1.45', color: '#334155' }}>
+          <strong style={{ color: '#9f1239', display: 'block', marginBottom: '2px' }}>
+            Emergency Protocol & Confidentiality
+          </strong>
+          These alerts are confidential. The other participant on the visit is informed only that it has been paused or ended, never who raised the alert or the underlying reason. Auto-refreshes every 30 seconds.
+        </div>
+      </div>
+
       {error && (
         <p role="alert" className="error-message">
           {error}
         </p>
       )}
       {!alerts && !error && <p role="status">Loading safety alerts…</p>}
+
+      {/* Empty State */}
       {alerts?.length === 0 && (
-        <p className="glass-panel empty-state">
-          {showClosed ? 'No safety alerts yet.' : 'No safety alerts need you right now.'}
-        </p>
+        <div className="glass-panel empty-state" style={{ padding: '36px 20px', textAlign: 'center', background: '#ffffff', borderRadius: '14px', border: '1px solid #e2e8f0', margin: '16px 0' }}>
+          <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#ecfdf5', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
+            <Icon name="check" size={24} />
+          </div>
+          <h4 style={{ fontSize: '1rem', fontWeight: 700, color: '#0f172a', margin: '0 0 6px' }}>
+            {showClosed ? 'No safety alerts recorded' : 'All clear — No active safety alerts'}
+          </h4>
+          <p style={{ fontSize: '0.82rem', color: '#64748b', margin: 0 }}>
+            {showClosed
+              ? 'There are currently no closed safety alerts on record.'
+              : 'Any emergency visit pauses or volunteer incidents will appear here immediately.'}
+          </p>
+        </div>
       )}
+
+      {/* Alert Cards */}
       {alerts?.map((alert) => {
         const paused = alert.visits.some((visit) => visit.pausedAt);
         const allowed = alert.visits.some((visit) => visit.restartAllowedAt);
         const closed = alert.status === 'RESOLVED';
         const underWay = alert.visits.some((visit) => visit.status === 'IN_PROGRESS');
+        const alertTone = closed ? 'emerald' : alert.status === 'OPEN' ? 'rose' : 'amber';
+
         return (
-          <section className="detail-panel glass-panel" key={alert.id} data-testid="safety-alert">
-            <h3>
-              {closed ? 'Closed' : alert.status === 'OPEN' ? 'New alert' : 'Being handled'} ·{' '}
+          <section
+            className="detail-panel glass-panel"
+            key={alert.id}
+            data-testid="safety-alert"
+            style={{
+              background: '#ffffff',
+              border: '1px solid #e2e8f0',
+              borderLeft: `4px solid ${closed ? '#10b981' : alert.status === 'OPEN' ? '#f43f5e' : '#f59e0b'}`,
+              borderRadius: '12px',
+              padding: '20px',
+              marginBottom: '16px',
+              boxShadow: '0 1px 3px rgba(15, 23, 42, 0.03)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span className={`kpi-card-pill kpi-tone-${alertTone}`} style={{ fontSize: '0.74rem' }}>
+                  <span className="kpi-pill-dot" />
+                  {closed ? 'Resolved' : alert.status === 'OPEN' ? 'Urgent: New Alert' : 'Being Handled'}
+                </span>
+                <span className="mono" style={{ fontSize: '0.82rem', fontWeight: 700, color: '#475569' }}>
+                  {alert.request.requestNumber}
+                </span>
+              </div>
+              <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                Raised: {indiaTime(alert.createdAt)}
+              </span>
+            </div>
+
+            <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', margin: '0 0 8px' }}>
               {alert.request.serviceName}
             </h3>
-            <p>
-              Raised {indiaTime(alert.createdAt)} by{' '}
-              <strong>{alert.raisedByName || 'a member'}</strong> ({role(alert.raisedByRole)}), who
-              chose to {alert.action === 'END' ? 'end the visit' : 'pause the visit'}.
+
+            <p style={{ margin: '0 0 12px', fontSize: '0.85rem', color: '#334155', lineHeight: '1.45' }}>
+              Raised by <strong>{alert.raisedByName || 'a member'}</strong> ({role(alert.raisedByRole)}), who chose to{' '}
+              <strong style={{ color: alert.action === 'END' ? '#e11d48' : '#d97706' }}>
+                {alert.action === 'END' ? 'end the visit' : 'pause the visit'}
+              </strong>.
             </p>
-            {alert.raisedOnPhoneAt && (
-              <p data-testid="raised-offline">
-                <strong>Recorded offline.</strong> Tapped on the phone{' '}
-                {indiaTime(alert.raisedOnPhoneAt)} with no signal; it reached us{' '}
-                {indiaTime(alert.createdAt)}.
-              </p>
+
+            {alert.notes && (
+              <div style={{ padding: '10px 14px', background: '#fff1f2', borderRadius: '8px', border: '1px solid #ffe4e6', color: '#9f1239', fontSize: '0.82rem', fontStyle: 'italic', marginBottom: '14px' }}>
+                “{alert.notes}”
+              </div>
             )}
-            {alert.notes && <p>“{alert.notes}”</p>}
-            <p>
-              <strong>Call:</strong> {alert.raisedByName || 'Person who raised it'}{' '}
-              {alert.raisedByPhone}
-            </p>
-            <p>
-              Beneficiary: {alert.request.beneficiaryName || 'No name'} ·{' '}
-              {alert.request.beneficiaryPhone}
-            </p>
-            {alert.visits.map((visit) => (
-              <p key={visit.id}>
-                Volunteer: {visit.volunteerName || 'No name'} · {visit.volunteerPhone} ·{' '}
-                {visit.pausedAt
-                  ? visit.restartAllowedAt
-                    ? 'Paused, cleared to restart'
-                    : 'Paused'
-                  : visit.status === 'IN_PROGRESS'
-                    ? 'Visit restarted'
-                    : `Visit ended${visit.reportedMinutes ? ` after ${visit.reportedMinutes} minutes` : ''}`}
-              </p>
-            ))}
-            <p>
-              Request {alert.request.requestNumber} · {alert.request.address}
-            </p>
+
+            {/* Contact & Visit Detail Cards */}
+            <div className="request-detail-grid" style={{ marginBottom: '14px' }}>
+              <div className="request-detail-card" style={{ padding: '12px 14px' }}>
+                <h5 className="request-detail-card-title">
+                  <Icon name="phoneRecovery" size={15} /> Direct Contact
+                </h5>
+                <div className="request-detail-row">
+                  <span className="row-label">Reporter ({role(alert.raisedByRole)})</span>
+                  <span className="row-value">{alert.raisedByName || 'Member'} · {alert.raisedByPhone}</span>
+                </div>
+                <div className="request-detail-row">
+                  <span className="row-label">Beneficiary</span>
+                  <span className="row-value">{alert.request.beneficiaryName || 'N/A'} · {alert.request.beneficiaryPhone}</span>
+                </div>
+                <div className="request-detail-row">
+                  <span className="row-label">Location</span>
+                  <span className="row-value">{alert.request.address}</span>
+                </div>
+              </div>
+
+              <div className="request-detail-card" style={{ padding: '12px 14px' }}>
+                <h5 className="request-detail-card-title">
+                  <Icon name="users" size={15} /> Assigned Volunteer Visits ({alert.visits.length})
+                </h5>
+                {alert.visits.map((visit) => (
+                  <div key={visit.id} className="request-detail-row">
+                    <span className="row-label">{visit.volunteerName || 'Volunteer'} ({visit.volunteerPhone})</span>
+                    <span className="row-value">
+                      {visit.pausedAt
+                        ? visit.restartAllowedAt
+                          ? 'Paused, cleared to restart'
+                          : 'Paused'
+                        : visit.status === 'IN_PROGRESS'
+                          ? 'Visit restarted'
+                          : `Ended (${visit.reportedMinutes ?? 0}m)`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             {alert.visits.some((visit) => visit.creditsPending) && (
-              <p className="help-text">
-                No credits are paid until you decide. Use Pay for visit or Not delivered on this
-                request in Requests &amp; matching.
+              <p className="help-text" style={{ padding: '8px 12px', background: '#eff6ff', borderRadius: '8px', border: '1px solid #dbeafe', color: '#1d4ed8', margin: '0 0 12px' }}>
+                ℹ️ No credits are paid until you decide. Use Pay for visit or Not delivered on this request in Requests &amp; matching.
               </p>
             )}
-            {alert.staffNotes && <p className="help-text">Staff notes: {alert.staffNotes}</p>}
+
+            {alert.staffNotes && (
+              <p className="help-text" style={{ margin: '0 0 10px', color: '#64748b' }}>
+                <strong>Staff notes:</strong> {alert.staffNotes}
+              </p>
+            )}
+
             {closed && alert.resolvedAt && (
-              <p className="help-text">
-                {alert.outcome === 'RESTARTED' ? 'Visit restarted' : 'Visit ended'}{' '}
-                {indiaTime(alert.resolvedAt)}
+              <p className="help-text" style={{ margin: '0 0 10px', color: '#059669', fontWeight: 600 }}>
+                ✓ {alert.outcome === 'RESTARTED' ? 'Visit restarted' : 'Visit ended'} at {indiaTime(alert.resolvedAt)}
               </p>
             )}
+
+            {/* Action Row */}
             {!closed && (
-              <div className="action-row">
+              <div className="action-row" style={{ marginTop: '12px' }}>
                 {alert.status === 'OPEN' && (
                   <button
+                    type="button"
                     className="btn btn-primary"
                     disabled={pending}
                     onClick={() =>
@@ -239,6 +398,7 @@ export function SafetyAlerts({
                 )}
                 {paused && !allowed && (
                   <button
+                    type="button"
                     className="btn btn-secondary"
                     disabled={pending}
                     onClick={() =>
@@ -255,6 +415,7 @@ export function SafetyAlerts({
                 )}
                 {underWay && (
                   <button
+                    type="button"
                     className="btn btn-danger"
                     disabled={pending}
                     onClick={() =>
@@ -271,6 +432,7 @@ export function SafetyAlerts({
                 )}
                 {!underWay && (
                   <button
+                    type="button"
                     className="btn btn-secondary"
                     disabled={pending}
                     onClick={() =>

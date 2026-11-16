@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { ApiError, backend } from '@/lib/api';
 import type { Action } from '@/lib/admin-types';
+import { Icon } from '@/components/icons';
 import { indiaTime } from '@/lib/request-utils';
 
 type RecoveryStatus = 'OPENED' | 'CONFIRMED' | 'COMPLETED' | 'REFUSED' | 'WITHDRAWN' | 'REVERSED';
@@ -252,12 +253,22 @@ export function PhoneRecoveries({
   const canDecideThis = (row: RecoverySummary) => isGlobal || (canDecide && !row.needsSuperAdmin);
   const isOpen = (row: RecoverySummary) => row.status === 'OPENED' || row.status === 'CONFIRMED';
 
+  const totalRecoveries = rows?.length ?? 0;
+  const waitingConfirm = rows?.filter((r) => r.status === 'OPENED').length ?? 0;
+  const waitingDecision = rows?.filter((r) => r.status === 'CONFIRMED').length ?? 0;
+  const completedCount = rows?.filter((r) => r.status === 'COMPLETED').length ?? 0;
+
   return (
     <div className="request-workspace">
-      <div className="section-heading">
-        <h2>Phone number changes</h2>
-        <div className="action-row">
-          <label className="inline-check">
+      <div className="section-heading" style={{ marginBottom: '16px' }}>
+        <div>
+          <h2>Phone Number Changes & Recovery</h2>
+          <p className="section-description" style={{ margin: '4px 0 0' }}>
+            Secure identity verification and credential transfer for lost phones or changed SIM cards.
+          </p>
+        </div>
+        <div className="action-row" style={{ alignItems: 'center', gap: '10px' }}>
+          <label className="coordinator-filter-checkbox">
             <input
               type="checkbox"
               checked={showEnded}
@@ -266,17 +277,95 @@ export function PhoneRecoveries({
             Show ended and refused
           </label>
           {organizationId && (
-            <button className="btn btn-primary" disabled={pending} onClick={openCase}>
+            <button className="btn btn-primary" disabled={pending} onClick={openCase} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <Icon name="plus" size={16} />
               Change a phone number
             </button>
           )}
         </div>
       </div>
-      <p className="help-text">
-        A coordinator checks the person&apos;s ID, the new number confirms with a code, and a
-        Municipality Admin decides. Someone in several communities, or a document that does not
-        match, goes to a Super Admin. The account, wallet and memberships stay the same.
-      </p>
+
+      {/* KPI Stat Cards */}
+      <div className="coordinator-kpi-row">
+        {[
+          {
+            name: 'Total Requests',
+            val: totalRecoveries,
+            icon: 'phoneRecovery',
+            color: '#2563EB',
+            glow: 'rgba(37, 99, 235, 0.08)',
+            tone: 'blue',
+            pill: 'Number update records',
+          },
+          {
+            name: 'Awaiting Verification',
+            val: waitingConfirm,
+            icon: 'clock',
+            color: '#D97706',
+            glow: 'rgba(217, 119, 6, 0.08)',
+            tone: 'amber',
+            pill: 'Code sent to new phone',
+          },
+          {
+            name: 'Needs Decision',
+            val: waitingDecision,
+            icon: 'check',
+            color: '#7C3AED',
+            glow: 'rgba(124, 58, 237, 0.08)',
+            tone: 'purple',
+            pill: 'Ready for admin approval',
+          },
+          {
+            name: 'Successfully Transferred',
+            val: completedCount,
+            icon: 'check',
+            color: '#059669',
+            glow: 'rgba(5, 150, 105, 0.08)',
+            tone: 'emerald',
+            pill: 'Completed transfers',
+          },
+        ].map((kpi) => (
+          <div
+            className={`modern-kpi-card kpi-tone-${kpi.tone}`}
+            key={kpi.name}
+            style={
+              {
+                '--kpi-color': kpi.color,
+                '--kpi-glow': kpi.glow,
+              } as React.CSSProperties
+            }
+          >
+            <div className="kpi-card-header">
+              <span className="kpi-card-label">{kpi.name}</span>
+              <div className="kpi-card-icon" aria-hidden="true">
+                <Icon name={kpi.icon as any} size={18} />
+              </div>
+            </div>
+            <div className="kpi-card-body">
+              <strong className="kpi-card-value">{kpi.val}</strong>
+            </div>
+            <div className="kpi-card-footer">
+              <span className="kpi-card-pill">
+                <span className="kpi-pill-dot" aria-hidden="true" />
+                {kpi.pill}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Governance Banner */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '14px 16px', background: 'rgba(37, 99, 235, 0.05)', border: '1px solid rgba(37, 99, 235, 0.15)', borderRadius: '12px', marginBottom: '18px' }}>
+        <div style={{ color: '#2563eb', flexShrink: 0, marginTop: '2px' }}>
+          <Icon name="phoneRecovery" size={20} />
+        </div>
+        <div style={{ fontSize: '0.80rem', lineHeight: '1.45', color: '#334155' }}>
+          <strong style={{ color: '#1e3a8a', display: 'block', marginBottom: '2px' }}>
+            Physical ID Verification & Anti-Hijack Guard
+          </strong>
+          A coordinator physically inspects the member&apos;s government ID in person, the new number confirms with an SMS code, and a Municipality Admin authorizes the migration. The account, wallets, and credits remain intact.
+        </div>
+      </div>
       {error && (
         <p role="alert" className="error-message">
           {error}

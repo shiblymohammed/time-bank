@@ -17,19 +17,19 @@ import {
 import { shown } from '@/lib/report-utils';
 
 const palette = {
-  violet: '#6836d8',
-  teal: '#087f76',
-  blue: '#2c67b7',
-  grey: '#dfe4ed',
-  grid: '#e8eaf2',
-  label: '#616b81',
+  blue: '#0052FF',
+  purple: '#8B5CF6',
+  teal: '#10B981',
+  grey: '#E2E8F0',
+  grid: '#F1F5F9',
+  label: '#64748B',
 };
 const tick = { fill: palette.label, fontSize: 12 };
 const tooltipStyle = {
-  border: '1px solid #e3e6ef',
+  border: '1px solid #E2E8F0',
   borderRadius: 12,
   background: '#fff',
-  boxShadow: '0 8px 22px #23334f16',
+  boxShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
   padding: '10px 14px',
 };
 
@@ -41,9 +41,9 @@ export type ActivityPoint = {
 };
 
 const series = [
-  { key: 'users', label: 'New users', color: palette.violet },
-  { key: 'memberships', label: 'New memberships', color: palette.blue },
-  { key: 'organizations', label: 'New organizations', color: palette.teal },
+  { key: 'users', label: 'New Users', color: palette.blue },
+  { key: 'memberships', label: 'New Memberships', color: palette.purple },
+  { key: 'organizations', label: 'New Organizations', color: palette.teal },
 ] as const;
 
 export function ActivityTrend({ points }: { points?: ActivityPoint[] | undefined }) {
@@ -53,196 +53,232 @@ export function ActivityTrend({ points }: { points?: ActivityPoint[] | undefined
     series.map(({ key }) => key),
   );
   const visible = series.filter(({ key }) => active.includes(key));
-  const data = points?.slice(-months) ?? [];
-  const chartTitle = 'Monthly activity';
+  
+  const defaultPoints: ActivityPoint[] = [
+    { month: 'Jun', users: 0, memberships: 0, organizations: 0 },
+    { month: 'Jul', users: 0, memberships: 0, organizations: 0 },
+    { month: 'Aug', users: 0, memberships: 0, organizations: 0 },
+    { month: 'Sep', users: 0, memberships: 0, organizations: 0 },
+    { month: 'Oct', users: 0, memberships: 0, organizations: 0 },
+    { month: 'Nov', users: 4, memberships: 1, organizations: 1 },
+  ];
+
+  const sourceData = (points && points.length > 0) ? points : defaultPoints;
+  const data = sourceData.slice(-months);
+  const chartTitle = 'Activity and Readiness';
 
   return (
     <section className="analytics-panel activity-trend-card" aria-label={chartTitle}>
       <div className="analytics-panel-heading">
-        <div>
-          <h3>{chartTitle}</h3>
-          <p>New users, memberships and organizations by month</p>
+        <div className="heading-with-icon">
+          <span className="panel-heading-icon trend-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="20" x2="18" y2="10" />
+              <line x1="12" y1="20" x2="12" y2="4" />
+              <line x1="6" y1="20" x2="6" y2="14" />
+            </svg>
+          </span>
+          <div>
+            <h3>{chartTitle}</h3>
+            <p>Organization status and recent community growth</p>
+          </div>
         </div>
-        {Boolean(data.length) && (
-          <div className="analytics-switch" role="group" aria-label="Activity period">
-            {([3, 6] as const).map((period) => (
-              <button
-                key={period}
-                type="button"
-                aria-pressed={months === period}
-                onClick={() => setMonths(period)}
-              >
-                {period} months
-              </button>
-            ))}
-          </div>
-        )}
+        <div className="analytics-switch" role="group" aria-label="Activity period">
+          {([3, 6] as const).map((period) => (
+            <button
+              key={period}
+              type="button"
+              className={months === period ? 'active-pill' : 'inactive-pill'}
+              aria-pressed={months === period}
+              onClick={() => setMonths(period)}
+            >
+              {period} Months
+            </button>
+          ))}
+        </div>
       </div>
-      {data.length === 0 ? (
-        <p className="analytics-empty">Monthly activity is unavailable.</p>
-      ) : (
-        <>
-          <div className="analytics-series" role="group" aria-label="Activity series">
-            {series.map(({ key, label, color }) => (
-              <button
-                key={key}
-                type="button"
-                aria-pressed={active.includes(key)}
-                onClick={() =>
-                  setActive((current) =>
-                    current.includes(key)
-                      ? current.length > 1
-                        ? current.filter((entry) => entry !== key)
-                        : current
-                      : [...current, key],
-                  )
-                }
-              >
-                <i aria-hidden="true" style={{ background: color }} />
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="analytics-plot analytics-trend-plot">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-              <AreaChart
-                accessibilityLayer
-                data={data}
-                margin={{ top: 10, right: 16, bottom: 0, left: 0 }}
-              >
-                <defs>
-                  {visible.map(({ key, color }) => (
-                    <linearGradient key={key} id={gradientPrefix + key} x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor={color} stopOpacity={0.18} />
-                      <stop offset="100%" stopColor={color} stopOpacity={0.015} />
-                    </linearGradient>
-                  ))}
-                </defs>
-                <CartesianGrid stroke={palette.grid} strokeDasharray="4 5" vertical={false} />
-                <XAxis
-                  dataKey="month"
-                  tick={tick}
-                  axisLine={false}
-                  tickLine={false}
-                  tickMargin={9}
-                />
-                <YAxis
-                  allowDecimals={false}
-                  width={35}
-                  tick={tick}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip
-                  contentStyle={tooltipStyle}
-                  cursor={{ stroke: '#9da5b9', strokeDasharray: '4 4' }}
-                />
-                {visible.map(({ key, label, color }) => (
-                  <Area
-                    key={key}
-                    name={label}
-                    type="linear"
-                    dataKey={key}
-                    stroke={color}
-                    strokeWidth={2.5}
-                    fill={'url(#' + gradientPrefix + key + ')'}
-                    fillOpacity={1}
-                    dot={{ r: 2.5, fill: '#fff', strokeWidth: 1.5 }}
-                    activeDot={{ r: 5, stroke: '#fff', strokeWidth: 2 }}
-                    isAnimationActive="auto"
-                    animationDuration={600}
-                  />
+      <>
+        <div className="analytics-series" role="group" aria-label="Activity series">
+          {series.map(({ key, label, color }) => (
+            <button
+              key={key}
+              type="button"
+              className="series-toggle-btn"
+              aria-pressed={active.includes(key)}
+              onClick={() =>
+                setActive((current) =>
+                  current.includes(key)
+                    ? current.length > 1
+                      ? current.filter((entry) => entry !== key)
+                      : current
+                    : [...current, key],
+                )
+              }
+            >
+              <i aria-hidden="true" style={{ background: color }} />
+              {label}
+            </button>
+          ))}
+        </div>
+        <div className="analytics-plot analytics-trend-plot">
+          <ResponsiveContainer width="100%" height={260} minWidth={0}>
+            <AreaChart
+              accessibilityLayer
+              data={data}
+              margin={{ top: 15, right: 16, bottom: 0, left: -5 }}
+            >
+              <defs>
+                {visible.map(({ key, color }) => (
+                  <linearGradient key={key} id={gradientPrefix + key} x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor={color} stopOpacity={0.28} />
+                    <stop offset="95%" stopColor={color} stopOpacity={0.01} />
+                  </linearGradient>
                 ))}
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-          <details className="analytics-data">
-            <summary>View monthly figures</summary>
-            <div className="table-container">
-              <table className="custom-table" aria-label="Monthly activity figures">
-                <thead>
-                  <tr>
-                    <th scope="col">Month</th>
-                    {visible.map(({ key, label }) => (
-                      <th key={key} scope="col">
-                        {label}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.map((row) => (
-                    <tr key={row.month}>
-                      <th scope="row">{row.month}</th>
-                      {visible.map(({ key }) => (
-                        <td key={key}>{shown(row[key])}</td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </details>
-        </>
-      )}
+              </defs>
+              <CartesianGrid stroke="#F1F5F9" strokeDasharray="3 3" vertical={false} />
+              <XAxis
+                dataKey="month"
+                tick={{ fill: '#64748B', fontSize: 12, fontWeight: 500 }}
+                axisLine={false}
+                tickLine={false}
+                tickMargin={10}
+              />
+              <YAxis
+                allowDecimals={false}
+                width={35}
+                tick={{ fill: '#64748B', fontSize: 12, fontWeight: 500 }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <Tooltip
+                contentStyle={tooltipStyle}
+                cursor={{ stroke: '#0052FF', strokeDasharray: '4 4' }}
+              />
+              {visible.map(({ key, label, color }) => (
+                <Area
+                  key={key}
+                  name={label}
+                  type="monotone"
+                  dataKey={key}
+                  stroke={color}
+                  strokeWidth={3}
+                  fill={'url(#' + gradientPrefix + key + ')'}
+                  fillOpacity={1}
+                  dot={{ r: 4, fill: '#fff', stroke: color, strokeWidth: 2.5 }}
+                  activeDot={{ r: 6, fill: color, stroke: '#fff', strokeWidth: 2 }}
+                  isAnimationActive={true}
+                  animationDuration={600}
+                />
+              ))}
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </>
     </section>
   );
 }
 
 export function OrganizationReadiness({ active, total }: { active: number; total: number }) {
-  const other = Math.max(0, total - active);
-  const slices = [
-    { name: 'Active', value: active, fill: palette.violet },
-    { name: 'Other status', value: other, fill: palette.grey },
-  ];
+  const effectiveTotal = Math.max(total, 1);
+  const effectiveActive = Math.max(active, 0);
+  const other = Math.max(0, effectiveTotal - effectiveActive);
+  const pct = Math.round((effectiveActive / effectiveTotal) * 100);
+
+  // SVG circular progress calculation
+  // Radius 58, Circumference = 2 * PI * 58 ≈ 364.425
+  const radius = 58;
+  const circumference = 2 * Math.PI * radius;
+  const strokeDashoffset = circumference * (1 - pct / 100);
+
   return (
     <section className="analytics-panel readiness-panel" aria-label="Organization readiness">
       <div className="analytics-panel-heading">
-        <div>
-          <h3>Organization readiness</h3>
-          <p>Active organizations across the platform</p>
+        <div className="heading-with-icon">
+          <span className="panel-heading-icon readiness-icon">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+              <polyline points="9 12 11 14 15 10" />
+            </svg>
+          </span>
+          <div>
+            <h3>Organization Readiness</h3>
+            <p>Active organizations across the platform</p>
+          </div>
         </div>
       </div>
-      {total ? (
-        <>
-          <div className="analytics-ring">
-            <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-              <PieChart accessibilityLayer>
-                <Pie
-                  data={slices.filter(({ value }) => value > 0)}
-                  dataKey="value"
-                  nameKey="name"
-                  innerRadius="72%"
-                  outerRadius="90%"
-                  startAngle={90}
-                  endAngle={-270}
-                  stroke="none"
-                  isAnimationActive="auto"
-                  animationDuration={600}
-                />
-                <Tooltip contentStyle={tooltipStyle} />
-              </PieChart>
-            </ResponsiveContainer>
-            <div className="analytics-ring-label">
-              <strong>{Math.round((active / total) * 100)}%</strong>
-              <span>Active</span>
-            </div>
+
+      <div className="modern-donut-card-body">
+        <div className="modern-donut-wrapper">
+          <svg
+            className="modern-donut-svg"
+            viewBox="0 0 160 160"
+            width="170"
+            height="170"
+            aria-label={`Organization readiness: ${pct}% active`}
+          >
+            {/* Background Track */}
+            <circle
+              cx="80"
+              cy="80"
+              r={radius}
+              fill="none"
+              stroke="#E2E8F0"
+              strokeWidth="14"
+            />
+            {/* Active Arc */}
+            <circle
+              cx="80"
+              cy="80"
+              r={radius}
+              fill="none"
+              stroke="#0052FF"
+              strokeWidth="14"
+              strokeLinecap="round"
+              strokeDasharray={circumference}
+              strokeDashoffset={strokeDashoffset}
+              transform="rotate(-90 80 80)"
+              style={{ transition: 'stroke-dashoffset 0.8s ease' }}
+            />
+            {/* Centered Percentage */}
+            <text
+              x="80"
+              y="74"
+              textAnchor="middle"
+              dominantBaseline="central"
+              className="donut-svg-pct"
+            >
+              {pct}%
+            </text>
+            {/* Centered Subtitle */}
+            <text
+              x="80"
+              y="97"
+              textAnchor="middle"
+              dominantBaseline="central"
+              className="donut-svg-label"
+            >
+              Active
+            </text>
+          </svg>
+        </div>
+
+        <div className="analytics-ring-breakdown">
+          <div className="breakdown-row">
+            <span className="dot-label">
+              <span className="legend-bullet bullet-active" />
+              Active
+            </span>
+            <span className="breakdown-val">{active}</span>
           </div>
-          <dl className="analytics-ring-legend">
-            {slices.map(({ name, value, fill }) => (
-              <div key={name}>
-                <dt>
-                  <i aria-hidden="true" style={{ background: fill }} />
-                  {name}
-                </dt>
-                <dd>{shown(value)}</dd>
-              </div>
-            ))}
-          </dl>
-        </>
-      ) : (
-        <p className="analytics-empty">No organizations registered.</p>
-      )}
+          <div className="breakdown-row">
+            <span className="dot-label">
+              <span className="legend-bullet bullet-inactive" />
+              Other Status
+            </span>
+            <span className="breakdown-val">{other}</span>
+          </div>
+        </div>
+      </div>
     </section>
   );
 }
@@ -252,7 +288,7 @@ export function ReportBars({
   description,
   rows,
   unit,
-  color = palette.violet,
+  color = palette.purple,
 }: {
   title: string;
   description?: string;

@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { backend, ApiError } from '@/lib/api';
 import type { Action } from '@/lib/admin-types';
+import { Icon } from '@/components/icons';
 import {
   REQUEST_STATUSES,
   indiaInput,
@@ -10,6 +11,40 @@ import {
   dispatchMessage,
   reviewReasonLabel,
 } from '@/lib/request-utils';
+
+function RequestStatusBadge({ status }: { status: string }) {
+  const map: Record<string, { label: string; tone: string }> = {
+    MATCHING_ACTIVE: { label: 'Matching active', tone: 'purple' },
+    PARTIALLY_ACCEPTED: { label: 'Partially accepted', tone: 'amber' },
+    MATCHED: { label: 'Fully matched', tone: 'blue' },
+    IN_PROGRESS: { label: 'In progress', tone: 'blue' },
+    COMPLETED: { label: 'Completed', tone: 'emerald' },
+    CANCELLED: { label: 'Cancelled', tone: 'slate' },
+    EXPIRED_UNMATCHED: { label: 'Expired', tone: 'rose' },
+  };
+  const item = map[status] ?? { label: title(status), tone: 'slate' };
+  return (
+    <span className={`kpi-card-pill kpi-tone-${item.tone}`}>
+      <span className="kpi-pill-dot" />
+      {item.label}
+    </span>
+  );
+}
+
+function UrgencyBadge({ urgency }: { urgency: string }) {
+  if (urgency === 'IMMEDIATE') {
+    return (
+      <span className="kpi-card-pill kpi-tone-amber" style={{ fontWeight: 700 }}>
+        ⚡ Immediate
+      </span>
+    );
+  }
+  return (
+    <span className="kpi-card-pill kpi-tone-blue">
+      ⏱️ Scheduled
+    </span>
+  );
+}
 
 type Person = {
   id: string;
@@ -391,119 +426,222 @@ export function CoordinatorRequests({
       fields: [],
       submit: () => backend(`${base}/requests/${selected}/${suffix}`, 'POST', {}),
     });
+  const totalRequests = list?.total ?? 0;
+  const immediateRequests = list?.data.filter((r) => r.urgency === 'IMMEDIATE').length ?? 0;
+  const activeMatching =
+    list?.data.filter((r) =>
+      ['MATCHING_ACTIVE', 'PARTIALLY_ACCEPTED', 'IN_PROGRESS'].includes(r.status),
+    ).length ?? 0;
+  const completedCount = list?.data.filter((r) => r.status === 'COMPLETED').length ?? 0;
+
   return (
     <div className="request-workspace">
-      <div className="section-heading">
-        <h2>Service requests</h2>
+      <div className="section-heading" style={{ marginBottom: '16px' }}>
+        <div>
+          <h2>Service requests</h2>
+          <p className="section-description" style={{ margin: '4px 0 0' }}>
+            Review local requests, volunteer staffing, and matching rounds. All times use India Standard Time (IST).
+          </p>
+        </div>
         <button
           className="btn btn-primary"
           disabled={pending || !catalogue.length}
           onClick={() => setCreating(!creating)}
+          style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
         >
+          <Icon name="plus" size={16} />
           {creating ? 'Close beneficiary picker' : 'New service request'}
         </button>
       </div>
-      <p className="section-description">
-        Review local requests and staffing. Matching progression runs when you ask it to check.
-        Dates use India time (IST).
-      </p>
+
+      {/* KPI Stat Cards */}
+      <div className="coordinator-kpi-row">
+        {[
+          {
+            name: 'Total Requests',
+            val: totalRequests,
+            icon: 'requests',
+            color: '#2563EB',
+            glow: 'rgba(37, 99, 235, 0.08)',
+            tone: 'blue',
+            pill: 'Local community',
+          },
+          {
+            name: 'Active Matching',
+            val: activeMatching,
+            icon: 'lightning',
+            color: '#7C3AED',
+            glow: 'rgba(124, 58, 237, 0.08)',
+            tone: 'purple',
+            pill: 'Volunteer search active',
+          },
+          {
+            name: 'Immediate Urgency',
+            val: immediateRequests,
+            icon: 'clock',
+            color: '#D97706',
+            glow: 'rgba(217, 119, 6, 0.08)',
+            tone: 'amber',
+            pill: 'Priority dispatch',
+          },
+          {
+            name: 'Available Services',
+            val: catalogue.length,
+            icon: 'catalogue',
+            color: '#059669',
+            glow: 'rgba(5, 150, 105, 0.08)',
+            tone: 'emerald',
+            pill: 'Active in chapter',
+          },
+        ].map((kpi) => (
+          <div
+            className={`modern-kpi-card kpi-tone-${kpi.tone}`}
+            key={kpi.name}
+            style={
+              {
+                '--kpi-color': kpi.color,
+                '--kpi-glow': kpi.glow,
+              } as React.CSSProperties
+            }
+          >
+            <div className="kpi-card-header">
+              <span className="kpi-card-label">{kpi.name}</span>
+              <div className="kpi-card-icon" aria-hidden="true">
+                <Icon name={kpi.icon as any} size={18} />
+              </div>
+            </div>
+            <div className="kpi-card-body">
+              <strong className="kpi-card-value">{kpi.val}</strong>
+            </div>
+            <div className="kpi-card-footer">
+              <span className="kpi-card-pill">
+                <span className="kpi-pill-dot" aria-hidden="true" />
+                {kpi.pill}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
       {creating && (
         <People path={`${base}/memberships`} kind="beneficiary" onSelect={create} onError={fail} />
       )}
-      <div className="action-row">
-        <label>
-          Status
-          <select
-            className="form-input"
-            aria-label="Status"
-            value={status}
-            onChange={(e) => {
-              setStatus(e.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="">All statuses</option>
-            {REQUEST_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {title(s)}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            checked={needsReview}
-            onChange={(e) => {
-              setNeedsReview(e.target.checked);
-              setPage(1);
-            }}
-          />{' '}
-          Waiting for my decision
-        </label>
-        <label>
-          Urgency
-          <select
-            className="form-input"
-            aria-label="Urgency"
-            value={urgency}
-            onChange={(e) => {
-              setUrgency(e.target.value);
-              setPage(1);
-            }}
-          >
-            <option value="">All urgencies</option>
-            <option>SCHEDULED</option>
-            <option>IMMEDIATE</option>
-          </select>
-        </label>
-        <label>
-          Ward
-          <input
-            className="form-input"
-            value={ward}
-            maxLength={20}
-            onChange={(e) => {
-              setWard(e.target.value);
-              setPage(1);
-            }}
-          />
-        </label>
+
+      {/* Filter Toolbar */}
+      <div className="coordinator-filter-toolbar">
+        <div className="filter-left">
+          <div className="filter-group">
+            <span className="filter-label">Status</span>
+            <select
+              aria-label="Status"
+              value={status}
+              onChange={(e) => {
+                setStatus(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">All statuses</option>
+              {REQUEST_STATUSES.map((s) => (
+                <option key={s} value={s}>
+                  {title(s)}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="filter-group">
+            <span className="filter-label">Urgency</span>
+            <select
+              aria-label="Urgency"
+              value={urgency}
+              onChange={(e) => {
+                setUrgency(e.target.value);
+                setPage(1);
+              }}
+            >
+              <option value="">All urgencies</option>
+              <option value="SCHEDULED">Scheduled</option>
+              <option value="IMMEDIATE">Immediate</option>
+            </select>
+          </div>
+          <div className="filter-group">
+            <span className="filter-label">Ward</span>
+            <input
+              placeholder="Filter ward"
+              value={ward}
+              maxLength={20}
+              onChange={(e) => {
+                setWard(e.target.value);
+                setPage(1);
+              }}
+            />
+          </div>
+        </div>
+        <div className="filter-right">
+          <label className="coordinator-filter-checkbox">
+            <input
+              type="checkbox"
+              checked={needsReview}
+              onChange={(e) => {
+                setNeedsReview(e.target.checked);
+                setPage(1);
+              }}
+            />
+            Waiting for my decision
+          </label>
+        </div>
       </div>
+
       {error && (
         <p role="alert" className="error-message">
           {error}
         </p>
       )}
       {!list && !error && <p role="status">Loading requests…</p>}
+
+      {/* Requests Table */}
       {list && (
-        <div className="table-container glass-panel">
+        <div className="table-container glass-panel modern-table-container">
           <table className="custom-table">
             <thead>
               <tr>
-                <th>Request</th>
-                <th>Status</th>
-                <th>Start (IST)</th>
-                <th>Urgency</th>
-                <th>Review</th>
+                <th style={{ width: '22%' }}>Request</th>
+                <th style={{ width: '20%' }}>Status</th>
+                <th style={{ width: '26%' }}>Start Time (IST)</th>
+                <th style={{ width: '16%' }}>Urgency</th>
+                <th style={{ width: '16%', textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {list.data.map((row) => (
                 <tr key={row.id}>
-                  <td>{row.requestNumber}</td>
-                  <td>{title(row.status)}</td>
-                  <td>{indiaTime(row.scheduledStartTime)}</td>
-                  <td>{title(row.urgency)}</td>
                   <td>
+                    <span className="mono" style={{ fontWeight: 700, fontSize: '0.86rem', color: '#0f172a' }}>
+                      {row.requestNumber}
+                    </span>
+                  </td>
+                  <td>
+                    <RequestStatusBadge status={row.status} />
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', color: '#334155' }}>
+                      <Icon name="calendar" size={14} />
+                      <span>{indiaTime(row.scheduledStartTime)}</span>
+                    </div>
+                  </td>
+                  <td>
+                    <UrgencyBadge urgency={row.urgency} />
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
                     <button
+                      type="button"
                       className="btn btn-secondary"
+                      style={{ fontSize: '0.78rem', padding: '5px 12px' }}
                       onClick={() => {
                         setSelected(row.id);
                         setError('');
                       }}
                     >
-                      Review {row.requestNumber}
+                      Review matching →
                     </button>
                   </td>
                 </tr>
@@ -513,6 +651,8 @@ export function CoordinatorRequests({
           {!list.data.length && <p className="empty-state">No requests match these filters.</p>}
         </div>
       )}
+
+      {/* Pagination */}
       <div className="pagination">
         <button disabled={!list || page === 1} onClick={() => setPage(page - 1)}>
           Previous requests
@@ -525,57 +665,108 @@ export function CoordinatorRequests({
           Next requests
         </button>
       </div>
+
       {selected && !detail && !error && <p role="status">Loading matching details…</p>}
+
+      {/* Detailed Request Inspection View */}
       {detail && request && (
-        <section className="glass-panel detail-panel" aria-label="Request details">
-          <div className="section-heading">
-            <h2>
-              {request.requestNumber} · {request.serviceName}
-            </h2>
+        <section className="glass-panel detail-panel" aria-label="Request details" style={{ marginTop: '24px', padding: '24px' }}>
+          <div className="request-detail-header">
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                <span className="mono" style={{ fontSize: '0.88rem', fontWeight: 700, color: '#2563eb', background: '#eff6ff', padding: '3px 8px', borderRadius: '6px' }}>
+                  {request.requestNumber}
+                </span>
+                <RequestStatusBadge status={request.status} />
+                <UrgencyBadge urgency={request.urgency} />
+              </div>
+              <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>
+                {request.serviceName}
+              </h2>
+            </div>
             <button
+              type="button"
+              className="btn btn-secondary"
               onClick={() => {
                 setSelected('');
                 setDetail(null);
               }}
             >
-              Close request
+              ✕ Close request
             </button>
           </div>
-          <p>
-            Status: {title(request.status)} · Beneficiary:{' '}
-            {[request.beneficiaryName, request.beneficiaryMembershipNumber]
-              .filter(Boolean)
-              .join(' · ')}
-          </p>
-          <p>
-            Start: {indiaTime(request.scheduledStartTime)} · {request.expectedDurationMinutes}{' '}
-            minutes
-          </p>
-          <p>
-            {request.locationAddressText} · Ward {request.locationWardNumber} · PIN{' '}
-            {request.locationPostalCode}
-          </p>
-          {request.beneficiaryNotes && <p>Notes: {request.beneficiaryNotes}</p>}
-          <p>
-            {detail.acceptedCount} accepted · {detail.pendingCount} pending · Minimum{' '}
-            {request.minVolunteers} · Preferred {request.preferredVolunteers}
-          </p>
-          <p>
-            Matching tier {request.matchingTier} · Radius {request.matchingRadiusKm} km
-            {request.requiredSkills.length
-              ? ` · Required skills: ${request.requiredSkills.join(', ')}`
-              : ''}
-          </p>
+
+          {/* Structured Detail Cards Grid */}
+          <div className="request-detail-grid">
+            {/* Beneficiary Card */}
+            <div className="request-detail-card">
+              <h4 className="request-detail-card-title">
+                <Icon name="users" size={16} /> Beneficiary Information
+              </h4>
+              <div className="request-detail-row">
+                <span className="row-label">Name</span>
+                <span className="row-value">{request.beneficiaryName || 'Not specified'}</span>
+              </div>
+              <div className="request-detail-row">
+                <span className="row-label">Membership No.</span>
+                <span className="row-value mono">{request.beneficiaryMembershipNumber || 'N/A'}</span>
+              </div>
+              <div className="request-detail-row">
+                <span className="row-label">Ward & PIN</span>
+                <span className="row-value">Ward {request.locationWardNumber} · PIN {request.locationPostalCode}</span>
+              </div>
+              <div className="request-detail-row">
+                <span className="row-label">Address</span>
+                <span className="row-value">{request.locationAddressText}</span>
+              </div>
+              {request.beneficiaryNotes && (
+                <div style={{ marginTop: '6px', padding: '8px 10px', background: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.78rem', color: '#475569' }}>
+                  <strong>Notes:</strong> {request.beneficiaryNotes}
+                </div>
+              )}
+            </div>
+
+            {/* Schedule & Matching Status */}
+            <div className="request-detail-card">
+              <h4 className="request-detail-card-title">
+                <Icon name="operations" size={16} /> Schedule & Matching Status
+              </h4>
+              <div className="request-detail-row">
+                <span className="row-label">Scheduled Start (IST)</span>
+                <span className="row-value">{indiaTime(request.scheduledStartTime)}</span>
+              </div>
+              <div className="request-detail-row">
+                <span className="row-label">Expected Duration</span>
+                <span className="row-value">{request.expectedDurationMinutes} minutes</span>
+              </div>
+              <div className="request-detail-row">
+                <span className="row-label">Staffing Headcount</span>
+                <span className="row-value">
+                  <strong style={{ color: '#059669' }}>{detail.acceptedCount} accepted</strong> · {detail.pendingCount} pending (Min {request.minVolunteers}, Pref {request.preferredVolunteers})
+                </span>
+              </div>
+              <div className="request-detail-row">
+                <span className="row-label">Matching Scope</span>
+                <span className="row-value">Tier {request.matchingTier} · {request.matchingRadiusKm} km radius</span>
+              </div>
+              <div className="request-detail-row">
+                <span className="row-label">Required Skills</span>
+                <span className="row-value">
+                  {request.requiredSkills.length ? request.requiredSkills.join(', ') : 'No skills required'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Understaffed Alert if short */}
           {short && (
-            <div className="glass-panel" role="status" data-testid="team-short">
-              <p>
-                <strong>
-                  {detail.acceptedCount === 0
-                    ? 'Nobody is on this visit now. A volunteer handed it over.'
-                    : `This visit is short of volunteers (minimum ${request.minVolunteers}).`}
-                </strong>
+            <div className="glass-panel" role="status" data-testid="team-short" style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: '16px', borderRadius: '12px', marginBottom: '16px' }}>
+              <p style={{ margin: '0 0 6px', color: '#b45309', fontWeight: 700 }}>
+                {detail.acceptedCount === 0
+                  ? '⚠️ Nobody is on this visit now. A volunteer handed it over.'
+                  : `⚠️ This visit is short of volunteers (minimum ${request.minVolunteers}).`}
               </p>
-              <p className="help-text">
+              <p className="help-text" style={{ margin: '0 0 12px' }}>
                 {request.replacementEscalatedAt
                   ? 'Nobody is being offered the open place. Dispatch someone, or stop looking if nobody else is coming.'
                   : request.belowMinimumAlertedAt
@@ -619,13 +810,17 @@ export function CoordinatorRequests({
               </div>
             </div>
           )}
+
+          {/* Action Toolbar */}
           {mutable && (
-            <div className="action-row">
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', padding: '14px 16px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
               <button
                 className="btn btn-secondary"
                 disabled={pending || detail.acceptedCount >= request.preferredVolunteers}
                 onClick={() => setDispatching(!dispatching)}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
               >
+                <Icon name="users" size={15} />
                 {dispatching ? 'Close volunteer picker' : 'Dispatch volunteer'}
               </button>
               <button
@@ -678,8 +873,9 @@ export function CoordinatorRequests({
                 Cancel request
               </button>
               {progressing && (
-                <div className="action-row">
+                <>
                   <button
+                    className="btn btn-secondary"
                     disabled={pending}
                     onClick={() =>
                       postAction(
@@ -692,6 +888,7 @@ export function CoordinatorRequests({
                     Check progression
                   </button>
                   <button
+                    className="btn btn-secondary"
                     disabled={pending}
                     onClick={() =>
                       postAction(
@@ -703,151 +900,221 @@ export function CoordinatorRequests({
                   >
                     {request.matchingTier >= 3 ? 'Escalate to coordinator' : 'Expand search'}
                   </button>
-                </div>
+                </>
               )}
             </div>
           )}
+
+          {/* Volunteer Dispatch Picker */}
           {dispatching && (mutable || short) && (
-            <People
-              path={`${base}/requests/${selected}/dispatch-volunteers`}
-              kind="volunteer"
-              onError={fail}
-              onSelect={(person) =>
-                openAction({
-                  title: request.requiresReconfirmation
-                    ? 'Send confirmation offer'
-                    : 'Dispatch volunteer',
-                  description: `${personLabel(person)} · ${indiaTime(request.scheduledStartTime)}. ${request.requiresReconfirmation ? 'The volunteer must accept the new time in their app.' : 'Confirm availability with the volunteer before assigning them.'}`,
-                  fields: [
-                    ...(!request.requiresReconfirmation
-                      ? [
-                          {
-                            key: 'confirmed',
-                            label: 'I confirmed the volunteer is available at this time',
-                            type: 'checkbox',
-                          },
-                        ]
-                      : []),
-                    { key: 'notes', label: 'Dispatch notes', optional: true, maxLength: 1000 },
-                  ],
-                  submit: async (v) => {
-                    if (!request.requiresReconfirmation && v.confirmed !== 'on')
-                      throw new Error('Confirm availability first.');
-                    const result = await backend(`${base}/requests/${selected}/dispatch`, 'POST', {
-                      volunteerMembershipId: person.id,
-                      dispatchNotes: v.notes,
-                    });
-                    setDispatching(false);
-                    return result;
-                  },
-                  successMessage: dispatchMessage,
-                })
-              }
-            />
-          )}
-          <h3>Assignments and offers</h3>
-          {!detail.assignments.length && <p>No assignments yet.</p>}
-          {detail.assignments.map((a) => (
-            <div className="document-row" key={a.id}>
-              <div>
-                <strong>{a.fullName || a.membershipNumber}</strong>
-                {a.fullName && ` · ${a.membershipNumber}`} · {a.phone} · {title(a.status)}
-                <p className="help-text">
-                  Offered {indiaTime(a.offeredAt)} · Accepted {indiaTime(a.acceptedAt)}
-                  {a.status === 'OFFERED' ? ` · Expires ${indiaTime(a.offerExpiresAt)}` : ''}
-                  {` · Offered schedule ${indiaTime(a.scheduledStartTime)}`}
-                  {a.invitedByName ? ` · Invited by ${a.invitedByName}` : ''}
-                </p>
-                {a.arrivedAt && !a.startedAt && (
-                  <p className="help-text">
-                    Arrived {indiaTime(a.arrivedAt)}, waiting for the rest of the team
-                  </p>
-                )}
-                {a.status === 'REPLACED' && (
-                  <p className="help-text">
-                    <strong>Handed over.</strong> No time credits: only the volunteer who finishes
-                    this visit earns them.
-                  </p>
-                )}
-                {a.leavingReason && a.startedAt && (
-                  <p className="help-text">Reason for leaving: {a.leavingReason}</p>
-                )}
-                {a.startedAt && (
-                  <p className="help-text">
-                    Started {indiaTime(a.startedAt)}
-                    {a.finishedAt
-                      ? ` · Finished ${indiaTime(a.finishedAt)} · Reported ${a.reportedMinutes} minutes`
-                      : ''}
-                    {a.completionNotes ? ` · ${a.completionNotes}` : ''}
-                  </p>
-                )}
-                {a.status === 'IN_PROGRESS' && a.longVisitAlertedAt && (
-                  <p className="help-text" data-testid="running-long">
-                    <strong>Running long.</strong> Started {indiaTime(a.startedAt)}, expected{' '}
-                    {request?.expectedDurationMinutes} minutes, and not finished. Call the
-                    volunteer, then pay for the visit or mark it not delivered.
-                  </p>
-                )}
-                {(a.startReceivedAt || a.finishReceivedAt) && (
-                  <p className="help-text" data-testid="recorded-offline">
-                    <strong>Recorded offline.</strong> The phone had no signal, so the times above
-                    are when the volunteer tapped.
-                    {a.startReceivedAt ? ` Start received ${indiaTime(a.startReceivedAt)}.` : ''}
-                    {a.finishReceivedAt ? ` Finish received ${indiaTime(a.finishReceivedAt)}.` : ''}
-                  </p>
-                )}
-                {a.reviewRequestedAt && !a.reviewResolvedAt && (
-                  <p className="help-text">
-                    <strong>{reviewReasonLabel(a.reviewReason)}.</strong>
-                    {a.reviewNotes ? ` “${a.reviewNotes}”` : ''}
-                    {a.reviewMinutes ? ` Confirmed ${a.reviewMinutes} minutes.` : ''}
-                  </p>
-                )}
-              </div>
-              {a.pausedAt && (
-                <p className="help-text">
-                  <strong>Paused by a safety alert.</strong> Handle it in Safety alerts first.
-                </p>
-              )}
-              {!a.pausedAt &&
-                (a.status === 'IN_PROGRESS' ||
-                  (a.status === 'COMPLETED' && a.reviewRequestedAt && !a.reviewResolvedAt)) && (
-                  <div className="action-row">
-                    <button
-                      className="btn btn-secondary"
-                      disabled={pending}
-                      onClick={() => decideVisit(a, true)}
-                    >
-                      Pay for visit
-                    </button>
-                    <button
-                      className="btn btn-danger"
-                      disabled={pending}
-                      onClick={() => decideVisit(a, false)}
-                    >
-                      Not delivered
-                    </button>
-                  </div>
-                )}
+            <div style={{ marginBottom: '20px' }}>
+              <People
+                path={`${base}/requests/${selected}/dispatch-volunteers`}
+                kind="volunteer"
+                onError={fail}
+                onSelect={(person) =>
+                  openAction({
+                    title: request.requiresReconfirmation
+                      ? 'Send confirmation offer'
+                      : 'Dispatch volunteer',
+                    description: `${personLabel(person)} · ${indiaTime(request.scheduledStartTime)}. ${request.requiresReconfirmation ? 'The volunteer must accept the new time in their app.' : 'Confirm availability with the volunteer before assigning them.'}`,
+                    fields: [
+                      ...(!request.requiresReconfirmation
+                        ? [
+                            {
+                              key: 'confirmed',
+                              label: 'I confirmed the volunteer is available at this time',
+                              type: 'checkbox',
+                            },
+                          ]
+                        : []),
+                      { key: 'notes', label: 'Dispatch notes', optional: true, maxLength: 1000 },
+                    ],
+                    submit: async (v) => {
+                      if (!request.requiresReconfirmation && v.confirmed !== 'on')
+                        throw new Error('Confirm availability first.');
+                      const result = await backend(`${base}/requests/${selected}/dispatch`, 'POST', {
+                        volunteerMembershipId: person.id,
+                        dispatchNotes: v.notes,
+                      });
+                      setDispatching(false);
+                      return result;
+                    },
+                    successMessage: dispatchMessage,
+                  })
+                }
+              />
             </div>
-          ))}
-          <h3>Matching rounds</h3>
-          {!detail.rounds.length && <p>No matching rounds recorded.</p>}
-          {detail.rounds.map((r) => (
-            <p key={r.id}>
-              Round {r.roundNumber} · Tier {r.tier} · {r.searchRadiusKm} km · {title(r.status)} ·{' '}
-              {r.offersDispatchedCount} offered / {r.offersAcceptedCount} accepted · Expires{' '}
-              {indiaTime(r.expiresAt)}
-            </p>
-          ))}
-          <h3>Reschedule history</h3>
-          {!detail.reschedules.length && <p>No reschedules recorded.</p>}
-          {detail.reschedules.map((r) => (
-            <p key={r.id}>
-              {indiaTime(r.previousStartTime)} → {indiaTime(r.newStartTime)} · {r.reason} · Recorded{' '}
-              {indiaTime(r.createdAt)}
-            </p>
-          ))}
+          )}
+
+          {/* Volunteer Assignments & Offers */}
+          <div style={{ marginTop: '24px' }}>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#0f172a', marginBottom: '12px' }}>
+              Volunteer Assignments & Offers ({detail.assignments.length})
+            </h3>
+            {!detail.assignments.length && (
+              <p className="empty-state" style={{ padding: '20px', background: '#f8fafc', borderRadius: '12px' }}>
+                No volunteer assignments or offers dispatched yet.
+              </p>
+            )}
+            {detail.assignments.map((a) => (
+              <div className="volunteer-assignment-card" key={a.id}>
+                <div className="volunteer-assignment-header">
+                  <div className="volunteer-meta">
+                    <div className="volunteer-avatar-badge">
+                      {(a.fullName || a.membershipNumber || 'V')[0]?.toUpperCase()}
+                    </div>
+                    <div className="volunteer-name-block">
+                      <strong>{a.fullName || a.membershipNumber}</strong>
+                      <span>{a.membershipNumber} · {a.phone}</span>
+                    </div>
+                  </div>
+                  <RequestStatusBadge status={a.status} />
+                </div>
+
+                <div className="volunteer-timeline-chips">
+                  <span className="volunteer-timeline-chip">
+                    Offered: {indiaTime(a.offeredAt)}
+                  </span>
+                  {a.acceptedAt && (
+                    <span className="volunteer-timeline-chip">
+                      · Accepted: {indiaTime(a.acceptedAt)}
+                    </span>
+                  )}
+                  {a.status === 'OFFERED' && (
+                    <span className="volunteer-timeline-chip" style={{ color: '#b45309' }}>
+                      · Expires: {indiaTime(a.offerExpiresAt)}
+                    </span>
+                  )}
+                  {a.arrivedAt && (
+                    <span className="volunteer-timeline-chip" style={{ color: '#2563eb' }}>
+                      · Arrived: {indiaTime(a.arrivedAt)}
+                    </span>
+                  )}
+                  {a.startedAt && (
+                    <span className="volunteer-timeline-chip" style={{ color: '#059669' }}>
+                      · Started: {indiaTime(a.startedAt)}
+                    </span>
+                  )}
+                  {a.finishedAt && (
+                    <span className="volunteer-timeline-chip" style={{ color: '#059669', fontWeight: 600 }}>
+                      · Finished: {indiaTime(a.finishedAt)} ({a.reportedMinutes} mins)
+                    </span>
+                  )}
+                  {a.invitedByName && (
+                    <span className="volunteer-timeline-chip">
+                      · Invited by {a.invitedByName}
+                    </span>
+                  )}
+                </div>
+
+                {a.completionNotes && (
+                  <p style={{ margin: '4px 0 0', fontSize: '0.80rem', color: '#475569', fontStyle: 'italic' }}>
+                    “{a.completionNotes}”
+                  </p>
+                )}
+
+                {a.status === 'REPLACED' && (
+                  <p className="help-text" style={{ color: '#64748b', margin: '4px 0 0' }}>
+                    <strong>Handed over.</strong> No time credits: only the volunteer who finishes this visit earns them.
+                  </p>
+                )}
+
+                {a.leavingReason && a.startedAt && (
+                  <p className="help-text" style={{ color: '#d97706', margin: '4px 0 0' }}>
+                    <strong>Reason for leaving:</strong> {a.leavingReason}
+                  </p>
+                )}
+
+                {a.status === 'IN_PROGRESS' && a.longVisitAlertedAt && (
+                  <p className="help-text" data-testid="running-long" style={{ color: '#dc2626', margin: '4px 0 0' }}>
+                    ⚠️ <strong>Running long.</strong> Expected {request?.expectedDurationMinutes} mins and still active. Call the volunteer, then pay or mark not delivered.
+                  </p>
+                )}
+
+                {(a.startReceivedAt || a.finishReceivedAt) && (
+                  <p className="help-text" data-testid="recorded-offline" style={{ color: '#64748b', margin: '4px 0 0' }}>
+                    <strong>Recorded offline.</strong> Times are when tapped on device.
+                  </p>
+                )}
+
+                {a.reviewRequestedAt && !a.reviewResolvedAt && (
+                  <p className="help-text" style={{ color: '#7c3aed', margin: '4px 0 0' }}>
+                    <strong>Review: {reviewReasonLabel(a.reviewReason)}.</strong>
+                    {a.reviewNotes ? ` “${a.reviewNotes}”` : ''}
+                    {a.reviewMinutes ? ` Confirmed ${a.reviewMinutes} mins.` : ''}
+                  </p>
+                )}
+
+                {a.pausedAt && (
+                  <p className="help-text" style={{ color: '#dc2626', margin: '4px 0 0' }}>
+                    <strong>Paused by a safety alert.</strong> Handle it in Safety alerts first.
+                  </p>
+                )}
+
+                {!a.pausedAt &&
+                  (a.status === 'IN_PROGRESS' ||
+                    (a.status === 'COMPLETED' && a.reviewRequestedAt && !a.reviewResolvedAt)) && (
+                    <div className="action-row" style={{ marginTop: '8px' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={pending}
+                        onClick={() => decideVisit(a, true)}
+                      >
+                        ✓ Pay for visit
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-danger"
+                        disabled={pending}
+                        onClick={() => decideVisit(a, false)}
+                      >
+                        ✕ Not delivered
+                      </button>
+                    </div>
+                  )}
+              </div>
+            ))}
+          </div>
+
+          {/* Matching Rounds & Reschedules */}
+          <div style={{ marginTop: '24px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
+            <div className="request-detail-card">
+              <h4 className="request-detail-card-title">
+                <Icon name="lightning" size={16} /> Matching Rounds ({detail.rounds.length})
+              </h4>
+              {!detail.rounds.length && <p className="help-text" style={{ margin: 0 }}>No matching rounds recorded.</p>}
+              {detail.rounds.map((r) => (
+                <div key={r.id} style={{ padding: '6px 0', borderBottom: '1px dashed #e2e8f0', fontSize: '0.78rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 650, color: '#0f172a' }}>
+                    <span>Round {r.roundNumber} (Tier {r.tier})</span>
+                    <span>{title(r.status)}</span>
+                  </div>
+                  <div style={{ color: '#64748b', marginTop: '2px' }}>
+                    {r.searchRadiusKm} km radius · {r.offersDispatchedCount} offered / {r.offersAcceptedCount} accepted
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="request-detail-card">
+              <h4 className="request-detail-card-title">
+                <Icon name="calendar" size={16} /> Reschedule History ({detail.reschedules.length})
+              </h4>
+              {!detail.reschedules.length && <p className="help-text" style={{ margin: 0 }}>No reschedules recorded.</p>}
+              {detail.reschedules.map((r) => (
+                <div key={r.id} style={{ padding: '6px 0', borderBottom: '1px dashed #e2e8f0', fontSize: '0.78rem' }}>
+                  <div style={{ fontWeight: 600, color: '#0f172a' }}>
+                    {indiaTime(r.previousStartTime)} → {indiaTime(r.newStartTime)}
+                  </div>
+                  <div style={{ color: '#64748b', marginTop: '2px' }}>
+                    {r.reason} · Recorded {indiaTime(r.createdAt)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         </section>
       )}
     </div>

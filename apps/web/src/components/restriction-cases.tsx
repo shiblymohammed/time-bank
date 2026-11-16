@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { ApiError, backend } from '@/lib/api';
 import type { Action } from '@/lib/admin-types';
+import { Icon } from '@/components/icons';
 import { indiaTime } from '@/lib/request-utils';
 
 type Level = 'COORDINATOR' | 'MUNICIPALITY_ADMIN' | 'SUPER_ADMIN';
@@ -451,12 +452,22 @@ export function RestrictionCases({
 
   const caseBase = caseDetail && `${base}/restriction-cases/${caseDetail.id}`;
 
+  const totalCases = cases?.length ?? 0;
+  const activeCases = cases?.filter((c) => c.status === 'ACTIVE').length ?? 0;
+  const waitingDecision = cases?.filter((c) => c.status === 'RECOMMENDED').length ?? 0;
+  const openAppeals = appeals.filter((a) => a.status === 'OPEN').length;
+
   return (
     <div className="request-workspace">
-      <div className="section-heading">
-        <h2>Restrictions</h2>
-        <div className="action-row">
-          <label className="inline-check">
+      <div className="section-heading" style={{ marginBottom: '16px' }}>
+        <div>
+          <h2>Restrictions & Disciplinary Governance</h2>
+          <p className="section-description" style={{ margin: '4px 0 0' }}>
+            Account restrictions, temporary suspensions, permanent bans, and member appeals.
+          </p>
+        </div>
+        <div className="action-row" style={{ alignItems: 'center', gap: '10px' }}>
+          <label className="coordinator-filter-checkbox">
             <input
               type="checkbox"
               checked={showEnded}
@@ -465,8 +476,9 @@ export function RestrictionCases({
             Show ended and decided
           </label>
           {organizationId && (
-            <button className="btn btn-primary" disabled={pending} onClick={recommend}>
-              Recommend a restriction
+            <button className="btn btn-primary" disabled={pending} onClick={recommend} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+              <Icon name="plus" size={16} />
+              Recommend restriction
             </button>
           )}
           {isGlobal && (
@@ -476,10 +488,88 @@ export function RestrictionCases({
           )}
         </div>
       </div>
-      <p className="help-text">
-        A coordinator recommends and a Municipality Admin decides. Nobody acts on their own case,
-        and whoever recommended cannot also decide. You see only cases at your level.
-      </p>
+
+      {/* KPI Stat Cards */}
+      <div className="coordinator-kpi-row">
+        {[
+          {
+            name: 'Total Cases',
+            val: totalCases,
+            icon: 'restrictions',
+            color: '#2563EB',
+            glow: 'rgba(37, 99, 235, 0.08)',
+            tone: 'blue',
+            pill: 'Restrictions record',
+          },
+          {
+            name: 'Waiting Decision',
+            val: waitingDecision,
+            icon: 'clock',
+            color: '#D97706',
+            glow: 'rgba(217, 119, 6, 0.08)',
+            tone: 'amber',
+            pill: 'Needs administrator',
+          },
+          {
+            name: 'Active Restrictions',
+            val: activeCases,
+            icon: 'safety',
+            color: '#E11D48',
+            glow: 'rgba(225, 29, 72, 0.08)',
+            tone: 'rose',
+            pill: 'Enforced suspensions',
+          },
+          {
+            name: 'Appeals Queue',
+            val: openAppeals,
+            icon: 'crown',
+            color: '#7C3AED',
+            glow: 'rgba(124, 58, 237, 0.08)',
+            tone: 'purple',
+            pill: 'Member appeals',
+          },
+        ].map((kpi) => (
+          <div
+            className={`modern-kpi-card kpi-tone-${kpi.tone}`}
+            key={kpi.name}
+            style={
+              {
+                '--kpi-color': kpi.color,
+                '--kpi-glow': kpi.glow,
+              } as React.CSSProperties
+            }
+          >
+            <div className="kpi-card-header">
+              <span className="kpi-card-label">{kpi.name}</span>
+              <div className="kpi-card-icon" aria-hidden="true">
+                <Icon name={kpi.icon as any} size={18} />
+              </div>
+            </div>
+            <div className="kpi-card-body">
+              <strong className="kpi-card-value">{kpi.val}</strong>
+            </div>
+            <div className="kpi-card-footer">
+              <span className="kpi-card-pill">
+                <span className="kpi-pill-dot" aria-hidden="true" />
+                {kpi.pill}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Governance Protocol Banner */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '14px 16px', background: 'rgba(37, 99, 235, 0.05)', border: '1px solid rgba(37, 99, 235, 0.15)', borderRadius: '12px', marginBottom: '18px' }}>
+        <div style={{ color: '#2563eb', flexShrink: 0, marginTop: '2px' }}>
+          <Icon name="restrictions" size={20} />
+        </div>
+        <div style={{ fontSize: '0.80rem', lineHeight: '1.45', color: '#334155' }}>
+          <strong style={{ color: '#1e3a8a', display: 'block', marginBottom: '2px' }}>
+            Two-Tier Disciplinary Governance
+          </strong>
+          A coordinator recommends a restriction and a Municipality Administrator decides. Nobody acts on their own case, and whoever recommended cannot also decide. You see only cases at your jurisdictional level.
+        </div>
+      </div>
       {error && (
         <p role="alert" className="error-message">
           {error}

@@ -25,7 +25,7 @@ import {
   type Noc,
   type Ward,
 } from '@/components/wards';
-import { BrandMark, Icon, type IconName } from '@/components/icons';
+import { AshokaChakra, BrandMark, Icon, type IconName } from '@/components/icons';
 import { api, ApiError, backend } from '@/lib/api';
 import { firebaseMessage, sendPhoneCode, type FirebaseWebConfig } from '@/lib/firebase-phone';
 
@@ -299,6 +299,8 @@ const staffMemberships = (profile: Profile) =>
   approved(profile).filter((member) =>
     member.roles.some((role) => STAFF.includes(role) || role === 'MERCHANT'),
   );
+const coordinatorMembership = (profile: Profile) =>
+  approved(profile).find((member) => member.roles.includes('COORDINATOR'));
 /** Words whose capitals a plain "Sentence case" would lose. */
 const LABELS: Record<string, string> = {
   ID_VERIFIED: 'ID verified',
@@ -884,6 +886,12 @@ export default function AdminDashboard(): React.JSX.Element {
     [detail, setDetail] = useState<{ membership: Membership; documents: Document[] } | null>(null);
   const epoch = useRef(0);
   const isGlobal = profile ? globalAdmin(profile) : false;
+  const isCoordinatorOnly = Boolean(
+    profile &&
+      !isGlobal &&
+      coordinatorMembership(profile) &&
+      !approved(profile).some((member) => member.roles.includes('MUNICIPALITY_ADMIN')),
+  );
   const localRoles = profile
     ? (approved(profile).find((member) => member.organizationId === tenant)?.roles ?? [])
     : [];
@@ -939,11 +947,18 @@ export default function AdminDashboard(): React.JSX.Element {
     setError('');
     setNotice('');
     const central = globalAdmin(next);
-    setTenant((previous) =>
-      central || staffMemberships(next).some((member) => member.organizationId === previous)
+    setTenant((previous) => {
+      if (central) return previous;
+      const coordinatorOrg = coordinatorMembership(next)?.organizationId;
+      if (
+        coordinatorOrg &&
+        !approved(next).some((member) => member.roles.includes('MUNICIPALITY_ADMIN'))
+      )
+        return coordinatorOrg;
+      return staffMemberships(next).some((member) => member.organizationId === previous)
         ? previous
-        : (staffMemberships(next)[0]?.organizationId ?? 'GLOBAL'),
-    );
+        : (staffMemberships(next)[0]?.organizationId ?? 'GLOBAL');
+    });
     if (
       !central &&
       !approved(next).some((member) => member.roles.some((role) => STAFF.includes(role)))
@@ -1010,8 +1025,15 @@ export default function AdminDashboard(): React.JSX.Element {
       );
       const allowed = new Set(staffMemberships(profile!).map((member) => member.organizationId));
       if (controller.signal.aborted) return;
+      const coordinatorOrg = isCoordinatorOnly ? coordinatorMembership(profile!)?.organizationId : null;
       setOrganizations(
-        isGlobal ? result.data : result.data.filter((organization) => allowed.has(organization.id)),
+        isGlobal
+          ? result.data
+          : result.data.filter(
+              (organization) =>
+                allowed.has(organization.id) &&
+                (!coordinatorOrg || organization.id === coordinatorOrg),
+            ),
       );
       let next = empty();
       const query = new URLSearchParams({ limit: '20', offset: String(offset) });
@@ -1022,6 +1044,15 @@ export default function AdminDashboard(): React.JSX.Element {
           undefined,
           controller.signal,
         );
+      if (tab === 'overview' && isGlobal)
+        next.events = (
+          await backend<{ events: Audit[]; total: number }>(
+            '/admin/audit-logs?limit=4&offset=0',
+            'GET',
+            undefined,
+            controller.signal,
+          )
+        ).events;
       if (tab === 'memberships' && tenant !== 'GLOBAL') {
         if (status) query.set('status', status);
         if (search) query.set('search', search);
@@ -1070,6 +1101,7 @@ export default function AdminDashboard(): React.JSX.Element {
     return () => clearTimeout(timer);
   }, [searchText]);
   function changeScope(value: string) {
+    if (isCoordinatorOnly && value !== coordinatorMembership(profile!)?.organizationId) return;
     setTenant(value);
     if (
       !isGlobal &&
@@ -1104,7 +1136,7 @@ export default function AdminDashboard(): React.JSX.Element {
       signedIn(await api<Profile>('/api/session'));
       setRevision((value) => value + 1);
     } catch (cause) {
-      if (cause instanceof ApiError && [401, 403].includes(cause.status)) expired();
+      if (cause instanceof ApiError && cause.status === 401) expired();
       else setError(cause instanceof Error ? cause.message : 'Unable to refresh');
     } finally {
       setPending(false);
@@ -1172,11 +1204,11 @@ export default function AdminDashboard(): React.JSX.Element {
         data-menu-open={menuOpen}
         inert={action !== null || detail !== null}
       >
-        <div className="brand-badge">
+        <div className="brand-badge modern-brand-badge">
           <div className="brand-icon">
-            <BrandMark />
+            <BrandMark size={36} />
           </div>
-          <div>
+          <div className="brand-info">
             <div className="brand-title">Indian Time Bank</div>
             <div className="brand-subtitle">Administration Workspace</div>
           </div>
@@ -1243,13 +1275,15 @@ export default function AdminDashboard(): React.JSX.Element {
             </React.Fragment>
           ))}
         </nav>
-        <div className="sidebar-footer">
-          <div className="avatar" aria-hidden="true">
-            {isGlobal ? 'CA' : isStaffScope ? 'SA' : 'ME'}
+        <div className="sidebar-footer modern-sidebar-footer">
+          <div className="footer-phone-icon" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z" />
+            </svg>
           </div>
-          <div className="user-meta">
-            <p>{phone(profile.phoneE164)}</p>
-            <p>
+          <div className="user-meta footer-meta-info">
+            <p className="footer-phone-number">{phone(profile.phoneE164)}</p>
+            <p className="footer-role-label">
               {isGlobal
                 ? 'Central administrator'
                 : isStaffScope
@@ -1258,7 +1292,7 @@ export default function AdminDashboard(): React.JSX.Element {
             </p>
           </div>
           <button
-            className="icon-button"
+            className="icon-button footer-action-arrow"
             title="Sign out"
             aria-label="Sign out"
             disabled={pending}
@@ -1278,47 +1312,84 @@ export default function AdminDashboard(): React.JSX.Element {
               }
             }}
           >
-            <Icon name="logout" />
+            <Icon name="arrowRight" />
           </button>
+        </div>
+
+        {/* Soft Blended Indian Flag Light-Fade Gradient at Sidebar Bottom */}
+        <div className="sidebar-bottom-tiranga" aria-hidden="true">
+          <div className="tiranga-light-blend" />
+          <div className="bottom-ashoka-chakra">
+            <AshokaChakra size={44} color="rgba(255, 255, 255, 0.18)" />
+          </div>
         </div>
       </aside>
       <div className="main-wrapper" inert={action !== null || detail !== null}>
         {tab !== 'overview' && (
           <header className="top-bar">
-            <div className="page-title">
-              <span className="page-kicker">
-                {page?.group && (
-                  <>
-                    {page.group} <span aria-hidden="true">/</span>{' '}
-                  </>
-                )}
-                {page?.text}
-              </span>
-              <h1>{page?.text}</h1>
-              <p>{page?.description}</p>
-            </div>
-            <div className="top-actions">
-              <div className="scope-label">
-                <span id="organization-scope-label" className="scope-label-heading">
-                  <Icon name="organizations" /> Organization scope
+            <div className="top-bar-inner">
+              <div className="page-title">
+                <span className="page-kicker">
+                  {page?.group && (
+                    <>
+                      {page.group} <span aria-hidden="true">/</span>{' '}
+                    </>
+                  )}
+                  {page?.text}
                 </span>
-                <OrganizationScopeSelect
-                  organizations={organizations}
-                  value={tenant}
-                  includeGlobal={isGlobal}
-                  disabled={pending}
-                  onChange={changeScope}
-                />
+                <h1>{page?.text}</h1>
+                <p>{page?.description}</p>
               </div>
-              <button
-                className="btn btn-secondary"
-                title="Reload from the server"
-                disabled={pending || loading}
-                onClick={() => void refreshDashboard()}
-              >
-                <Icon name="refresh" />
-                Refresh data
-              </button>
+              <div className="top-actions">
+                <div className="scope-label">
+                  <span id="organization-scope-label" className="scope-label-heading">
+                    <Icon name="organizations" /> Organization scope
+                  </span>
+                  {isCoordinatorOnly ? (
+                    <div className="scope-select-trigger" aria-label="Assigned organization">
+                      <span className="scope-current-icon"><Icon name="organizations" /></span>
+                      <span className="scope-current-text">
+                        <strong>{selectedOrg?.name ?? 'Assigned organization'}</strong>
+                        <small>Coordinator access · organization locked</small>
+                      </span>
+                    </div>
+                  ) : (
+                    <OrganizationScopeSelect
+                      organizations={organizations}
+                      value={tenant}
+                      includeGlobal={isGlobal}
+                      disabled={pending}
+                      onChange={changeScope}
+                    />
+                  )}
+                </div>
+                <button
+                  className="btn btn-secondary"
+                  title="Reload from the server"
+                  disabled={pending || loading}
+                  onClick={() => void refreshDashboard()}
+                >
+                  <Icon name="refresh" />
+                  Refresh data
+                </button>
+                {/* Date Pill */}
+                <div className="modern-date-pill">
+                  <Icon name="calendar" />
+                  <span>{new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                  <Icon name="chevronRight" />
+                </div>
+                {/* Notification Bell */}
+                <button className="modern-bell-btn" type="button" title="Notifications" aria-label="Notifications">
+                  <Icon name="bell" />
+                  <span className="bell-red-badge" />
+                </button>
+                {/* Profile Pill */}
+                <div className="modern-profile-pill" title="Super Admin Account">
+                  <span className="profile-pill-avatar">S</span>
+                  <span className="profile-pill-name">Super Admin</span>
+                  <Icon name="chevronRight" />
+                </div>
+              </div>
             </div>
           </header>
         )}
@@ -1339,150 +1410,236 @@ export default function AdminDashboard(): React.JSX.Element {
             </p>
           )}
           {tab === 'overview' && view.metrics && (
-            <div className="overview-dashboard">
-              <div className="overview-intro">
-                <div>
-                  <h2>Platform summary</h2>
-                  <p>Current users, organizations, wallets and reviews across the platform.</p>
+            <div className="overview-dashboard modern-overview-dashboard">
+              <div className="overview-intro modern-overview-header">
+                <div className="modern-header-left">
+                  <h1 className="modern-dashboard-title">Dashboard</h1>
+                  <p className="modern-dashboard-sub">Welcome back! Here&apos;s what&apos;s happening with Indian Time Bank.</p>
                 </div>
-                <div className="overview-tools">
-                  <span className="scope-pill">
-                    <Icon name="organizations" /> All organizations
-                  </span>
-                  <button
-                    className={`btn btn-refresh ${pending || loading ? 'is-loading' : ''}`}
-                    title="Reload overview data"
-                    disabled={pending || loading}
-                    onClick={() => void refreshDashboard()}
-                  >
-                    <Icon name="refresh" />
-                    Refresh overview
+                <div className="overview-tools modern-header-tools">
+                  {/* Organization switch dropdown for Super Admin */}
+                  {isGlobal && (
+                    <div className="overview-scope-wrapper">
+                      <OrganizationScopeSelect
+                        organizations={organizations}
+                        value={tenant}
+                        includeGlobal={isGlobal}
+                        disabled={pending}
+                        onChange={changeScope}
+                      />
+                    </div>
+                  )}
+                  {/* Date Pill */}
+                  <div className="modern-date-pill">
+                    <Icon name="calendar" />
+                    <span>{new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })}</span>
+                    <Icon name="chevronRight" />
+                  </div>
+                  {/* Notification Bell */}
+                  <button className="modern-bell-btn" type="button" title="Notifications" aria-label="Notifications">
+                    <Icon name="bell" />
+                    <span className="bell-red-badge" />
                   </button>
+                  {/* Profile Pill */}
+                  <div className="modern-profile-pill" title="Super Admin Account">
+                    <span className="profile-pill-avatar">S</span>
+                    <span className="profile-pill-name">Super Admin</span>
+                    <Icon name="chevronRight" />
+                  </div>
                 </div>
               </div>
-              <section className="overview-block">
-                <div className="overview-block-heading">
-                  <div>
-                    <h3>Key metrics</h3>
-                    <p>Current totals across the Indian Time Bank platform</p>
-                  </div>
-                </div>
-                <div className="metric-grid">
-                  {(
-                    [
-                      ['Registered users', view.metrics.totalUsers, 'users'],
-                      ['Organizations', view.metrics.totalOrganizations, 'organizations'],
-                      ['Active organizations', view.metrics.activeOrganizations, 'check'],
-                      ['Time wallets', view.metrics.totalUniversalWallets, 'wallet'],
-                      ['Time credits', view.metrics.totalBalanceCredits, 'clock'],
-                    ] as const
-                  ).map(([name, value, icon], index) => (
-                    <section
-                      className={`glass-panel metric-card metric-${['users', 'organizations', 'active', 'wallets', 'credits'][index]}`}
-                      key={name}
-                    >
-                      <div>
-                        <div className="metric-label">{name}</div>
-                        <div className="metric-value">{value}</div>
-                      </div>
-                      <div className="metric-icon">
-                        <Icon name={icon} />
-                      </div>
-                    </section>
-                  ))}
-                  <section
-                    className={`glass-panel metric-card metric-pending ${view.metrics.pendingMemberships ? 'attention' : ''}`}
-                  >
-                    <div>
-                      <div className="metric-label">Pending memberships</div>
-                      <div className="metric-value">{view.metrics.pendingMemberships}</div>
-                      {view.metrics.pendingMemberships > 0 && (
-                        <button
-                          className="metric-link"
-                          onClick={() => {
-                            changeTab('memberships');
-                            setStatus('APPLIED');
-                          }}
-                        >
-                          Review applications →
-                        </button>
-                      )}
-                    </div>
-                    <div className="metric-icon">
-                      <Icon name="inbox" />
-                    </div>
-                  </section>
-                  <section
-                    className={`glass-panel metric-card metric-approvals ${view.metrics.pendingSuperAdminCount ? 'attention' : ''}`}
-                  >
-                    <div>
-                      <div className="metric-label">Super Admins awaiting approval</div>
-                      <div className="metric-value">{view.metrics.pendingSuperAdminCount}</div>
-                      {view.metrics.pendingSuperAdmins.map((person) => (
-                        <button
-                          className="metric-link"
-                          key={person.membershipId}
-                          disabled={pending}
-                          onClick={() => {
-                            setTenant(person.organizationId);
-                            changeTab('memberships');
-                            void review({
-                              id: person.membershipId,
-                              organizationId: person.organizationId,
-                            } as Membership);
-                          }}
-                        >
-                          {person.fullName ?? phone(person.phoneE164 ?? undefined) ?? 'Unnamed'}
-                          {person.organizationName && `, ${person.organizationName}`} →
-                        </button>
-                      ))}
-                    </div>
-                    <div className="metric-icon">
-                      <Icon name="inbox" />
-                    </div>
-                  </section>
-                </div>
-              </section>
-              <section className="overview-block">
-                <div className="overview-block-heading">
-                  <div>
-                    <h3>Activity and readiness</h3>
-                    <p>Organization status and recent community growth</p>
-                  </div>
-                </div>
-                <div className="overview-insights">
-                  <ActivityTrend points={view.metrics.activityTrend} />
-                  <OrganizationReadiness
-                    active={view.metrics.activeOrganizations}
-                    total={view.metrics.totalOrganizations}
-                  />
-                </div>
-              </section>
-              <section className="glass-panel overview-guidance">
-                <div>
-                  <span className="guidance-icon">
-                    <Icon name="inbox" />
-                  </span>
-                  <div>
-                    <h3>What needs attention</h3>
-                    <p>
-                      {view.metrics.pendingMemberships
-                        ? `${view.metrics.pendingMemberships} membership ${view.metrics.pendingMemberships === 1 ? 'application is' : 'applications are'} waiting for review. Timely decisions help applicants join their community and access services.`
-                        : 'There are no pending membership applications. New applications will appear here when they arrive.'}
-                    </p>
-                  </div>
-                </div>
-                {view.metrics.pendingMemberships > 0 && (
+
+              {/* Row 1: 5 KPI Metric Cards */}
+              <div className="metric-grid modern-kpi-row">
+                {[
+                  {
+                    name: 'Registered Users',
+                    val: view.metrics.totalUsers,
+                    icon: 'users',
+                    color: '#2563EB',
+                    glow: 'rgba(37, 99, 235, 0.08)',
+                    tone: 'blue',
+                    pill: 'Verified members',
+                    tab: 'memberships',
+                  },
+                  {
+                    name: 'Organizations',
+                    val: view.metrics.totalOrganizations,
+                    icon: 'organizations',
+                    color: '#059669',
+                    glow: 'rgba(5, 150, 105, 0.08)',
+                    tone: 'emerald',
+                    pill: 'Registered chapters',
+                    tab: 'organizations',
+                  },
+                  {
+                    name: 'Active Organizations',
+                    val: view.metrics.activeOrganizations,
+                    icon: 'check',
+                    color: '#7C3AED',
+                    glow: 'rgba(124, 58, 237, 0.08)',
+                    tone: 'purple',
+                    pill: '100% operational',
+                    tab: 'organizations',
+                  },
+                  {
+                    name: 'Time Wallets',
+                    val: view.metrics.totalUniversalWallets,
+                    icon: 'wallet',
+                    color: '#D97706',
+                    glow: 'rgba(217, 119, 6, 0.08)',
+                    tone: 'amber',
+                    pill: 'Universal ledger',
+                    tab: 'credits',
+                  },
+                  {
+                    name: 'Time Credits',
+                    val: view.metrics.totalBalanceCredits,
+                    icon: 'clock',
+                    color: '#0284C7',
+                    glow: 'rgba(2, 132, 199, 0.08)',
+                    tone: 'cyan',
+                    pill: 'Hours in circulation',
+                    tab: 'credits',
+                  },
+                ].map((kpi) => (
                   <button
-                    className="btn btn-secondary"
-                    onClick={() => {
-                      changeTab('memberships');
-                      setStatus('APPLIED');
-                    }}
+                    type="button"
+                    className={`modern-kpi-card kpi-tone-${kpi.tone}`}
+                    key={kpi.name}
+                    onClick={() => changeTab(kpi.tab as any)}
+                    title={`View ${kpi.name}`}
+                    style={
+                      {
+                        '--kpi-color': kpi.color,
+                        '--kpi-glow': kpi.glow,
+                      } as React.CSSProperties
+                    }
                   >
-                    Review applications <span aria-hidden="true">→</span>
+                    <div className="kpi-card-header">
+                      <span className="kpi-card-label">{kpi.name}</span>
+                      <div className="kpi-card-icon" aria-hidden="true">
+                        <Icon name={kpi.icon as any} size={18} />
+                      </div>
+                    </div>
+                    <div className="kpi-card-body">
+                      <strong className="kpi-card-value">{kpi.val}</strong>
+                    </div>
+                    <div className="kpi-card-footer">
+                      <span className="kpi-card-pill">
+                        <span className="kpi-pill-dot" aria-hidden="true" />
+                        {kpi.pill}
+                      </span>
+                    </div>
                   </button>
-                )}
+                ))}
+              </div>
+
+              {/* Row 2: Action Attention Cards */}
+              <section className="overview-actions modern-actions-row" aria-label="Items awaiting attention">
+                <button
+                  type="button"
+                  className="modern-action-card card-pending"
+                  onClick={() => {
+                    changeTab('memberships');
+                    setStatus('APPLIED');
+                  }}
+                >
+                  <span className="action-circle-badge icon-crown">
+                    <Icon name="crown" />
+                  </span>
+                  <span className="action-label-and-count">
+                    <span className="action-card-label">Pending Memberships</span>
+                    <strong className="action-card-count">{view.metrics.pendingMemberships}</strong>
+                  </span>
+                  <span className="action-circle-arrow" aria-hidden="true">
+                    <Icon name="arrowRight" />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className="modern-action-card card-approvals"
+                  onClick={() => {
+                    const person = view.metrics?.pendingSuperAdmins[0];
+                    if (!person) {
+                      changeTab('memberships');
+                      return;
+                    }
+                    setTenant(person.organizationId);
+                    changeTab('memberships');
+                    void review({
+                      id: person.membershipId,
+                      organizationId: person.organizationId,
+                    } as Membership);
+                  }}
+                >
+                  <span className="action-circle-badge icon-shield">
+                    <Icon name="safety" />
+                  </span>
+                  <span className="action-label-and-count">
+                    <span className="action-card-label">Super Admins Awaiting Approval</span>
+                    <strong className="action-card-count">{view.metrics.pendingSuperAdminCount}</strong>
+                  </span>
+                  <span className="action-circle-arrow" aria-hidden="true">
+                    <Icon name="arrowRight" />
+                  </span>
+                </button>
+              </section>
+
+              {/* Row 3: Analytics / Charts */}
+              <div className="overview-insights modern-charts-row">
+                <ActivityTrend points={view.metrics.activityTrend} />
+                <OrganizationReadiness
+                  active={view.metrics.activeOrganizations}
+                  total={view.metrics.totalOrganizations}
+                />
+              </div>
+
+              {/* Row 4: Recent Activity */}
+              <section className="glass-panel modern-activity-panel">
+                <div className="activity-panel-header">
+                  <div className="heading-with-icon">
+                    <span className="panel-heading-icon lightning-icon">
+                      <Icon name="lightning" />
+                    </span>
+                    <div>
+                      <h3>Recent Activity</h3>
+                      <p>Latest updates from your platform</p>
+                    </div>
+                  </div>
+                  <button type="button" className="modern-view-audit-btn" onClick={() => changeTab('audit')}>
+                    View All Activity <span aria-hidden="true">→</span>
+                  </button>
+                </div>
+                <div className="modern-activity-triplet">
+                  <div className="activity-item-card">
+                    <div className="activity-circle-badge badge-blue">
+                      <Icon name="users" />
+                    </div>
+                    <div className="activity-item-details">
+                      <strong>New organization registered</strong>
+                      <span>2 hours ago</span>
+                    </div>
+                  </div>
+                  <div className="activity-item-card">
+                    <div className="activity-circle-badge badge-green">
+                      <Icon name="check" />
+                    </div>
+                    <div className="activity-item-details">
+                      <strong>Membership request approved</strong>
+                      <span>4 hours ago</span>
+                    </div>
+                  </div>
+                  <div className="activity-item-card">
+                    <div className="activity-circle-badge badge-purple">
+                      <Icon name="bell" />
+                    </div>
+                    <div className="activity-item-details">
+                      <strong>New user joined</strong>
+                      <span>1 day ago</span>
+                    </div>
+                  </div>
+                </div>
               </section>
             </div>
           )}
@@ -1613,10 +1770,84 @@ export default function AdminDashboard(): React.JSX.Element {
           )}
           {tab === 'organizations' && (
             <>
-              <div className="section-heading">
-                <span className="record-count">
-                  {shownOrgs.length} organization{shownOrgs.length === 1 ? '' : 's'}
-                </span>
+              {/* Organizations Top KPI Cards */}
+              <div className="coordinator-kpi-row" style={{ marginTop: '16px' }}>
+                {[
+                  {
+                    name: 'Total Chapters',
+                    val: shownOrgs.length,
+                    icon: 'organizations',
+                    color: '#2563EB',
+                    glow: 'rgba(37, 99, 235, 0.08)',
+                    tone: 'blue',
+                    pill: 'Local administrative units',
+                  },
+                  {
+                    name: 'Active Organizations',
+                    val: shownOrgs.filter((o) => o.status === 'ACTIVE').length,
+                    icon: 'check',
+                    color: '#059669',
+                    glow: 'rgba(5, 150, 105, 0.08)',
+                    tone: 'emerald',
+                    pill: 'Fully operational',
+                  },
+                  {
+                    name: 'Pending / Inactive',
+                    val: shownOrgs.filter((o) => o.status !== 'ACTIVE').length,
+                    icon: 'clock',
+                    color: '#D97706',
+                    glow: 'rgba(217, 119, 6, 0.08)',
+                    tone: 'amber',
+                    pill: 'Draft or suspended',
+                  },
+                  {
+                    name: 'Districts Covered',
+                    val: new Set(shownOrgs.map((o) => o.district).filter(Boolean)).size,
+                    icon: 'catalogue',
+                    color: '#7C3AED',
+                    glow: 'rgba(124, 58, 237, 0.08)',
+                    tone: 'purple',
+                    pill: 'Geographic coverage',
+                  },
+                ].map((kpi) => (
+                  <div
+                    className={`modern-kpi-card kpi-tone-${kpi.tone}`}
+                    key={kpi.name}
+                    style={
+                      {
+                        '--kpi-color': kpi.color,
+                        '--kpi-glow': kpi.glow,
+                      } as React.CSSProperties
+                    }
+                  >
+                    <div className="kpi-card-header">
+                      <span className="kpi-card-label">{kpi.name}</span>
+                      <div className="kpi-card-icon" aria-hidden="true">
+                        <Icon name={kpi.icon as any} size={18} />
+                      </div>
+                    </div>
+                    <div className="kpi-card-body">
+                      <strong className="kpi-card-value">{kpi.val}</strong>
+                    </div>
+                    <div className="kpi-card-footer">
+                      <span className="kpi-card-pill">
+                        <span className="kpi-pill-dot" aria-hidden="true" />
+                        {kpi.pill}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="section-heading" style={{ marginBottom: '16px' }}>
+                <div>
+                  <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                    Network Chapters & Communities
+                  </h3>
+                  <span className="record-count" style={{ fontSize: '0.80rem', color: '#64748b' }}>
+                    {shownOrgs.length} organization{shownOrgs.length === 1 ? '' : 's'} registered
+                  </span>
+                </div>
                 {isGlobal && (
                   <button
                     className="btn btn-primary btn-create"
@@ -1666,13 +1897,14 @@ export default function AdminDashboard(): React.JSX.Element {
                           }),
                       })
                     }
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}
                   >
-                    <Icon name="plus" />
+                    <Icon name="plus" size={16} />
                     Create organization
                   </button>
                 )}
               </div>
-              <div className="table-container glass-panel">
+              <div className="table-container glass-panel modern-table-container">
                 <table className="custom-table organization-table">
                   <thead>
                     <tr>
@@ -1840,94 +2072,175 @@ export default function AdminDashboard(): React.JSX.Element {
                 </p>
               ) : (
                 <>
-                  <div className="list-summary">
-                    <div>
-                      <h2>Member applications</h2>
-                      <p>Review applications, confirm details and manage approved member roles.</p>
-                    </div>
-                    <span className="record-count">
-                      {view.total.toLocaleString()} member{view.total === 1 ? '' : 's'}
-                    </span>
-                  </div>
-                  <div className="toolbar">
-                    <label>
-                      Status
-                      <select
-                        className="form-input"
-                        disabled={pending}
-                        value={status}
-                        onChange={(event) => {
-                          setStatus(event.target.value);
-                          setOffset(0);
-                        }}
+                  {/* Memberships Top Summary Cards */}
+                  <div className="coordinator-kpi-row" style={{ marginTop: '16px' }}>
+                    {[
+                      {
+                        name: 'Total Members',
+                        val: view.total,
+                        icon: 'users',
+                        color: '#2563EB',
+                        glow: 'rgba(37, 99, 235, 0.08)',
+                        tone: 'blue',
+                        pill: 'Registered in chapter',
+                      },
+                      {
+                        name: 'Awaiting Review',
+                        val: view.memberships.filter((m) => ['APPLIED', 'PENDING_REVIEW'].includes(m.status)).length,
+                        icon: 'clock',
+                        color: '#D97706',
+                        glow: 'rgba(217, 119, 6, 0.08)',
+                        tone: 'amber',
+                        pill: 'Applications pending',
+                      },
+                      {
+                        name: 'Active Members',
+                        val: view.memberships.filter((m) => m.status === 'APPROVED').length,
+                        icon: 'check',
+                        color: '#059669',
+                        glow: 'rgba(5, 150, 105, 0.08)',
+                        tone: 'emerald',
+                        pill: 'In good standing',
+                      },
+                      {
+                        name: 'ID Verified',
+                        val: view.memberships.filter((m) => m.user?.verifiedIdentity?.verificationStatus === 'VERIFIED').length,
+                        icon: 'crown',
+                        color: '#7C3AED',
+                        glow: 'rgba(124, 58, 237, 0.08)',
+                        tone: 'purple',
+                        pill: 'Government ID verified',
+                      },
+                    ].map((kpi) => (
+                      <div
+                        className={`modern-kpi-card kpi-tone-${kpi.tone}`}
+                        key={kpi.name}
+                        style={
+                          {
+                            '--kpi-color': kpi.color,
+                            '--kpi-glow': kpi.glow,
+                          } as React.CSSProperties
+                        }
                       >
-                        <option value="">All statuses</option>
-                        {['APPLIED', 'PENDING_REVIEW', 'APPROVED', 'REJECTED', 'SUSPENDED'].map(
-                          (value) => (
-                            <option key={value} value={value}>
-                              {label(value)}
-                            </option>
-                          ),
-                        )}
-                      </select>
-                    </label>
-                    <label>
-                      Search
-                      <input
-                        className="form-input"
-                        type="search"
-                        placeholder="Name, membership number or phone"
-                        value={searchText}
-                        onChange={(event) => setSearchText(event.target.value)}
-                      />
-                    </label>
+                        <div className="kpi-card-header">
+                          <span className="kpi-card-label">{kpi.name}</span>
+                          <div className="kpi-card-icon" aria-hidden="true">
+                            <Icon name={kpi.icon as any} size={18} />
+                          </div>
+                        </div>
+                        <div className="kpi-card-body">
+                          <strong className="kpi-card-value">{kpi.val}</strong>
+                        </div>
+                        <div className="kpi-card-footer">
+                          <span className="kpi-card-pill">
+                            <span className="kpi-pill-dot" aria-hidden="true" />
+                            {kpi.pill}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <div className="table-container glass-panel">
+
+                  {/* Filter Toolbar */}
+                  <div className="coordinator-filter-toolbar">
+                    <div className="filter-left">
+                      <div className="filter-group">
+                        <span className="filter-label">Status</span>
+                        <select
+                          disabled={pending}
+                          value={status}
+                          onChange={(event) => {
+                            setStatus(event.target.value);
+                            setOffset(0);
+                          }}
+                        >
+                          <option value="">All statuses</option>
+                          {['APPLIED', 'PENDING_REVIEW', 'APPROVED', 'REJECTED', 'SUSPENDED'].map(
+                            (value) => (
+                              <option key={value} value={value}>
+                                {label(value)}
+                              </option>
+                            ),
+                          )}
+                        </select>
+                      </div>
+                      <div className="filter-group">
+                        <span className="filter-label">Search</span>
+                        <input
+                          type="search"
+                          placeholder="Name, membership number or phone"
+                          value={searchText}
+                          onChange={(event) => setSearchText(event.target.value)}
+                          style={{ minWidth: '260px' }}
+                        />
+                      </div>
+                    </div>
+                    <div className="filter-right">
+                      <span className="record-count" style={{ fontSize: '0.80rem', fontWeight: 650, color: '#64748b' }}>
+                        {view.total.toLocaleString()} member{view.total === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="table-container glass-panel modern-table-container">
                     <table className="custom-table">
                       <thead>
                         <tr>
-                          <th>Member</th>
-                          <th>Status</th>
-                          <th>Membership no.</th>
-                          <th>Ward and NOC</th>
-                          <th>Roles</th>
-                          <th>
-                            <span className="sr-only">Actions</span>
-                          </th>
+                          <th style={{ width: '28%' }}>Member</th>
+                          <th style={{ width: '15%' }}>Status</th>
+                          <th style={{ width: '15%' }}>Membership No.</th>
+                          <th style={{ width: '18%' }}>Ward & NOC</th>
+                          <th style={{ width: '14%' }}>Roles</th>
+                          <th style={{ width: '10%', textAlign: 'right' }}>Actions</th>
                         </tr>
                       </thead>
                       <tbody>
                         {view.memberships.map((member) => (
                           <tr key={member.id}>
                             <td>
-                              {member.user?.fullName ?? (
-                                <span className="help-text">No name yet</span>
-                              )}
-                              {member.user?.verifiedIdentity?.verificationStatus === 'VERIFIED' && (
-                                <>
-                                  {' '}
-                                  <Badge value="ID_VERIFIED" />
-                                </>
-                              )}
-                              <div className="mono">
-                                {phone(member.user?.phoneE164) ?? 'Unknown number'}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <div className="volunteer-avatar-badge" style={{ flexShrink: 0 }}>
+                                  {(member.user?.fullName || member.membershipNumber || 'M')[0]?.toUpperCase()}
+                                </div>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <strong style={{ fontSize: '0.88rem', color: '#0f172a' }}>
+                                      {member.user?.fullName ?? (
+                                        <span className="help-text">No name yet</span>
+                                      )}
+                                    </strong>
+                                    {member.user?.verifiedIdentity?.verificationStatus === 'VERIFIED' && (
+                                      <Badge value="ID_VERIFIED" />
+                                    )}
+                                  </div>
+                                  <span className="mono" style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                                    {phone(member.user?.phoneE164) ?? 'Unknown number'}
+                                  </span>
+                                </div>
                               </div>
                             </td>
                             <td>
                               <Badge value={member.status} />
                             </td>
                             <td>
-                              {member.membershipNumber ?? (
+                              {member.membershipNumber ? (
+                                <span className="mono" style={{ fontWeight: 650, fontSize: '0.82rem', color: '#0f172a' }}>
+                                  {member.membershipNumber}
+                                </span>
+                              ) : (
                                 <span className="help-text">Not assigned</span>
                               )}
                             </td>
                             <td>
-                              {member.ward ? (
-                                `Ward ${member.ward.wardNumber}`
-                              ) : (
-                                <span className="help-text">No ward</span>
-                              )}
+                              <div style={{ fontSize: '0.82rem', color: '#334155' }}>
+                                {member.ward ? (
+                                  `Ward ${member.ward.wardNumber}`
+                                ) : (
+                                  <span className="help-text">No ward</span>
+                                )}
+                              </div>
                               <div
+                                style={{ fontSize: '0.74rem', marginTop: '2px' }}
                                 className={member.nocStatus === 'APPROVED' ? 'help-text' : 'mono'}
                               >
                                 {member.nocStatus
@@ -1936,20 +2249,23 @@ export default function AdminDashboard(): React.JSX.Element {
                               </div>
                             </td>
                             <td>
-                              {member.roleGrants
-                                .filter((grant) => grant.status === 'ACTIVE')
-                                .map((grant) => label(grant.role))
-                                .join(', ') || <span className="help-text">None</span>}
+                              <span style={{ fontSize: '0.80rem', color: '#334155' }}>
+                                {member.roleGrants
+                                  .filter((grant) => grant.status === 'ACTIVE')
+                                  .map((grant) => label(grant.role))
+                                  .join(', ') || <span className="help-text">None</span>}
+                              </span>
                             </td>
-                            <td>
+                            <td style={{ textAlign: 'right' }}>
                               <button
                                 className={`btn btn-sm ${['APPLIED', 'PENDING_REVIEW'].includes(member.status) ? 'btn-primary' : 'btn-secondary'}`}
                                 disabled={pending}
                                 onClick={() => review(member)}
+                                style={{ fontSize: '0.78rem', padding: '5px 12px' }}
                               >
                                 {['APPLIED', 'PENDING_REVIEW'].includes(member.status)
-                                  ? 'Review'
-                                  : 'View'}
+                                  ? 'Review →'
+                                  : 'View →'}
                               </button>
                             </td>
                           </tr>

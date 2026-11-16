@@ -20,6 +20,7 @@ export class GatewayError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    readonly renewed?: Json,
   ) {
     super(message);
   }
@@ -135,7 +136,15 @@ export async function withSession(
   })) as Json;
   if (typeof session['accessToken'] !== 'string')
     throw new GatewayError('Please sign in again', 401);
-  return { body: await action(session['accessToken']), renewed: session };
+  try {
+    return { body: await action(session['accessToken']), renewed: session };
+  } catch (error) {
+    // A valid refreshed session can still be refused by a particular feature endpoint.
+    // Keep the renewed cookies and surface the endpoint error without signing out the user.
+    if (error instanceof GatewayError && error.status === 401)
+      throw new GatewayError(error.message, 403, session);
+    throw error;
+  }
 }
 export function respond(body: unknown, renewed?: Json) {
   return renewCookies(
@@ -185,7 +194,10 @@ export function failure(error: unknown) {
     { message: error instanceof GatewayError ? error.message : 'Unable to complete the request' },
     { status, headers: { 'Cache-Control': 'no-store' } },
   );
-  return status === 401 ? clearSession(response) : response;
+  if (status === 401) return clearSession(response);
+  return error instanceof GatewayError && error.renewed
+    ? renewCookies(response, error.renewed)
+    : response;
 }
 export function isStaff(profile: Json) {
   return (

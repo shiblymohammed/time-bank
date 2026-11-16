@@ -2,6 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { ApiError, backend } from '@/lib/api';
 import type { Action } from '@/lib/admin-types';
+import { Icon } from '@/components/icons';
 import { indiaTime } from '@/lib/request-utils';
 
 type Summary = {
@@ -168,73 +169,201 @@ export function Complaints({
   const base = detail && `/organizations/${detail.organizationId}/complaints/${detail.id}`;
   const closed = detail?.status === 'CLOSED';
 
+  const totalComplaints = rows?.length ?? 0;
+  const openComplaints = rows?.filter((r) => r.status === 'OPEN').length ?? 0;
+  const inReviewComplaints = rows?.filter((r) => r.status === 'IN_REVIEW').length ?? 0;
+  const closedComplaints = rows?.filter((r) => r.status === 'CLOSED').length ?? 0;
+
   return (
     <div className="request-workspace">
-      <div className="section-heading">
-        <div className="section-title-group">
-          <h2>Complaints</h2>
-          <span className="record-count">
-            {rows?.length ?? 0} {showClosed ? 'total' : 'open'}
-          </span>
+      <div className="section-heading" style={{ marginBottom: '16px' }}>
+        <div>
+          <h2>Complaints & Grievances</h2>
+          <p className="section-description" style={{ margin: '4px 0 0' }}>
+            Confidential member complaints, escalations, and dispute resolution.
+          </p>
         </div>
-        <label className="inline-check">
+        <label className="coordinator-filter-checkbox">
           <input
             type="checkbox"
             checked={showClosed}
             onChange={(event) => setShowClosed(event.target.checked)}
-          />{' '}
+          />
           Show closed complaints
         </label>
       </div>
-      <p className="help-text privacy-note">
-        These are confidential. You see only complaints at your level, and never one you made or one
-        about a visit you were part of. Nothing here moves credits. To restrict someone, use
-        Restrictions and give this complaint’s reference. A member can appeal a decision, and that
-        appeal also appears under Restrictions.
-      </p>
+
+      {/* KPI Stat Cards */}
+      <div className="coordinator-kpi-row">
+        {[
+          {
+            name: 'Total Complaints',
+            val: totalComplaints,
+            icon: 'complaints',
+            color: '#2563EB',
+            glow: 'rgba(37, 99, 235, 0.08)',
+            tone: 'blue',
+            pill: showClosed ? 'All recorded' : 'Active queue',
+          },
+          {
+            name: 'New / Open',
+            val: openComplaints,
+            icon: 'clock',
+            color: '#D97706',
+            glow: 'rgba(217, 119, 6, 0.08)',
+            tone: 'amber',
+            pill: 'Needs coordinator',
+          },
+          {
+            name: 'Under Review',
+            val: inReviewComplaints,
+            icon: 'lightning',
+            color: '#7C3AED',
+            glow: 'rgba(124, 58, 237, 0.08)',
+            tone: 'purple',
+            pill: 'Being investigated',
+          },
+          {
+            name: 'Resolved & Decided',
+            val: closedComplaints,
+            icon: 'check',
+            color: '#059669',
+            glow: 'rgba(5, 150, 105, 0.08)',
+            tone: 'emerald',
+            pill: 'Decisions rendered',
+          },
+        ].map((kpi) => (
+          <div
+            className={`modern-kpi-card kpi-tone-${kpi.tone}`}
+            key={kpi.name}
+            style={
+              {
+                '--kpi-color': kpi.color,
+                '--kpi-glow': kpi.glow,
+              } as React.CSSProperties
+            }
+          >
+            <div className="kpi-card-header">
+              <span className="kpi-card-label">{kpi.name}</span>
+              <div className="kpi-card-icon" aria-hidden="true">
+                <Icon name={kpi.icon as any} size={18} />
+              </div>
+            </div>
+            <div className="kpi-card-body">
+              <strong className="kpi-card-value">{kpi.val}</strong>
+            </div>
+            <div className="kpi-card-footer">
+              <span className="kpi-card-pill">
+                <span className="kpi-pill-dot" aria-hidden="true" />
+                {kpi.pill}
+              </span>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Confidentiality Callout Banner */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '14px 16px', background: 'rgba(37, 99, 235, 0.05)', border: '1px solid rgba(37, 99, 235, 0.15)', borderRadius: '12px', marginBottom: '18px' }}>
+        <div style={{ color: '#2563eb', flexShrink: 0, marginTop: '2px' }}>
+          <Icon name="complaints" size={20} />
+        </div>
+        <div style={{ fontSize: '0.80rem', lineHeight: '1.45', color: '#334155' }}>
+          <strong style={{ color: '#1e3a8a', display: 'block', marginBottom: '2px' }}>
+            Confidential Grievance Protocol
+          </strong>
+          These are confidential. You see only complaints at your level, and never one you made or one about a visit you were part of. Nothing here moves credits. To restrict someone, use Restrictions and provide this complaint’s reference. A member can appeal a decision, and that appeal also appears under Restrictions.
+        </div>
+      </div>
+
       {error && (
         <p role="alert" className="error-message">
           {error}
         </p>
       )}
       {!rows && !error && <p role="status">Loading complaints…</p>}
+
+      {/* Empty State */}
       {rows?.length === 0 && (
-        <p className="glass-panel empty-state">
-          {showClosed ? 'No complaints yet.' : 'No complaints need you right now.'}
-        </p>
+        <div className="glass-panel empty-state" style={{ padding: '36px 20px', textAlign: 'center', background: '#ffffff', borderRadius: '14px', border: '1px solid #e2e8f0', margin: '16px 0' }}>
+          <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#ecfdf5', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
+            <Icon name="check" size={24} />
+          </div>
+          <h4 style={{ fontSize: '1rem', fontWeight: 700, color: '#0f172a', margin: '0 0 6px' }}>
+            {showClosed ? 'No complaints recorded' : 'All clear — No complaints need your attention'}
+          </h4>
+          <p style={{ fontSize: '0.82rem', color: '#64748b', margin: 0 }}>
+            {showClosed
+              ? 'There are currently no closed complaints on record.'
+              : 'Any confidential member grievances or incident escalations will appear here.'}
+          </p>
+        </div>
       )}
+
+      {/* Table */}
       {rows && rows.length > 0 && (
-        <div className="table-container glass-panel">
+        <div className="table-container glass-panel modern-table-container">
           <table className="custom-table">
             <thead>
               <tr>
-                <th>Reference</th>
-                {!organizationId && <th>Community</th>}
-                <th>About</th>
-                <th>With</th>
-                <th>Status</th>
-                <th>Made (IST)</th>
-                <th>
-                  <span className="sr-only">Open</span>
-                </th>
+                <th style={{ width: '16%' }}>Reference</th>
+                {!organizationId && <th style={{ width: '18%' }}>Community</th>}
+                <th style={{ width: '24%' }}>Subject</th>
+                <th style={{ width: '16%' }}>Level</th>
+                <th style={{ width: '16%' }}>Status</th>
+                <th style={{ width: '18%' }}>Filed (IST)</th>
+                <th style={{ width: '10%', textAlign: 'right' }}>Action</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((row) => (
                 <tr key={row.id} data-testid="complaint-row">
-                  <td className="mono">{row.reference}</td>
-                  {!organizationId && <td>{row.organizationName}</td>}
-                  <td>{SUBJECT[row.subject]}</td>
-                  <td>{LEVEL[row.level]}</td>
-                  <td>{statusText(row)}</td>
-                  <td>{indiaTime(row.createdAt)}</td>
                   <td>
+                    <span className="mono" style={{ fontWeight: 700, fontSize: '0.86rem', color: '#0f172a' }}>
+                      {row.reference}
+                    </span>
+                  </td>
+                  {!organizationId && <td>{row.organizationName}</td>}
+                  <td>
+                    <span style={{ fontSize: '0.82rem', color: '#334155', fontWeight: 550 }}>
+                      {SUBJECT[row.subject]}
+                    </span>
+                  </td>
+                  <td>
+                    <span className="kpi-card-pill kpi-tone-purple" style={{ fontSize: '0.70rem' }}>
+                      {LEVEL[row.level]}
+                    </span>
+                  </td>
+                  <td>
+                    <span
+                      className={`kpi-card-pill kpi-tone-${
+                        row.status === 'CLOSED'
+                          ? row.outcome === 'UPHELD'
+                            ? 'emerald'
+                            : 'slate'
+                          : row.status === 'IN_REVIEW'
+                            ? 'purple'
+                            : 'amber'
+                      }`}
+                    >
+                      <span className="kpi-pill-dot" />
+                      {statusText(row)}
+                    </span>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.80rem', color: '#475569' }}>
+                      <Icon name="calendar" size={13} />
+                      <span>{indiaTime(row.createdAt)}</span>
+                    </div>
+                  </td>
+                  <td style={{ textAlign: 'right' }}>
                     <button
-                      className="btn btn-secondary btn-open"
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ fontSize: '0.78rem', padding: '5px 12px' }}
                       aria-label={`Open ${row.reference}`}
                       onClick={() => setChosen(row)}
                     >
-                      Open
+                      Open case →
                     </button>
                   </td>
                 </tr>
@@ -243,64 +372,163 @@ export function Complaints({
           </table>
         </div>
       )}
+
       {chosen && !detail && <p role="status">Opening the complaint…</p>}
+
+      {/* Complaint Detail Inspection View */}
       {detail && base && (
-        <section className="detail-panel glass-panel" data-testid="complaint-detail">
-          <h3>
-            {detail.reference} · {statusText(detail)}
-          </h3>
-          <p>
-            <strong>About:</strong> {SUBJECT[detail.subject]}
-          </p>
-          <p>
-            <strong>With:</strong> {LEVEL[detail.level]}
-            {detail.handledByName ? ` · ${detail.handledByName} has this` : ''}
-          </p>
-          <p>“{detail.description}”</p>
-          <p>
-            <strong>Made by:</strong> {detail.raisedByName || 'No name'} · {detail.raisedByPhone}
-            {detail.raisedByMemberNumber ? ` · ${detail.raisedByMemberNumber}` : ''} ·{' '}
-            {indiaTime(detail.createdAt)}
-          </p>
-          {detail.visit && (
-            <p>
-              <strong>Visit:</strong> {detail.visit.serviceName} · {detail.visit.requestNumber} ·{' '}
-              {indiaTime(detail.visit.scheduledStartTime)} · Beneficiary:{' '}
-              {detail.visit.beneficiaryName || 'No name'}
-              {detail.visit.volunteerNames.length > 0 &&
-                ` · Volunteers: ${detail.visit.volunteerNames.join(', ')}`}
-            </p>
-          )}
-          {isGlobal && detail.level !== 'SUPER_ADMIN' && (
-            <p className="help-text">
-              This is with {LEVEL[detail.level].toLowerCase()}. Your reading it is on the audit
-              trail.
-            </p>
-          )}
-          <h4>History</h4>
-          {detail.events.map((event) => (
-            <p key={event.id}>
-              <strong>{EVENT[event.type]}</strong>
-              {event.type !== 'RAISED' &&
-                event.type !== 'APPEALED' &&
-                ` by ${event.actorName || 'staff'}`}{' '}
-              · {indiaTime(event.createdAt)}
-              {event.notes && (
+        <section className="glass-panel detail-panel" data-testid="complaint-detail" style={{ marginTop: '24px', padding: '24px' }}>
+          <div className="request-detail-header">
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+                <span className="mono" style={{ fontSize: '0.88rem', fontWeight: 700, color: '#2563eb', background: '#eff6ff', padding: '3px 8px', borderRadius: '6px' }}>
+                  {detail.reference}
+                </span>
+                <span
+                  className={`kpi-card-pill kpi-tone-${
+                    detail.status === 'CLOSED'
+                      ? detail.outcome === 'UPHELD'
+                        ? 'emerald'
+                        : 'slate'
+                      : detail.status === 'IN_REVIEW'
+                        ? 'purple'
+                        : 'amber'
+                  }`}
+                >
+                  <span className="kpi-pill-dot" />
+                  {statusText(detail)}
+                </span>
+                <span className="kpi-card-pill kpi-tone-purple" style={{ fontSize: '0.72rem' }}>
+                  {LEVEL[detail.level]}
+                </span>
+              </div>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>
+                {SUBJECT[detail.subject]}
+              </h2>
+            </div>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={() => {
+                setChosen(null);
+                setDetail(null);
+              }}
+            >
+              ✕ Close case
+            </button>
+          </div>
+
+          {/* Structured Detail Grid */}
+          <div className="request-detail-grid">
+            <div className="request-detail-card">
+              <h4 className="request-detail-card-title">
+                <Icon name="complaints" size={16} /> Case Description
+              </h4>
+              <p style={{ margin: '6px 0 10px', fontSize: '0.85rem', color: '#1e293b', lineHeight: '1.5', fontStyle: 'italic' }}>
+                “{detail.description}”
+              </p>
+              <div className="request-detail-row">
+                <span className="row-label">Filed by</span>
+                <span className="row-value">{detail.raisedByName || 'Anonymous / Unnamed'}</span>
+              </div>
+              <div className="request-detail-row">
+                <span className="row-label">Phone</span>
+                <span className="row-value">{detail.raisedByPhone || 'N/A'}</span>
+              </div>
+              <div className="request-detail-row">
+                <span className="row-label">Member No.</span>
+                <span className="row-value mono">{detail.raisedByMemberNumber || 'N/A'}</span>
+              </div>
+              <div className="request-detail-row">
+                <span className="row-label">Filed Time (IST)</span>
+                <span className="row-value">{indiaTime(detail.createdAt)}</span>
+              </div>
+            </div>
+
+            <div className="request-detail-card">
+              <h4 className="request-detail-card-title">
+                <Icon name="operations" size={16} /> Handling & Associated Visit
+              </h4>
+              <div className="request-detail-row">
+                <span className="row-label">Assigned Level</span>
+                <span className="row-value">{LEVEL[detail.level]}</span>
+              </div>
+              <div className="request-detail-row">
+                <span className="row-label">Currently Handled By</span>
+                <span className="row-value">{detail.handledByName || 'Unassigned'}</span>
+              </div>
+              {detail.visit ? (
                 <>
-                  <br />
-                  {event.notes}
+                  <div className="request-detail-row">
+                    <span className="row-label">Visit Service</span>
+                    <span className="row-value">{detail.visit.serviceName} ({detail.visit.requestNumber})</span>
+                  </div>
+                  <div className="request-detail-row">
+                    <span className="row-label">Visit Time</span>
+                    <span className="row-value">{indiaTime(detail.visit.scheduledStartTime)}</span>
+                  </div>
+                  <div className="request-detail-row">
+                    <span className="row-label">Beneficiary</span>
+                    <span className="row-value">{detail.visit.beneficiaryName || 'N/A'}</span>
+                  </div>
+                  {detail.visit.volunteerNames.length > 0 && (
+                    <div className="request-detail-row">
+                      <span className="row-label">Volunteers</span>
+                      <span className="row-value">{detail.visit.volunteerNames.join(', ')}</span>
+                    </div>
+                  )}
                 </>
+              ) : (
+                <div style={{ marginTop: '8px', fontSize: '0.80rem', color: '#64748b' }}>
+                  No visit associated with this complaint.
+                </div>
               )}
-            </p>
-          ))}
-          {closed && (
-            <p>
-              <strong>{outcomeText(detail.outcome)}.</strong> The member was told: “
-              {detail.memberMessage}”
+            </div>
+          </div>
+
+          {isGlobal && detail.level !== 'SUPER_ADMIN' && (
+            <p className="help-text" style={{ padding: '8px 12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
+              ℹ️ This is with {LEVEL[detail.level].toLowerCase()}. Your reading it is recorded on the audit trail.
             </p>
           )}
+
+          {/* Event History */}
+          <div style={{ marginTop: '20px' }}>
+            <h4 style={{ fontSize: '0.92rem', fontWeight: 700, color: '#0f172a', marginBottom: '10px' }}>
+              Investigation History ({detail.events.length})
+            </h4>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {detail.events.map((event) => (
+                <div key={event.id} style={{ padding: '10px 14px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.82rem' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <strong style={{ color: '#0f172a' }}>
+                      {EVENT[event.type]}
+                      {event.type !== 'RAISED' && event.type !== 'APPEALED' && ` by ${event.actorName || 'staff'}`}
+                    </strong>
+                    <span style={{ fontSize: '0.74rem', color: '#64748b' }}>{indiaTime(event.createdAt)}</span>
+                  </div>
+                  {event.notes && (
+                    <div style={{ marginTop: '6px', color: '#334155', fontStyle: 'italic' }}>
+                      “{event.notes}”
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {closed && (
+            <div style={{ marginTop: '16px', padding: '14px 16px', background: '#ecfdf5', borderRadius: '10px', border: '1px solid #a7f3d0' }}>
+              <strong style={{ color: '#065f46' }}>Decision: {outcomeText(detail.outcome)}.</strong>
+              <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#047857' }}>
+                The member was notified: “{detail.memberMessage}”
+              </p>
+            </div>
+          )}
+
+          {/* Action Row */}
           {!closed && (
-            <div className="action-row">
+            <div className="action-row" style={{ marginTop: '20px' }}>
               {!detail.beingHandled && (
                 <button
                   className="btn btn-primary"

@@ -31,13 +31,29 @@ const paths = {
   plus: 'M12 5v14M5 12h14',
   chevronLeft: 'M15 18l-6-6 6-6',
   chevronRight: 'M9 18l6-6-6-6',
+  bell: 'M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 0 1-3.46 0',
+  crown: 'M2 4l3 12h14l3-12-6 7-4-7-4 7-6-7z',
+  calendar: 'M19 4H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2zM16 2v4M8 2v4M3 10h18',
+  lightning: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z',
+  arrowRight: 'M5 12h14M12 5l7 7-7 7',
 } as const;
 
 export type IconName = keyof typeof paths;
 
-export function Icon({ name }: { name: IconName }) {
+export function Icon({
+  name,
+  className,
+  size = 18,
+}: {
+  name: IconName;
+  className?: string;
+  size?: number | string;
+}) {
   return (
     <svg
+      width={size}
+      height={size}
+      className={className}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -45,25 +61,94 @@ export function Icon({ name }: { name: IconName }) {
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
+      style={{ flexShrink: 0 }}
     >
       <path d={paths[name]} />
     </svg>
   );
 }
 
-/** The six-dot ring used by the member app. */
-export function BrandMark() {
+/** Authentic 24-spoke Ashoka Chakra of the Republic of India */
+export function AshokaChakra({
+  size = 40,
+  className,
+  color = 'currentColor',
+}: {
+  size?: number | string;
+  className?: string;
+  color?: string;
+}) {
   return (
-    <svg viewBox="0 0 40 40" aria-hidden="true">
-      <circle cx="20" cy="20" r="12" fill="none" stroke="currentColor" strokeWidth="5" />
-      <g fill="currentColor">
-        <circle cx="20" cy="7" r="6" />
-        <circle cx="31.258" cy="13.5" r="6" />
-        <circle cx="31.258" cy="26.5" r="6" />
-        <circle cx="20" cy="33" r="6" />
-        <circle cx="8.742" cy="26.5" r="6" />
-        <circle cx="8.742" cy="13.5" r="6" />
-      </g>
+    <svg
+      viewBox="0 0 100 100"
+      width={size}
+      height={size}
+      className={className}
+      aria-label="Ashoka Chakra"
+      role="img"
+    >
+      {/* Outer rim */}
+      <circle cx="50" cy="50" r="46" fill="none" stroke={color} strokeWidth="3" />
+      <circle cx="50" cy="50" r="42" fill="none" stroke={color} strokeWidth="1" opacity="0.65" />
+
+      {/* Hub */}
+      <circle cx="50" cy="50" r="8" fill="none" stroke={color} strokeWidth="2.5" />
+      <circle cx="50" cy="50" r="3.5" fill={color} />
+
+      {/* 24 Spokes */}
+      {Array.from({ length: 24 }).map((_, i) => (
+        <g key={i} transform={`rotate(${i * 15} 50 50)`}>
+          <polygon
+            points="49.1,50 49.4,12 50,8 50.6,12 50.9,50"
+            fill={color}
+          />
+          <circle cx="50" cy="5.5" r="1.6" fill={color} />
+        </g>
+      ))}
     </svg>
+  );
+}
+
+/** Indian Time Bank official emblem with crisp 24-spoke Ashoka Chakra */
+export function BrandMark({ size = 40 }: { size?: number | string }) {
+  return (
+    <div className="brandmark-composite" style={{ position: 'relative', width: size, height: size }}>
+      <svg
+        viewBox="0 0 100 100"
+        width={size}
+        height={size}
+        aria-hidden="true"
+        style={{ display: 'block' }}
+      >
+        <defs>
+          <radialGradient id="chakraBackglow" cx="50%" cy="50%" r="50%">
+            <stop offset="0%" stopColor="rgba(0, 82, 255, 0.25)" />
+            <stop offset="100%" stopColor="rgba(0, 82, 255, 0)" />
+          </radialGradient>
+        </defs>
+
+        {/* Soft radial glow */}
+        <circle cx="50" cy="50" r="48" fill="url(#chakraBackglow)" />
+
+        {/* Outer rim */}
+        <circle cx="50" cy="50" r="45" fill="none" stroke="#0052FF" strokeWidth="2.8" />
+        <circle cx="50" cy="50" r="41" fill="none" stroke="#0052FF" strokeWidth="0.9" opacity="0.6" />
+
+        {/* Hub */}
+        <circle cx="50" cy="50" r="8" fill="none" stroke="#0052FF" strokeWidth="2.2" />
+        <circle cx="50" cy="50" r="3.5" fill="#0052FF" />
+
+        {/* 24 Spokes */}
+        {Array.from({ length: 24 }).map((_, i) => (
+          <g key={i} transform={`rotate(${i * 15} 50 50)`}>
+            <polygon
+              points="49.1,50 49.4,14 50,10 50.6,14 50.9,50"
+              fill="#0052FF"
+            />
+            <circle cx="50" cy="7.2" r="1.5" fill="#0052FF" />
+          </g>
+        ))}
+      </svg>
+    </div>
   );
 }

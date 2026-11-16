@@ -3,6 +3,7 @@ import React, { useEffect, useState } from 'react';
 import { ApiError, backend } from '@/lib/api';
 import type { Action, Field } from '@/lib/admin-types';
 import { indiaTime } from '@/lib/request-utils';
+import { Icon } from '@/components/icons';
 
 export type Ward = {
   id: string;
@@ -153,10 +154,11 @@ export function WardsPanel({
     });
 
   return (
-    <section className="glass-panel" aria-label={`Wards of ${organizationName}`}>
-      <div className="section-heading">
+    <section className="glass-panel wards-panel" aria-label={`Wards of ${organizationName}`}>
+      <div className="section-heading wards-heading">
         <div>
-          <h3>Wards: {organizationName}</h3>
+          <span className="wards-kicker">LOCAL ADMINISTRATION</span>
+          <h3>Wards in {organizationName}</h3>
           <p className="help-text">
             Members see the ward, its councillor or ward member and the office address. The phone
             number is for staff only.
@@ -174,63 +176,54 @@ export function WardsPanel({
         </div>
       </div>
       {error && <p className="error-message">{error}</p>}
+      {!wards && !error && (
+        <div className="wards-loading" role="status">Loading ward details…</div>
+      )}
       {wards && wards.length === 0 && (
-        <p className="help-text">
-          No wards yet. Until wards are added, members can join without choosing one.
-        </p>
+        <div className="wards-empty">
+          <span className="wards-empty-icon"><Icon name="organizations" /></span>
+          <div>
+            <strong>No wards have been added</strong>
+            <p>Members can join without choosing a ward until you add one.</p>
+          </div>
+          {canEdit && <button className="btn btn-primary" disabled={pending} onClick={add}>Add the first ward</button>}
+        </div>
       )}
       {wards && wards.length > 0 && (
-        <table className="custom-table">
-          <thead>
-            <tr>
-              <th>Ward</th>
-              <th>Represented by</th>
-              <th>Office</th>
-              <th>Status</th>
-              {canEdit && (
-                <th>
-                  <span className="sr-only">Actions</span>
-                </th>
-              )}
-            </tr>
-          </thead>
-          <tbody>
-            {wards.map((ward) => (
-              <tr key={ward.id}>
-                <td className="primary-cell">{wardLabel(ward)}</td>
-                <td>
-                  {ward.representativeName}
-                  <div className="help-text">
-                    {TITLE[ward.representativeTitle]}
-                    {ward.representativePhone ? ` · ${ward.representativePhone}` : ''}
+        <div className="wards-grid">
+          {wards.map((ward) => (
+            <article className={`ward-card ${ward.status === 'ACTIVE' ? 'is-active' : 'is-inactive'}`} key={ward.id}>
+              <div className="ward-card-top">
+                <div className="ward-identity">
+                  <span className="ward-number">{ward.wardNumber}</span>
+                  <div>
+                    <h4>{ward.name}</h4>
+                    <span className="ward-caption">Ward {ward.wardNumber}</span>
                   </div>
-                </td>
-                <td>{ward.officeAddress ?? <span className="help-text">Not given</span>}</td>
-                <td>{ward.status === 'ACTIVE' ? 'In use' : 'Switched off'}</td>
-                {canEdit && (
-                  <td>
-                    <div className="action-row">
-                      <button
-                        className="btn btn-sm btn-secondary"
-                        disabled={pending}
-                        onClick={() => edit(ward)}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        className="btn btn-sm btn-secondary"
-                        disabled={pending}
-                        onClick={() => toggle(ward)}
-                      >
-                        {ward.status === 'ACTIVE' ? 'Switch off' : 'Switch on'}
-                      </button>
-                    </div>
-                  </td>
-                )}
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                </div>
+                <span className={`ward-status ${ward.status === 'ACTIVE' ? 'active' : 'inactive'}`}>
+                  <i aria-hidden="true" />{ward.status === 'ACTIVE' ? 'Active' : 'Inactive'}
+                </span>
+              </div>
+              <div className="ward-detail-row">
+                <span className="ward-detail-icon"><Icon name="users" /></span>
+                <div><small>Ward representative</small><strong>{ward.representativeName}</strong><span>{TITLE[ward.representativeTitle]}{ward.representativePhone ? ` · ${ward.representativePhone}` : ''}</span></div>
+              </div>
+              <div className="ward-detail-row">
+                <span className="ward-detail-icon"><Icon name="organizations" /></span>
+                <div><small>Office address</small><strong>{ward.officeAddress || 'Not provided'}</strong></div>
+              </div>
+              {canEdit && (
+                <div className="ward-card-actions">
+                  <button className="btn ward-edit-button" disabled={pending} onClick={() => edit(ward)}>Edit details</button>
+                  <button className={`btn ${ward.status === 'ACTIVE' ? 'ward-disable-button' : 'ward-enable-button'}`} disabled={pending} onClick={() => toggle(ward)}>
+                    {ward.status === 'ACTIVE' ? 'Deactivate' : 'Activate'}
+                  </button>
+                </div>
+              )}
+            </article>
+          ))}
+        </div>
       )}
     </section>
   );
