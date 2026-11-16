@@ -63,6 +63,18 @@ const ROUTES: [methods: string, pattern: RegExp][] = [
   ['PATCH', new RegExp(`^${ORG}/caregivers/${ID}/review$`, 'i')],
   ['GET POST', new RegExp(`^${ORG}/zones$`, 'i')],
   ['GET PUT', new RegExp(`^${ORG}/zones/${ID}$`, 'i')],
+  ['PUT', new RegExp(`^${ORG}/community/nearby/areas/${ID}$`, 'i')],
+  ['GET POST', new RegExp(`^${ORG}/community/announcements$`, 'i')],
+  ['GET POST', new RegExp(`^${ORG}/community/events$`, 'i')],
+  ['GET', new RegExp(`^${ORG}/community/impact$`, 'i')],
+  ['PUT', new RegExp(`^${ORG}/community/impact/goal$`, 'i')],
+  ['POST', new RegExp(`^${ORG}/community/events/${ID}/cancel$`, 'i')],
+  ['DELETE', new RegExp(`^${ORG}/community/announcements/${ID}$`, 'i')],
+  ['GET', new RegExp(`^${ORG}/community/posts/pending$`, 'i')],
+  ['GET', new RegExp(`^${ORG}/community/posts/${ID}/photo$`, 'i')],
+  ['POST', new RegExp(`^${ORG}/community/posts/${ID}/decision$`, 'i')],
+  ['GET', new RegExp(`^${ORG}/community/reports$`, 'i')],
+  ['POST', new RegExp(`^${ORG}/community/reports/${ID}/decision$`, 'i')],
   ['POST', new RegExp(`^${ORG}/zones/${ID}/volunteers$`, 'i')],
   ['DELETE', new RegExp(`^${ORG}/zones/${ID}/volunteers/${ID}$`, 'i')],
   ['GET', new RegExp(`^${ORG}/volunteers/${ID}/(?:availability|skills|zones)$`, 'i')],
@@ -82,9 +94,9 @@ const allowed = (method: string, resource: string) =>
     ([methods, pattern]) =>
       (methods === '*' || methods.split(' ').includes(method)) && pattern.test(resource),
   );
-/** Report downloads and uploaded member documents are the only things here that are not JSON. */
 const FILE_DOWNLOADS =
-  /(?:\/reports(?:\/sponsor\/[a-f0-9-]+)?\/download|\/loyalty\/achievements\/[a-f0-9-]+\/certificate|\/memberships\/documents\/[a-f0-9-]+\/file)$/i;
+  /(?:\/reports(?:\/sponsor\/[a-f0-9-]+)?\/download|\/loyalty\/achievements\/[a-f0-9-]+\/certificate|\/memberships\/documents\/[a-f0-9-]+\/file|\/community\/posts\/[a-f0-9-]+\/photo)$/i;
+const POST_PHOTO = new RegExp(`^${ORG}/community/posts/${ID}/photo$`, 'i');
 async function proxy(request: NextRequest, context: Context) {
   try {
     if (!['GET', 'POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method))
@@ -100,7 +112,13 @@ async function proxy(request: NextRequest, context: Context) {
       const file = await withSession(request, (token) =>
         upstreamFile(resource + request.nextUrl.search, token),
       );
-      return respondFile(file.body as GatewayFile, file.renewed);
+      const content = file.body as GatewayFile;
+      if (POST_PHOTO.test(resource)) {
+        if (content.contentType !== 'image/jpeg')
+          throw new GatewayError('Unexpected photo type', 502);
+        return respondFile({ ...content, disposition: 'inline' }, file.renewed);
+      }
+      return respondFile(content, file.renewed);
     }
     const body = request.method === 'GET' ? undefined : await request.json().catch(() => undefined);
     const result = await withSession(request, (token) =>

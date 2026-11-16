@@ -542,6 +542,12 @@ export class MatchingService {
             locationAddressText: needsAddress(assignment.status)
               ? assignment.serviceRequest.locationAddressText
               : null,
+            locationLat: needsAddress(assignment.status)
+              ? (assignment.serviceRequest.locationLat ?? null)
+              : null,
+            locationLng: needsAddress(assignment.status)
+              ? (assignment.serviceRequest.locationLng ?? null)
+              : null,
             // Who they are helping, and how to call them, once the visit is theirs.
             beneficiary: needsAddress(assignment.status)
               ? {

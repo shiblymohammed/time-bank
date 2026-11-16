@@ -127,6 +127,9 @@ export class ServiceRequest {
   @Column({ name: 'location_lng', type: 'numeric', precision: 10, scale: 7, nullable: true })
   locationLng?: number | null;
 
+  @Column({ name: 'share_nearby_pin', type: 'boolean', default: false })
+  shareNearbyPin!: boolean;
+
   @Column({ name: 'beneficiary_notes', type: 'text', nullable: true })
   beneficiaryNotes?: string | null;
 

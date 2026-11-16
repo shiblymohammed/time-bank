@@ -13,6 +13,7 @@ import { CommunityParticipation1729118400033 } from '../src/database/migrations/
 import { CommunityPostEditingAndPhotos1729118400034 } from '../src/database/migrations/1729118400034-CommunityPostEditingAndPhotos';
 import { CommunityVisibility1729118400035 } from '../src/database/migrations/1729118400035-CommunityVisibility';
 import { CommunityImpact1729118400036 } from '../src/database/migrations/1729118400036-CommunityImpact';
+import { NearbyRequestPins1729118400037 } from '../src/database/migrations/1729118400037-NearbyRequestPins';
 import { NearbyService } from '../src/nearby/nearby.service';
 import { ProfilePhotoService } from '../src/identity/profile-photo.service';
 import { DocumentStorage } from '../src/wards/noc-storage';
@@ -185,6 +186,7 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       CommunityPostEditingAndPhotos1729118400034,
       CommunityVisibility1729118400035,
       CommunityImpact1729118400036,
+      NearbyRequestPins1729118400037,
     ],
     synchronize: false,
     extra: {
@@ -317,6 +319,26 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         'membershipId',
       ])
         expect(json).not.toContain(privateValue);
+      expect(result.requestPins).toEqual([]);
+    });
+    it('shows only consented approximate pins to approved local volunteers until filled', async () => {
+      const req = await request();
+      await db.query(
+        `UPDATE service_requests SET scheduled_start_time=now()+interval '30 minutes',
+          location_ward_number='1',location_lat=10.9912345,location_lng=75.9912345,
+          share_nearby_pin=true WHERE id=$1`,
+        [req],
+      );
+      const pins = (await nearby.snapshot(orgA, volunteer)).requestPins;
+      expect(pins).toHaveLength(1);
+      expect(pins[0]).toMatchObject({ latitude: 10.99, longitude: 75.99, ward: '1' });
+      expect(JSON.stringify(pins)).not.toContain(req);
+      const recipient = await id('SELECT user_id AS id FROM organization_memberships WHERE id=$1', [
+        beneficiaryA,
+      ]);
+      expect((await nearby.snapshot(orgA, recipient)).requestPins).toEqual([]);
+      await db.query(`UPDATE service_requests SET status='FULLY_MATCHED' WHERE id=$1`, [req]);
+      expect((await nearby.snapshot(orgA, volunteer)).requestPins).toEqual([]);
     });
     it('keeps opt-in membership-scoped, expires on the server, and stops idempotently', async () => {
       await nearby.available(orgA, volunteer, session, optIn(areaA, 15));

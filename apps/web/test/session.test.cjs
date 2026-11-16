@@ -303,6 +303,7 @@ test('service operation routes are allowed per method while other writes stay ex
     ['GET', [...org, 'beneficiaries', 'def-456', 'eligibility']],
     ['PATCH', [...org, 'caregivers', 'def-456', 'review']],
     ['PUT', [...org, 'zones', 'def-456']],
+    ['PUT', [...org, 'community', 'nearby', 'areas', 'def-456']],
     ['DELETE', [...org, 'zones', 'def-456', 'volunteers', 'fed-654']],
     ['PUT', [...org, 'volunteers', 'def-456', 'availability']],
     ['POST', [...org, 'volunteers', 'skills', 'verify']],
@@ -320,6 +321,8 @@ test('service operation routes are allowed per method while other writes stay ex
     ['POST', [...org, 'volunteers', 'def-456', 'availability']],
     ['GET', [...org, 'caregivers', 'mine']],
     ['POST', [...org, 'assignments', 'def-456', 'accept']],
+    ['POST', [...org, 'community', 'nearby', 'areas', 'def-456']],
+    ['PUT', [...org, 'community', 'availability']],
   ]) {
     const result = await proxy[method](
       request(method, method === 'GET' ? undefined : {}, jar(signed)),

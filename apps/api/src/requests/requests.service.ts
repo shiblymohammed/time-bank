@@ -109,6 +109,9 @@ export class RequestsService {
     dto: CreateServiceRequestDto,
     ipAddress?: string,
   ): Promise<ServiceRequest> {
+    if (dto.shareNearbyPin === true && (dto.locationLat == null || dto.locationLng == null)) {
+      throw new BadRequestException('Choose a service location before sharing a map pin.');
+    }
     return this.requestRepo.manager.transaction('READ COMMITTED', async (manager) => {
       // Serialize creation per organization: retries, duplicate checks and the
       // last monthly quota slot must observe the preceding committed request.
@@ -338,6 +341,7 @@ export class RequestsService {
       locationPostalCode: dto.locationPostalCode,
       locationLat: dto.locationLat ?? null,
       locationLng: dto.locationLng ?? null,
+      shareNearbyPin: dto.shareNearbyPin === true,
       beneficiaryNotes: dto.beneficiaryNotes ?? null,
       matchingRadiusKm: 3.0,
       matchingTier: 1,
@@ -1353,6 +1357,7 @@ export function sameRequestDetails(saved: ServiceRequest, dto: CreateServiceRequ
     (saved.beneficiaryNotes ?? null) === (dto.beneficiaryNotes ?? null) &&
     sameCoordinate(saved.locationLat, dto.locationLat) &&
     sameCoordinate(saved.locationLng, dto.locationLng) &&
+    Boolean(saved.shareNearbyPin) === (dto.shareNearbyPin === true) &&
     (Boolean(saved.latestRescheduleId) ||
       new Date(saved.scheduledStartTime).getTime() === new Date(dto.scheduledStartTime).getTime())
   );

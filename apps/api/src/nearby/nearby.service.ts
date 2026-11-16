@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -46,6 +47,11 @@ const eligibleVolunteer = `m.status='APPROVED' AND u.status='ACTIVE'
       (a.status='ACCEPTED' AND ${assignmentStart}<p.expires_at
        AND ${assignmentStart}+r.expected_duration_minutes*interval '1 minute'>now())))`;
 
+const openNearbyRequest = `r.status IN ('MATCHING_ACTIVE','PARTIALLY_ACCEPTED','ESCALATED_TO_COORDINATOR')
+  AND r.scheduled_start_time BETWEEN now()-interval '1 hour' AND now()+interval '24 hours'
+  AND b.status='APPROVED' AND bu.status='ACTIVE'
+  AND NOT EXISTS (SELECT 1 FROM global_account_restrictions x WHERE x.user_id=bu.id AND x.status='ACTIVE')`;
+
 @Injectable()
 export class NearbyService implements OnModuleInit, OnModuleDestroy {
   private cleanupTimer?: ReturnType<typeof setInterval>;
@@ -83,16 +89,15 @@ export class NearbyService implements OnModuleInit, OnModuleDestroy {
   async snapshot(org: string, user: string) {
     return this.db.transaction('REPEATABLE READ', async (m) => {
       const actor = await this.actor(m, org, user);
+      const canVolunteer =
+        actor.roles.includes(UserRole.VOLUNTEER) && actor.membershipStatus === 'APPROVED';
       const rows = await m.query(
         `SELECT z.id,z.name,z.ward_numbers,z.center_lat,z.center_lng,z.radius_km,
         (SELECT count(*) FROM service_requests r
           JOIN organization_memberships b ON b.id=r.beneficiary_membership_id AND b.organization_id=r.organization_id
           JOIN users bu ON bu.id=b.user_id
           WHERE r.organization_id=z.organization_id AND z.ward_numbers ? r.location_ward_number
-          AND r.status IN ('MATCHING_ACTIVE','PARTIALLY_ACCEPTED','ESCALATED_TO_COORDINATOR')
-          AND r.scheduled_start_time BETWEEN now()-interval '1 hour' AND now()+interval '24 hours'
-          AND b.status='APPROVED' AND bu.status='ACTIVE'
-          AND NOT EXISTS (SELECT 1 FROM global_account_restrictions x WHERE x.user_id=bu.id AND x.status='ACTIVE')) AS requests,
+          AND ${openNearbyRequest}) AS requests,
         (SELECT count(*) FROM nearby_availability p
           JOIN organization_memberships m ON m.id=p.membership_id AND m.organization_id=p.organization_id
           JOIN users u ON u.id=m.user_id JOIN authentication_sessions s ON s.id=p.session_id
@@ -114,11 +119,40 @@ export class NearbyService implements OnModuleInit, OnModuleDestroy {
         [org, user],
       );
       const [{ time }] = await m.query('SELECT clock_timestamp() AS time');
+      const pins: {
+        id: string;
+        service_name: string;
+        location_ward_number: string;
+        scheduled_start_time: Date;
+        location_lat: string;
+        location_lng: string;
+      }[] = canVolunteer
+        ? await m.query(
+            `SELECT r.id,r.location_lat,r.location_lng,r.location_ward_number,r.scheduled_start_time,
+              COALESCE(c.custom_label_en,g.name_en) AS service_name
+            FROM service_requests r
+            JOIN organization_memberships b ON b.id=r.beneficiary_membership_id AND b.organization_id=r.organization_id
+            JOIN users bu ON bu.id=b.user_id
+            JOIN organization_service_catalog c ON c.id=r.service_catalog_id AND c.organization_id=r.organization_id
+            JOIN global_service_definitions g ON g.id=c.global_service_id
+            WHERE r.organization_id=$1 AND r.share_nearby_pin AND ${openNearbyRequest}
+            ORDER BY r.scheduled_start_time,r.id LIMIT 101`,
+            [org],
+          )
+        : [];
       return {
         generatedAt: new Date(time).toISOString(),
         refreshAfterSeconds: 15,
-        canShareAvailability:
-          actor.roles.includes(UserRole.VOLUNTEER) && actor.membershipStatus === 'APPROVED',
+        canShareAvailability: canVolunteer,
+        requestPins: pins.slice(0, 100).map((pin) => ({
+          id: createHash('sha256').update(pin.id).digest('hex').slice(0, 24),
+          name: pin.service_name,
+          ward: pin.location_ward_number,
+          scheduledStartTime: pin.scheduled_start_time.toISOString(),
+          latitude: coarseCoordinate(pin.location_lat),
+          longitude: coarseCoordinate(pin.location_lng),
+        })),
+        requestPinsLimited: pins.length > 100,
         availability: mine[0]
           ? { areaId: mine[0].area_id, expiresAt: new Date(mine[0].expires_at).toISOString() }
           : null,

@@ -5,6 +5,7 @@ import type { Action } from '@/lib/admin-types';
 import { indiaTime } from '@/lib/request-utils';
 import { currentIndiaMonth, periodQuery, previousIndiaMonth, shown } from '@/lib/report-utils';
 import type { ReportPeriodChoice, Shown } from '@/lib/report-utils';
+import { ReportBars } from './dashboard-charts';
 
 type VisitRow = { label: string; visits: Shown; hours: Shown };
 type CountRow = { label: string; count: Shown };
@@ -19,6 +20,7 @@ type CommunityRow = {
   creditsEarned: Shown;
 };
 type Figures = {
+  community: { name: string } | null;
   period: { label: string };
   people: {
     volunteers: number;
@@ -88,6 +90,36 @@ const FORMATS = [
   { format: 'csv', label: 'CSV' },
 ];
 const SPONSOR_FORMATS = FORMATS.filter(({ format }) => format !== 'xlsx');
+const REPORT_VIEWS = [
+  { id: 'impact', label: 'Impact' },
+  { id: 'coverage', label: 'Coverage' },
+  { id: 'credits', label: 'Credits & loyalty' },
+  { id: 'safety', label: 'Safety & governance' },
+  { id: 'sponsor', label: 'Sponsor reports' },
+] as const;
+type ReportView = (typeof REPORT_VIEWS)[number]['id'];
+
+function impactMetrics(figures: Figures) {
+  return [
+    { label: 'Hours confirmed', value: figures.help.hoursConfirmed, unit: 'h' },
+    { label: 'Visits completed', value: figures.help.visitsCompleted },
+    { label: 'People helped', value: figures.help.peopleHelped },
+    { label: 'Volunteers who helped', value: figures.help.volunteersHelped },
+    { label: 'Requests made', value: figures.help.requestsMade },
+    {
+      label: 'Median wait for a volunteer',
+      value: figures.speed.typicalMinutesToVolunteer,
+      unit: 'min',
+    },
+  ];
+}
+
+function reportChange(value: number | null, previous: number | null | undefined) {
+  if (value === null || previous == null) return 'Comparison unavailable';
+  const difference = Math.round((value - previous) * 100) / 100;
+  if (difference === 0) return 'Same as previous month';
+  return (difference > 0 ? '+' : '−') + shown(Math.abs(difference)) + ' vs previous month';
+}
 
 function FigureTable({
   title,
@@ -99,9 +131,9 @@ function FigureTable({
   unit?: string;
 }) {
   return (
-    <div className="table-container glass-panel">
-      <table className="custom-table">
-        <caption className="help-text">{title}</caption>
+    <div className="table-container glass-panel report-table-container">
+      <table className="custom-table report-table report-table-compact">
+        <caption className="report-caption">{title}</caption>
         <thead>
           <tr>
             <th scope="col">Figure</th>
@@ -126,9 +158,9 @@ function VisitTable({ title, label, rows }: { title: string; label: string; rows
     return <p className="glass-panel empty-state">{title}: nothing in this period.</p>;
   }
   return (
-    <div className="table-container glass-panel">
-      <table className="custom-table">
-        <caption className="help-text">{title}</caption>
+    <div className="table-container glass-panel report-table-container">
+      <table className="custom-table report-table report-table-compact">
+        <caption className="report-caption">{title}</caption>
         <thead>
           <tr>
             <th scope="col">{label}</th>
@@ -169,12 +201,29 @@ export function Reports({
     from: '',
     to: '',
   });
-  const [figures, setFigures] = useState<Figures | null>(null);
+  const [reportView, setReportView] = useState<ReportView>('impact');
+  const isSponsor = reportView === 'sponsor';
+  const [compare, setCompare] = useState(false);
+  const [report, setReport] = useState<{ key: string; data: Figures } | null>(null);
+  const [comparison, setComparison] = useState<{ key: string; data: Figures | null } | null>(null);
   const [sponsor, setSponsor] = useState<SponsorReport[] | null>(null);
   const [error, setError] = useState('');
   const [downloading, setDownloading] = useState('');
+  const [reload, setReload] = useState(0);
   const base = organizationId ? `/organizations/${organizationId}/reports` : '/admin/reports';
   const query = periodQuery(choice);
+  const thisMonth = currentIndiaMonth(new Date());
+  const lastMonth = previousIndiaMonth(new Date());
+  const completedMonth =
+    choice.mode === 'month' && Boolean(choice.month) && choice.month < thisMonth;
+  const previousMonth = completedMonth
+    ? previousIndiaMonth(new Date(choice.month + '-15T00:00:00Z'))
+    : null;
+  const reportKey = base + '?' + query + ':' + revision + ':' + reload;
+  const comparisonKey = reportKey + ':' + previousMonth;
+  const figures = report?.key === reportKey && query !== null ? report.data : null;
+  const prior = compare && comparison?.key === comparisonKey ? comparison.data : null;
+  const compareLoading = compare && previousMonth && comparison?.key !== comparisonKey;
 
   const failed = useCallback(
     (reason: unknown) => {
@@ -189,24 +238,55 @@ export function Reports({
   );
 
   useEffect(() => {
-    if (query === null) return;
-    const controller = new AbortController();
+    if (query === null || isSponsor) return;
     setError('');
-    setFigures(null);
+    const controller = new AbortController();
     backend<Figures>(`${base}?${query}`, 'GET', undefined, controller.signal)
-      .then(setFigures)
-      .catch(failed);
+      .then((data) => {
+        if (!controller.signal.aborted) setReport({ key: reportKey, data });
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) failed(error);
+      });
     return () => controller.abort();
-  }, [base, query, revision, failed]);
+  }, [base, query, reportKey, failed, isSponsor]);
 
   useEffect(() => {
-    if (!organizationId) return;
+    if (!compare || !previousMonth || reportView !== 'impact') return;
+    const controller = new AbortController();
+    backend<Figures>(
+      `${base}?month=${encodeURIComponent(previousMonth)}`,
+      'GET',
+      undefined,
+      controller.signal,
+    )
+      .then((data) => {
+        if (!controller.signal.aborted) setComparison({ key: comparisonKey, data });
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        if (error instanceof ApiError && error.status === 401) onExpired();
+        setComparison({ key: comparisonKey, data: null });
+      });
+    return () => controller.abort();
+  }, [base, compare, comparisonKey, onExpired, previousMonth, reportView]);
+
+  useEffect(() => {
+    if (!organizationId || reportView !== 'sponsor') return;
+    setError('');
+    setSponsor(null);
     const controller = new AbortController();
     backend<SponsorReport[]>(`${base}/sponsor`, 'GET', undefined, controller.signal)
       .then(setSponsor)
       .catch(failed);
     return () => controller.abort();
-  }, [base, organizationId, revision, failed]);
+  }, [base, organizationId, revision, failed, reportView, reload]);
+
+  function selectMonth(month: string) {
+    setError('');
+    setChoice({ mode: 'month', month, from: '', to: '' });
+    if (month >= thisMonth) setCompare(false);
+  }
 
   const download = async (path: string, key: string) => {
     setDownloading(key);
@@ -240,106 +320,270 @@ export function Reports({
     });
 
   return (
-    <div className="request-workspace">
-      <div className="section-heading">
-        <h2>Reports{figures ? `: ${figures.period.label}` : ''}</h2>
-        <div className="action-row">
-          {FORMATS.map(({ format, label }) => (
-            <button
-              key={format}
-              className="btn btn-secondary"
-              disabled={query === null || Boolean(downloading)}
-              onClick={() => void download(`${base}/download?${query}&format=${format}`, format)}
-            >
-              {downloading === format ? 'Preparing…' : `Download ${label}`}
-            </button>
-          ))}
+    <div className="reports-workspace">
+      <header className="reports-intro">
+        <div>
+          <h2>Community analytics</h2>
+          <p>
+            {report?.data.community?.name ??
+              (organizationId ? 'Selected community' : 'All organizations')}
+          </p>
         </div>
-      </div>
-      <div className="toolbar">
-        <label>
-          Period
-          <select
-            value={choice.mode}
-            onChange={(event) =>
-              setChoice({ ...choice, mode: event.target.value as ReportPeriodChoice['mode'] })
-            }
-          >
-            <option value="month">A month</option>
-            <option value="range">Between two dates</option>
-          </select>
-        </label>
-        {choice.mode === 'month' ? (
-          <label>
-            Month
-            <input
-              type="month"
-              value={choice.month}
-              max={currentIndiaMonth(new Date())}
-              onChange={(event) => setChoice({ ...choice, month: event.target.value })}
-            />
-          </label>
-        ) : (
-          <>
-            <label>
-              From
-              <input
-                type="date"
-                value={choice.from}
-                onChange={(event) => setChoice({ ...choice, from: event.target.value })}
-              />
-            </label>
-            <label>
-              To
-              <input
-                type="date"
-                value={choice.to}
-                onChange={(event) => setChoice({ ...choice, to: event.target.value })}
-              />
-            </label>
-          </>
+        {reportView !== 'sponsor' && (
+          <div className="action-row">
+            {FORMATS.map(({ format, label }) => (
+              <button
+                key={format}
+                className={`btn report-export report-export-${format}`}
+                disabled={!figures || Boolean(downloading)}
+                onClick={() => void download(`${base}/download?${query}&format=${format}`, format)}
+              >
+                {downloading === format ? 'Preparing…' : `Download ${label}`}
+              </button>
+            ))}
+          </div>
         )}
-      </div>
-      <p className="help-text">
-        Counts only, in India time. No names, phone numbers or addresses. A count under 5 in a table
-        shows as &lt;5, and &quot;hidden&quot; stops it being worked out from the total. Every
-        download is recorded.
-      </p>
+      </header>
+      <nav className="reports-navigation" aria-label="Report views">
+        {REPORT_VIEWS.map(({ id, label }) => (
+          <button
+            key={id}
+            type="button"
+            aria-current={id === reportView ? 'page' : undefined}
+            onClick={() => {
+              if (id === reportView) return;
+              setReportView(id);
+              if (reportView === 'sponsor' || id === 'sponsor') {
+                setError('');
+                setReload((value) => value + 1);
+              }
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+      {reportView !== 'sponsor' && (
+        <>
+          <div className="toolbar report-filters">
+            <div className="report-presets" role="group" aria-label="Quick report period">
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                aria-pressed={choice.mode === 'month' && choice.month === thisMonth}
+                onClick={() => selectMonth(thisMonth)}
+              >
+                This month
+              </button>
+              <button
+                type="button"
+                className="btn btn-sm btn-secondary"
+                aria-pressed={choice.mode === 'month' && choice.month === lastMonth}
+                onClick={() => selectMonth(lastMonth)}
+              >
+                Last month
+              </button>
+            </div>
+            <label>
+              Period
+              <select
+                className="form-input"
+                value={choice.mode}
+                onChange={(event) => {
+                  setError('');
+                  setChoice({ ...choice, mode: event.target.value as ReportPeriodChoice['mode'] });
+                  setCompare(false);
+                }}
+              >
+                <option value="month">A month</option>
+                <option value="range">Between two dates</option>
+              </select>
+            </label>
+            {choice.mode === 'month' ? (
+              <label>
+                Month
+                <input
+                  className="form-input"
+                  type="month"
+                  value={choice.month}
+                  max={thisMonth}
+                  onChange={(event) => selectMonth(event.target.value)}
+                />
+              </label>
+            ) : (
+              <>
+                <label>
+                  From
+                  <input
+                    className="form-input"
+                    type="date"
+                    value={choice.from}
+                    onChange={(event) => {
+                      setError('');
+                      setChoice({ ...choice, from: event.target.value });
+                    }}
+                  />
+                </label>
+                <label>
+                  To
+                  <input
+                    className="form-input"
+                    type="date"
+                    value={choice.to}
+                    onChange={(event) => {
+                      setError('');
+                      setChoice({ ...choice, to: event.target.value });
+                    }}
+                  />
+                </label>
+              </>
+            )}
+            {reportView === 'impact' && completedMonth && (
+              <label className="report-compare">
+                <input
+                  type="checkbox"
+                  checked={compare}
+                  onChange={(event) => setCompare(event.target.checked)}
+                />
+                Compare with previous month
+              </label>
+            )}
+          </div>
+          <p className="report-period-label">
+            {figures?.period.label ?? 'Selected period'} <span>India time</span>
+          </p>
+          <details className="report-privacy-note">
+            <summary>How report figures are displayed</summary>
+            <p>
+              Small breakdowns appear as &lt;5 or hidden in the tables. Charts use published
+              numbers. Downloads are recorded.
+            </p>
+          </details>
+        </>
+      )}
       {error && (
-        <p role="alert" className="error-message">
-          {error}
+        <div role="alert" className="report-error">
+          <p className="error-message">{error}</p>
+          <button
+            type="button"
+            className="btn btn-sm btn-secondary"
+            onClick={() => {
+              setError('');
+              setReload((value) => value + 1);
+            }}
+          >
+            Retry report
+          </button>
+        </div>
+      )}
+      {reportView !== 'sponsor' && query === null && (
+        <p className="glass-panel empty-state">
+          {choice.mode === 'month' ? 'Choose a month.' : 'Choose both dates.'}
         </p>
       )}
-      {query === null && <p className="glass-panel empty-state">Choose both dates.</p>}
-      {query !== null && !figures && !error && <p role="status">Working out the figures…</p>}
-      {figures && (
+      {reportView !== 'sponsor' && query !== null && !figures && !error && (
+        <p role="status">Loading report…</p>
+      )}
+      {figures && reportView === 'impact' && (
         <>
-          <div className="metric-grid">
-            {(
-              [
-                ['Hours confirmed', figures.help.hoursConfirmed],
-                ['Visits completed', figures.help.visitsCompleted],
-                ['People helped', figures.help.peopleHelped],
-                ['Volunteers who helped', figures.help.volunteersHelped],
-                ['Requests made', figures.help.requestsMade],
-                [
-                  'Typical minutes to find a volunteer',
-                  figures.speed.typicalMinutesToVolunteer ?? 'Too few requests',
-                ],
-              ] as [string, Shown][]
-            ).map(([label, value]) => (
-              <div className="metric-card glass-panel" key={label}>
+          {compare && completedMonth && (
+            <p className="analytics-note" role="status">
+              {compareLoading
+                ? 'Loading previous month…'
+                : prior
+                  ? 'Compared with ' + prior.period.label
+                  : 'Previous month figures are unavailable.'}
+            </p>
+          )}
+          <div className="metric-grid reports-metrics">
+            {impactMetrics(figures).map(({ label, value, unit }, index) => (
+              <div className="metric-card glass-panel report-metric-card" key={label}>
                 <div>
                   <div className="metric-label">{label}</div>
-                  <div className="metric-value">{shown(value)}</div>
+                  <div className="metric-value">
+                    {value === null ? '—' : shown(value)}
+                    {value !== null && unit && <small>{unit}</small>}
+                  </div>
+                  {value === null && <p className="report-metric-detail">Too few requests</p>}
+                  {prior && (
+                    <p className="report-metric-detail">
+                      {reportChange(value, impactMetrics(prior)[index]?.value)}
+                    </p>
+                  )}
                 </div>
               </div>
             ))}
           </div>
+          <div className="analytics-report-grid">
+            <ReportBars
+              title="Request activity"
+              description="Requests created or reaching each outcome during this period"
+              unit="Requests"
+              rows={[
+                { label: 'Created', value: figures.help.requestsMade },
+                { label: 'Completed', value: figures.help.requestsCompleted },
+                { label: 'Cancelled', value: figures.help.requestsCancelled },
+                { label: 'Unmatched', value: figures.help.requestsUnmatched },
+              ]}
+            />
+            <ReportBars
+              title="Help by service"
+              description="Confirmed volunteer hours"
+              unit="Hours"
+              color="#087f76"
+              rows={figures.byService.map((row) => ({ label: row.label, value: row.hours }))}
+            />
+          </div>
+          <div className="analytics-report-grid">
+            <FigureTable
+              title="People today"
+              rows={[
+                ['Volunteers', figures.people.volunteers],
+                ['Beneficiaries', figures.people.beneficiaries],
+                ['Applications waiting', figures.people.applicationsWaiting],
+              ]}
+            />
+            <FigureTable
+              title="Activity in this period"
+              rows={[
+                ['New members', figures.people.newMembers],
+                ['Requests made', figures.help.requestsMade],
+                ['Requests completed', figures.help.requestsCompleted],
+                ['Requests cancelled', figures.help.requestsCancelled],
+                ['Requests with no volunteer found', figures.help.requestsUnmatched],
+              ]}
+            />
+          </div>
+        </>
+      )}
+      {figures && reportView === 'coverage' && (
+        <>
+          <div className="analytics-report-grid">
+            <ReportBars
+              title="Visits by service"
+              description="Verified visits by type of help"
+              unit="Visits"
+              rows={figures.byService.map((row) => ({ label: row.label, value: row.visits }))}
+            />
+            <ReportBars
+              title={organizationId ? 'Visits by ward' : 'Visits by community'}
+              description="Verified visits in the selected period"
+              unit="Visits"
+              color="#087f76"
+              rows={
+                organizationId
+                  ? figures.byWard.map((row) => ({ label: row.label, value: row.visits }))
+                  : (figures.communities ?? []).map((row) => ({
+                      label: row.name,
+                      value: row.visits,
+                    }))
+              }
+            />
+          </div>
           {figures.communities && (
-            <div className="table-container glass-panel">
-              <table className="custom-table">
-                <caption className="help-text">
+            <div className="table-container glass-panel report-table-container">
+              <table className="custom-table report-table">
+                <caption className="report-caption">
                   By community. A person active in several communities counts once in the totals
                   above, so the totals can be lower than these rows added up.
                 </caption>
@@ -370,25 +614,38 @@ export function Reports({
               </table>
             </div>
           )}
-          <FigureTable
-            title="People, as of today"
-            rows={[
-              ['Volunteers', figures.people.volunteers],
-              ['Beneficiaries', figures.people.beneficiaries],
-              ['Applications waiting', figures.people.applicationsWaiting],
-            ]}
-          />
-          <FigureTable
-            title="Help given in this period"
-            rows={[
-              ['New members', figures.people.newMembers],
-              ['Requests completed', figures.help.requestsCompleted],
-              ['Requests cancelled', figures.help.requestsCancelled],
-              ['Requests with no volunteer found', figures.help.requestsUnmatched],
-            ]}
-          />
           <VisitTable title="Help by service" label="Service" rows={figures.byService} />
           {organizationId && <VisitTable title="Help by ward" label="Ward" rows={figures.byWard} />}
+        </>
+      )}
+      {figures && reportView === 'credits' && (
+        <>
+          <div className="analytics-report-grid">
+            <ReportBars
+              title="Time-credit activity"
+              unit="Credits"
+              rows={[
+                { label: 'Earned', value: figures.credits.earned },
+                { label: 'Donated', value: figures.credits.donated },
+                { label: 'Spent', value: figures.credits.spent },
+                { label: 'Put on hold', value: figures.credits.held },
+              ]}
+            />
+            {figures.loyalty && (
+              <ReportBars
+                title="Local loyalty activity"
+                unit="Coins"
+                color="#087f76"
+                rows={[
+                  { label: 'Earned', value: figures.loyalty.earned },
+                  { label: 'Redeemed', value: figures.loyalty.redeemed },
+                  { label: 'Put on hold', value: figures.loyalty.held },
+                  { label: 'Retired', value: figures.loyalty.retired },
+                  { label: 'Restored', value: figures.loyalty.restored },
+                ]}
+              />
+            )}
+          </div>
           <FigureTable
             title="Time credits, under the community they came from"
             unit="Credits"
@@ -420,8 +677,24 @@ export function Reports({
               />
             </>
           )}
+        </>
+      )}
+      {figures && reportView === 'safety' && (
+        <>
+          <ReportBars
+            title="Safety and governance activity"
+            description="Cases and actions recorded in the selected period"
+            unit="Cases"
+            color="#2c67b7"
+            rows={[
+              { label: 'Safety alerts', value: figures.safety.alertsRaised },
+              { label: 'Complaints', value: figures.safety.complaintsReceived },
+              { label: 'Restrictions recommended', value: figures.safety.restrictionsRecommended },
+              { label: 'Appeals', value: figures.safety.appealsFiled },
+            ]}
+          />
           <FigureTable
-            title="Safety and governance"
+            title="Safety and governance details"
             rows={[
               ['Safety alerts', figures.safety.alertsRaised],
               ['Complaints received', figures.safety.complaintsReceived],
@@ -448,31 +721,41 @@ export function Reports({
         </>
       )}
 
-      <div className="section-heading">
-        <h2>Sponsor reports</h2>
-        {organizationId && (
-          <div className="action-row">
-            <button className="btn btn-primary" disabled={pending} onClick={saveVersion}>
-              Save a report
-            </button>
+      {reportView === 'sponsor' && (
+        <>
+          <div className="section-heading">
+            <h2>Sponsor reports</h2>
+            {organizationId && (
+              <div className="action-row">
+                <button className="btn btn-primary" disabled={pending} onClick={saveVersion}>
+                  Save a report
+                </button>
+              </div>
+            )}
           </div>
-        )}
-      </div>
-      {!organizationId && (
-        <p className="glass-panel empty-state">Choose a community to see its sponsor reports.</p>
-      )}
-      {organizationId && (
-        <p className="help-text">
-          Saved on the 1st of each month. They leave out safety matters, complaints, restrictions,
-          closures and budgets. Download one and send it yourself; sponsors have no login.
-        </p>
-      )}
-      {organizationId && sponsor?.length === 0 && (
-        <p className="glass-panel empty-state">No sponsor reports yet.</p>
+          {!organizationId && (
+            <p className="glass-panel empty-state">
+              Choose a community to see its sponsor reports.
+            </p>
+          )}
+          {organizationId && (
+            <p className="help-text">
+              Saved on the 1st of each month. They leave out safety matters, complaints,
+              restrictions, closures and budgets. Download one and send it yourself; sponsors have
+              no login.
+            </p>
+          )}
+          {organizationId && sponsor === null && !error && (
+            <p role="status">Loading saved reports…</p>
+          )}
+          {organizationId && sponsor?.length === 0 && (
+            <p className="glass-panel empty-state">No sponsor reports yet.</p>
+          )}
+        </>
       )}
       {organizationId && sponsor && sponsor.length > 0 && (
-        <div className="table-container glass-panel">
-          <table className="custom-table">
+        <div className="table-container glass-panel report-table-container">
+          <table className="custom-table report-table">
             <thead>
               <tr>
                 <th scope="col">Month</th>

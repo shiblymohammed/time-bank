@@ -120,6 +120,11 @@ export class CreateServiceRequestDto {
   @IsOptional()
   locationLng?: number;
 
+  @ApiPropertyOptional({ description: 'Show an approximate pin to approved local volunteers' })
+  @IsBoolean()
+  @IsOptional()
+  shareNearbyPin?: boolean;
+
   @ApiPropertyOptional({ example: 'Needs wheelchair assistance from parking lot' })
   @IsString()
   @IsOptional()
