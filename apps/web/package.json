@@ -5,6 +5,7 @@
   "description": "Kottakkal Time Bank — Next.js web dashboards for coordinators, admins and merchants (D#96, D#93)",
   "scripts": {
     "dev": "next dev --port 3000",
+    "prebuild": "pnpm --filter @ktb/shared-types build",
     "build": "next build",
     "start": "next start --port 3000",
     "lint": "eslint src",

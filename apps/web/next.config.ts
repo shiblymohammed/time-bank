@@ -10,9 +10,8 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   // API traffic goes through the allowlisted /api/backend gateway, not a blanket rewrite.
 
-  // Self-contained server for infra/docker/Dockerfile.web; trace from the monorepo root so
-  // pnpm workspace dependencies are included.
-  output: 'standalone',
+  // Self-contained server for Docker (Linux); on Vercel or local Windows, native build is used.
+  output: process.env.VERCEL ? undefined : (process.platform === 'win32' ? undefined : 'standalone'),
   // Separate build output lets disposable UI QA run alongside a developer's session.
   distDir: process.env['NEXT_DIST_DIR'] ?? '.next',
   outputFileTracingRoot: path.join(__dirname, '../..'),
