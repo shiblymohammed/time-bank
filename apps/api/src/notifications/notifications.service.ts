@@ -42,6 +42,19 @@ export class NotificationsService {
     private readonly sender: PushSender,
   ) {}
 
+  /** Returns only this user's recent notification messages for the web and mobile inboxes. */
+  async inbox(userId: string) {
+    const items = await this.dataSource.query(
+      `SELECT id,type,title,body,data,created_at AS "createdAt",sent_at AS "sentAt"
+       FROM notification_outbox
+       WHERE user_id=$1 AND created_at >= NOW() - INTERVAL '30 days'
+       ORDER BY created_at DESC,id DESC
+       LIMIT 50`,
+      [userId],
+    );
+    return { items };
+  }
+
   /** Joins the caller's transaction, so the message exists only if the event commits. */
   async enqueue(manager: EntityManager, notification: NewNotification): Promise<void> {
     await manager.getRepository(NotificationOutbox).insert(notification);

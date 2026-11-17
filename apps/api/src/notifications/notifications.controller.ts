@@ -2,6 +2,7 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   HttpCode,
   HttpStatus,
   Put,
@@ -17,11 +18,17 @@ import { NotificationsService } from './notifications.service';
 @ApiTags('Notifications')
 @ApiBearerAuth()
 @UseGuards(AuthGuard)
-@Controller('notifications/devices')
+@Controller('notifications')
 export class NotificationsController {
   constructor(private readonly notifications: NotificationsService) {}
 
-  @Put()
+  @Get('inbox')
+  @ApiOperation({ summary: 'List recent notifications for the signed-in user' })
+  async inbox(@CurrentUserId() userId: string) {
+    return this.notifications.inbox(userId);
+  }
+
+  @Put('devices')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Register this phone for push messages' })
   async register(
@@ -37,7 +44,7 @@ export class NotificationsController {
     );
   }
 
-  @Delete()
+  @Delete('devices')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Stop push messages to this phone, used when signing out' })
   async remove(@Body() dto: RemovePushDeviceDto, @CurrentUserId() userId: string) {

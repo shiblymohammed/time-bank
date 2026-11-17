@@ -81,6 +81,7 @@ const ROUTES: [methods: string, pattern: RegExp][] = [
   ['PUT', new RegExp(`^${ORG}/volunteers/${ID}/availability$`, 'i')],
   ['POST', new RegExp(`^${ORG}/volunteers/skills/verify$`, 'i')],
   ['GET', /^\/donation-pools$/],
+  ['GET', /^\/notifications\/inbox$/],
   ['POST', new RegExp(`^${ORG}/donation-pools$`, 'i')],
   ['GET', new RegExp(`^${ORG}/donation-pools/${ID}/transactions$`, 'i')],
   ['GET POST', new RegExp(`^${ORG}/credit-reviews$`, 'i')],

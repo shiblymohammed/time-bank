@@ -131,6 +131,15 @@ type Audit = {
   createdAt: string;
   payload: Record<string, unknown>;
 };
+type AdminNotification = {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  data: Record<string, string>;
+  createdAt: string;
+  sentAt: string | null;
+};
 type Document = { id: string; documentType: string; storageKey: string; reviewStatus: string };
 type Metrics = {
   totalUsers: number;
@@ -879,6 +888,11 @@ export default function AdminDashboard(): React.JSX.Element {
   const [tab, setTab] = useState<Tab>('overview'),
     [tenant, setTenant] = useState('GLOBAL');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<AdminNotification[]>([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationsError, setNotificationsError] = useState('');
+  const [notificationsRevision, setNotificationsRevision] = useState(0);
   const mobileMenu = useRef<HTMLButtonElement>(null);
   const [organizations, setOrganizations] = useState<Organization[]>([]),
     [wardCounts, setWardCounts] = useState<Record<string, number | null>>({}),
@@ -1014,7 +1028,46 @@ export default function AdminDashboard(): React.JSX.Element {
     setTab('overview');
     setNotice('');
     setError('');
+    setNotificationsOpen(false);
+    setNotifications([]);
   }, []);
+  useEffect(() => {
+    if (!notificationsOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [notificationsOpen]);
+  useEffect(() => {
+    if (!notificationsOpen || !profile) return;
+    const controller = new AbortController();
+    setNotificationsLoading(true);
+    setNotificationsError('');
+    void backend<{ items: AdminNotification[] }>(
+      '/notifications/inbox',
+      'GET',
+      undefined,
+      controller.signal,
+    )
+      .then((result) => {
+        if (!controller.signal.aborted) setNotifications(result.items);
+      })
+      .catch((cause: unknown) => {
+        if (controller.signal.aborted) return;
+        if (cause instanceof ApiError && cause.status === 401) {
+          expired();
+          return;
+        }
+        setNotificationsError(
+          cause instanceof Error ? cause.message : 'Could not load notifications.',
+        );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setNotificationsLoading(false);
+      });
+    return () => controller.abort();
+  }, [notificationsOpen, notificationsRevision, profile, expired]);
   useEffect(() => {
     const controller = new AbortController();
     api<Profile>('/api/session', 'GET', undefined, controller.signal)
@@ -1365,7 +1418,7 @@ export default function AdminDashboard(): React.JSX.Element {
           </div>
         </div>
       </aside>
-      <div className="main-wrapper" inert={action !== null || detail !== null}>
+      <div className="main-wrapper" inert={action !== null || detail !== null || notificationsOpen}>
         {tab !== 'overview' && (
           <header
             className={`top-bar ${['restrictions', 'closures', 'phone-recoveries'].includes(tab) ? 'governance-topbar' : ''}`}
@@ -1422,9 +1475,16 @@ export default function AdminDashboard(): React.JSX.Element {
                   <Icon name="chevronRight" />
                 </div>
                 {/* Notification Bell */}
-                <button className="modern-bell-btn" type="button" title="Notifications" aria-label="Notifications">
+                <button
+                  className="modern-bell-btn"
+                  type="button"
+                  title="Notifications"
+                  aria-label="Notifications"
+                  aria-expanded={notificationsOpen}
+                  onClick={() => setNotificationsOpen(true)}
+                >
                   <Icon name="bell" />
-                  <span className="bell-red-badge" />
+                  {notifications.length > 0 && <span className="bell-red-badge" />}
                 </button>
                 {/* Profile Pill */}
                 <div className="modern-profile-pill" title="Super Admin Account">
@@ -1479,9 +1539,16 @@ export default function AdminDashboard(): React.JSX.Element {
                     <Icon name="chevronRight" />
                   </div>
                   {/* Notification Bell */}
-                  <button className="modern-bell-btn" type="button" title="Notifications" aria-label="Notifications">
+                  <button
+                    className="modern-bell-btn"
+                    type="button"
+                    title="Notifications"
+                    aria-label="Notifications"
+                    aria-expanded={notificationsOpen}
+                    onClick={() => setNotificationsOpen(true)}
+                  >
                     <Icon name="bell" />
-                    <span className="bell-red-badge" />
+                    {notifications.length > 0 && <span className="bell-red-badge" />}
                   </button>
                   {/* Profile Pill */}
                   <div className="modern-profile-pill" title="Super Admin Account">
@@ -3004,6 +3071,98 @@ export default function AdminDashboard(): React.JSX.Element {
           }}
         />
       )}
+      {notificationsOpen && typeof document !== 'undefined' &&
+        createPortal(
+          <>
+            <div
+              className="drawer-backdrop notification-drawer-backdrop"
+              onClick={() => setNotificationsOpen(false)}
+            />
+            <aside
+              className="drawer notification-drawer"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="notification-drawer-title"
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') setNotificationsOpen(false);
+              }}
+            >
+              <div className="drawer-header notification-drawer-header">
+                <div>
+                  <span className="membership-review-kicker">ADMIN WORKSPACE</span>
+                  <h2 id="notification-drawer-title">Notifications</h2>
+                  <p>Recent updates for your account</p>
+                </div>
+                <button
+                  className="icon-button"
+                  type="button"
+                  aria-label="Close notifications"
+                  title="Close"
+                  autoFocus
+                  onClick={() => setNotificationsOpen(false)}
+                >
+                  <Icon name="close" />
+                </button>
+              </div>
+              <div className="drawer-body notification-drawer-body" aria-busy={notificationsLoading}>
+                {notificationsLoading && (
+                  <p className="notification-drawer-state" role="status">
+                    Loading notifications…
+                  </p>
+                )}
+                {notificationsError && (
+                  <div className="notification-drawer-error">
+                    <p className="error-message" role="alert">{notificationsError}</p>
+                    <button
+                      className="btn btn-secondary"
+                      type="button"
+                      disabled={notificationsLoading}
+                      onClick={() => setNotificationsRevision((value) => value + 1)}
+                    >
+                      Try again
+                    </button>
+                  </div>
+                )}
+                {!notificationsLoading && !notificationsError && notifications.length === 0 && (
+                  <div className="notification-empty-state">
+                    <span><Icon name="bell" size={20} /></span>
+                    <h3>You’re all caught up</h3>
+                    <p>New updates for your account will appear here.</p>
+                  </div>
+                )}
+                {!notificationsError && notifications.map((notification) => {
+                  const organizationName = organizations.find(
+                    (organization) => organization.id === notification.data?.organizationId,
+                  )?.name;
+                  return (
+                    <article className="notification-item" key={notification.id}>
+                      <span className="notification-item-icon" aria-hidden="true">
+                        <Icon name="bell" size={16} />
+                      </span>
+                      <div className="notification-item-copy">
+                        <div className="notification-item-heading">
+                          <h3>{notification.title}</h3>
+                          <time dateTime={notification.createdAt}>
+                            {new Date(notification.createdAt).toLocaleString('en-IN', {
+                              dateStyle: 'medium',
+                              timeStyle: 'short',
+                            })}
+                          </time>
+                        </div>
+                        <p>{notification.body}</p>
+                        {organizationName && <span className="notification-item-scope">{organizationName}</span>}
+                      </div>
+                    </article>
+                  );
+                })}
+                {!notificationsLoading && notifications.length > 0 && (
+                  <p className="notification-retention-note">Showing your latest notifications from the past 30 days.</p>
+                )}
+              </div>
+            </aside>
+          </>,
+          document.body,
+        )}
     </div>
   );
 }
