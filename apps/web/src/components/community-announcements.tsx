@@ -32,6 +32,7 @@ export function CommunityAnnouncements({
   const [photoPreview, setPhotoPreview] = useState<string | null>(null);
   const photoInput = useRef<HTMLInputElement>(null);
   const [removing, setRemoving] = useState<string | null>(null);
+  const [composerOpen, setComposerOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [reload, setReload] = useState(0);
@@ -49,6 +50,20 @@ export function CommunityAnnouncements({
     setPhotoPreview(preview);
     return () => URL.revokeObjectURL(preview);
   }, [photo]);
+
+  useEffect(() => {
+    if (!composerOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) setComposerOpen(false);
+    };
+    document.body.style.overflow = 'hidden';
+    window.addEventListener('keydown', closeOnEscape);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener('keydown', closeOnEscape);
+    };
+  }, [composerOpen, busy]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -118,6 +133,26 @@ export function CommunityAnnouncements({
         hidden={tab !== 'posts'}
         style={tab !== 'posts' ? { display: 'none' } : undefined}
       >
+        <section className="glass-panel community-compose-card community-compose-feature">
+          <div className="community-card-heading">
+            <div>
+              <span className="community-section-kicker">COMMUNITY POSTS</span>
+              <h2>Share an update with members</h2>
+              <p>Compose a local announcement with an optional image.</p>
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary community-open-composer"
+              onClick={() => {
+                setProblem('');
+                setComposerOpen(true);
+              }}
+            >
+              <Icon name="plus" size={16} />
+              Publish post
+            </button>
+          </div>
+        </section>
         <CommunityPendingPosts organizationId={organizationId} revision={revision} />
         <CommunityReportQueue
           organizationId={organizationId}
@@ -125,118 +160,156 @@ export function CommunityAnnouncements({
           announcementRevision={announcementRevision}
           onPostRemoved={() => setReload((value) => value + 1)}
         />
-        <section className="glass-panel community-compose-card">
-          <div className="community-card-heading">
-            <div>
-              <span className="community-section-kicker">COMMUNITY POSTS</span>
-              <h2>Publish an announcement</h2>
-              <p>Share a useful update with members of this municipality.</p>
-            </div>
-            <span className="community-audience-badge">Local members</span>
-          </div>
-          <form
-            className="community-announcement-form"
-            onSubmit={(event) => {
-              event.preventDefault();
-              if (!body.trim() || busy) return;
-              void run(async () => {
-                const form = new FormData();
-                form.set('body', body.trim());
-                if (photo) form.set('file', photo);
-                await backendFormData(path, form);
-                setBody('');
-                setPhoto(null);
-                if (photoInput.current) photoInput.current.value = '';
-                setNotice('Announcement published.');
-                setReload((value) => value + 1);
-              });
+        {composerOpen && (
+          <div
+            className="modal-backdrop community-composer-backdrop"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget && !busy) setComposerOpen(false);
             }}
           >
-            <div className="community-form-field">
-              <label htmlFor="community-announcement">Message for members</label>
-              <textarea
-                id="community-announcement"
-                className="form-input community-announcement-message"
-                value={body}
-                onChange={(event) => setBody(event.target.value)}
-                rows={5}
-                maxLength={2000}
-                required
-                disabled={busy}
-                placeholder="Write a clear update for your community…"
-              />
-              <span className="community-character-count">{body.length} / 2,000</span>
-            </div>
-            <div className="community-form-field">
-              <span className="community-field-label">Image (optional)</span>
-              <label className={`community-upload-dropzone ${photo ? 'has-file' : ''}`}>
-                <input
-                  id="community-announcement-photo"
-                  ref={photoInput}
-                  className="community-file-input"
-                  type="file"
-                  accept="image/jpeg,image/png"
-                  disabled={busy}
-                  onChange={(event) => {
-                    const selected = event.currentTarget.files?.[0] ?? null;
-                    if (selected && !['image/jpeg', 'image/png'].includes(selected.type)) {
-                      setProblem('Choose a JPEG or PNG image.');
-                      event.currentTarget.value = '';
-                      return;
-                    }
-                    if (selected && selected.size > 5 * 1024 * 1024) {
-                      setProblem('The image must be 5 MB or smaller.');
-                      event.currentTarget.value = '';
-                      return;
-                    }
-                    setProblem('');
-                    setPhoto(selected);
-                  }}
-                />
-                <span className="community-upload-icon" aria-hidden="true">
-                  <Icon name="plus" size={18} />
-                </span>
-                <span className="community-upload-copy">
-                  <strong>{photo?.name ?? 'Choose an image to attach'}</strong>
-                  <small>JPEG or PNG · Up to 5 MB</small>
-                </span>
-                <span className="community-upload-action">Browse files</span>
-              </label>
-              {photoPreview && (
-                <div className="community-announcement-photo-preview">
-                  {/* eslint-disable-next-line @next/next/no-img-element -- Local object URL previews an unsubmitted image. */}
-                  <img src={photoPreview} alt="Announcement image preview" />
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    disabled={busy}
-                    onClick={() => {
-                      setPhoto(null);
-                      if (photoInput.current) photoInput.current.value = '';
-                    }}
-                  >
-                    Remove image
-                  </button>
+            <section
+              className="modal-content community-composer-modal"
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="community-composer-title"
+            >
+              <div className="community-composer-header">
+                <div>
+                  <span className="community-section-kicker">COMMUNITY ANNOUNCEMENT</span>
+                  <h2 id="community-composer-title">Publish a post</h2>
+                  <p>Share an update with members of this municipality.</p>
                 </div>
-              )}
-            </div>
-            <div className="community-compose-footer">
-              <p>
-                Members of this community can read this. Don&apos;t include private details about
-                people or visits.
-              </p>
-              <button type="submit" className="btn btn-primary" disabled={busy || !body.trim()}>
-                {busy ? 'Publishing…' : 'Publish announcement'}
-              </button>
-            </div>
-          </form>
-        </section>
+                <button
+                  type="button"
+                  className="community-composer-close"
+                  aria-label="Close announcement form"
+                  disabled={busy}
+                  onClick={() => setComposerOpen(false)}
+                >
+                  ×
+                </button>
+              </div>
+              <form
+                className="community-announcement-form"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  if (!body.trim() || busy) return;
+                  void run(async () => {
+                    const form = new FormData();
+                    form.set('body', body.trim());
+                    if (photo) form.set('file', photo);
+                    await backendFormData(path, form);
+                    setBody('');
+                    setPhoto(null);
+                    if (photoInput.current) photoInput.current.value = '';
+                    setComposerOpen(false);
+                    setNotice('Announcement published.');
+                    setReload((value) => value + 1);
+                  });
+                }}
+              >
+                <div className="community-form-field">
+                  <label htmlFor="community-announcement">Message for members</label>
+                  <textarea
+                    id="community-announcement"
+                    className="form-input community-announcement-message"
+                    value={body}
+                    onChange={(event) => setBody(event.target.value)}
+                    rows={5}
+                    maxLength={2000}
+                    required
+                    disabled={busy}
+                    placeholder="Write a clear update for your community…"
+                  />
+                  <span className="community-character-count">{body.length} / 2,000</span>
+                </div>
+                <div className="community-form-field">
+                  <span className="community-field-label">Image (optional)</span>
+                  <label className={`community-upload-dropzone ${photo ? 'has-file' : ''}`}>
+                    <input
+                      id="community-announcement-photo"
+                      ref={photoInput}
+                      className="community-file-input"
+                      type="file"
+                      accept="image/jpeg,image/png"
+                      disabled={busy}
+                      onChange={(event) => {
+                        const selected = event.currentTarget.files?.[0] ?? null;
+                        if (selected && !['image/jpeg', 'image/png'].includes(selected.type)) {
+                          setProblem('Choose a JPEG or PNG image.');
+                          event.currentTarget.value = '';
+                          return;
+                        }
+                        if (selected && selected.size > 5 * 1024 * 1024) {
+                          setProblem('The image must be 5 MB or smaller.');
+                          event.currentTarget.value = '';
+                          return;
+                        }
+                        setProblem('');
+                        setPhoto(selected);
+                      }}
+                    />
+                    <span className="community-upload-icon" aria-hidden="true">
+                      <Icon name="plus" size={18} />
+                    </span>
+                    <span className="community-upload-copy">
+                      <strong>{photo?.name ?? 'Choose an image to attach'}</strong>
+                      <small>JPEG or PNG · Up to 5 MB</small>
+                    </span>
+                    <span className="community-upload-action">Browse files</span>
+                  </label>
+                  {photoPreview && (
+                    <div className="community-announcement-photo-preview">
+                      {/* eslint-disable-next-line @next/next/no-img-element -- Local object URL previews an unsubmitted image. */}
+                      <img src={photoPreview} alt="Announcement image preview" />
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={busy}
+                        onClick={() => {
+                          setPhoto(null);
+                          if (photoInput.current) photoInput.current.value = '';
+                        }}
+                      >
+                        Remove image
+                      </button>
+                    </div>
+                  )}
+                </div>
+                {problem && (
+                  <p className="error-message" role="alert">
+                    {problem}
+                  </p>
+                )}
+                <div className="community-compose-footer">
+                  <p>
+                    Members of this community can read this. Don&apos;t include private details about
+                    people or visits.
+                  </p>
+                  <div className="community-composer-actions">
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      disabled={busy}
+                      onClick={() => setComposerOpen(false)}
+                    >
+                      Cancel
+                    </button>
+                    <button type="submit" className="btn btn-primary" disabled={busy || !body.trim()}>
+                      {busy ? 'Publishing…' : 'Publish post'}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </section>
+          </div>
+        )}
         {notice && (
           <p className="success-message" role="status">
             {notice}
           </p>
         )}
-        {problem && (
+        {problem && !composerOpen && (
           <p className="error-message" role="alert">
             {problem}
           </p>

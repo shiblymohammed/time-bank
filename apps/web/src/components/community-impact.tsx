@@ -73,10 +73,16 @@ export function CommunityImpact({
 
   const formatter = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
   return (
-    <section className="glass-panel stack" style={{ padding: 22 }}>
-      <h2>Community Impact</h2>
-      <label>
-        Reporting month (India time)
+    <section className="glass-panel stack community-feature-card community-impact-card">
+      <div className="community-card-heading">
+        <div>
+          <span className="community-section-kicker">COMMUNITY INSIGHTS</span>
+          <h2>Community impact</h2>
+          <p>Track verified volunteer activity and set a monthly goal.</p>
+        </div>
+      </div>
+      <label className="community-impact-month">
+        Reporting month <span>India time</span>
         <input
           className="form-input"
           type="month"
@@ -93,30 +99,41 @@ export function CommunityImpact({
       {!current && month && !error && <p role="status">Loading community impact…</p>}
       {current && (
         <>
-          <div className="action-row">
-            <p>
-              <strong>{formatter.format(current.verifiedMinutes / 60)}</strong> verified volunteer
-              hours
-            </p>
-            <p>
-              <strong>{formatter.format(current.completedVisits)}</strong> completed visits
-            </p>
+          <div className="community-impact-stats">
+            <article className="community-impact-stat">
+              <span>Verified volunteer hours</span>
+              <strong>{formatter.format(current.verifiedMinutes / 60)}</strong>
+              <small>Hours completed and verified</small>
+            </article>
+            <article className="community-impact-stat">
+              <span>Completed visits</span>
+              <strong>{formatter.format(current.completedVisits)}</strong>
+              <small>Assistance visits completed</small>
+            </article>
           </div>
           {current.targetHours !== null && (
-            <label>
-              Goal progress · {formatter.format(current.verifiedMinutes / 60)} of{' '}
-              {formatter.format(current.targetHours)} hours
+            <div className="community-impact-progress">
+              <div>
+                <strong>Monthly goal progress</strong>
+                <span>
+                  {formatter.format(current.verifiedMinutes / 60)} of{' '}
+                  {formatter.format(current.targetHours)} hours
+                </span>
+              </div>
               <progress
-                style={{ display: 'block', width: '100%' }}
                 max={current.targetHours * 60}
                 value={Math.min(current.verifiedMinutes, current.targetHours * 60)}
               />
-            </label>
+            </div>
           )}
           {month >= indiaMonth(new Date()) ? (
-            <form className="stack" onSubmit={(event) => void save(event)}>
+            <form className="community-impact-goal" onSubmit={(event) => void save(event)}>
+              <div>
+                <h3>Monthly volunteer goal</h3>
+                <p>Set a target for verified volunteer hours this month.</p>
+              </div>
               <label>
-                Monthly goal in volunteer hours
+                Goal (hours)
                 <input
                   className="form-input"
                   type="number"
@@ -128,7 +145,7 @@ export function CommunityImpact({
                   onChange={(event) => setHours(event.target.value)}
                 />
               </label>
-              <div>
+              <div className="community-impact-goal-action">
                 <button
                   type="submit"
                   className="btn btn-primary"

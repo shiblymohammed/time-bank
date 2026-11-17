@@ -132,10 +132,19 @@ export function CommunityEvents({
   }
 
   return (
-    <section className="glass-panel stack" style={{ padding: 22 }} aria-busy={busy || loading}>
-      <h2>Community events</h2>
-      <form className="stack" onSubmit={publish}>
-        <h3>Publish an event</h3>
+    <section className="glass-panel stack community-feature-card" aria-busy={busy || loading}>
+      <div className="community-card-heading">
+        <div>
+          <span className="community-section-kicker">COMMUNITY CALENDAR</span>
+          <h2>Community events</h2>
+          <p>Publish local events and manage member sign-ups.</p>
+        </div>
+      </div>
+      <form className="community-event-form" onSubmit={publish}>
+        <div className="community-subsection-heading">
+          <h3>Publish an event</h3>
+          <p>Members in this organization can view the event and sign up.</p>
+        </div>
         {(
           [
             ['title', 'Event title', 'text', 120],
@@ -145,7 +154,7 @@ export function CommunityEvents({
             ['capacity', 'Capacity (optional)', 'number'],
           ] as const
         ).map(([key, label, type, maxLength]) => (
-          <label key={key}>
+          <label className="community-event-field" key={key}>
             {label}
             <input
               className="form-input"
@@ -160,8 +169,12 @@ export function CommunityEvents({
             />
           </label>
         ))}
-        {timezone && <p className="help-text">Times use your browser’s time zone ({timezone}).</p>}
-        <label>
+        {timezone && (
+          <p className="help-text community-event-timezone">
+            Times use your browser’s time zone ({timezone}).
+          </p>
+        )}
+        <label className="community-event-field community-event-description">
           Description
           <textarea
             className="form-input"
@@ -173,7 +186,7 @@ export function CommunityEvents({
             onChange={(event) => setFields({ ...fields, description: event.target.value })}
           />
         </label>
-        <div>
+        <div className="community-event-submit">
           <button className="btn btn-primary" type="submit" disabled={busy}>
             Publish event
           </button>
@@ -189,8 +202,11 @@ export function CommunityEvents({
           {actionError}
         </p>
       )}
-      <h3>Published and past events</h3>
-      <div>
+      <div className="community-subsection-heading community-event-list-heading">
+        <div>
+          <h3>Published and past events</h3>
+          <p>Review event details, sign-ups, and cancellations.</p>
+        </div>
         <button className="btn btn-secondary" disabled={loading || busy} onClick={reload}>
           Refresh events
         </button>
@@ -203,18 +219,32 @@ export function CommunityEvents({
       )}
       {!loading && !loadError && !events.length && <p>No events have been published.</p>}
       {events.map((event) => (
-        <article
-          key={event.id}
-          className="stack"
-          style={{ borderTop: '1px solid #ddd', paddingTop: 16 }}
-        >
-          <h4>{event.title}</h4>
-          <p>
-            {event.venue} · {new Date(event.starts_at).toLocaleString()} –{' '}
-            {new Date(event.ends_at).toLocaleString()}
+        <article key={event.id} className="stack community-event-card">
+          <div className="community-event-card-heading">
+            <h4>{event.title}</h4>
+            <span className={`community-event-status ${event.cancelled_at ? 'cancelled' : ''}`}>
+              {event.cancelled_at
+                ? 'Cancelled'
+                : Date.parse(event.starts_at) > Date.now()
+                  ? 'Upcoming'
+                  : Date.parse(event.ends_at) > Date.now()
+                    ? 'In progress'
+                    : 'Completed'}
+            </span>
+          </div>
+          <p className="community-event-meta">
+            <span>{event.venue}</span>
+            <span>
+              {new Date(event.starts_at).toLocaleString()} – {new Date(event.ends_at).toLocaleString()}
+            </span>
           </p>
-          <p style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{event.description}</p>
-          <p className="help-text">
+          <p
+            className="community-event-description"
+            style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}
+          >
+            {event.description}
+          </p>
+          <p className="help-text community-event-attendees">
             {event.attendees}
             {event.capacity !== null ? ` / ${event.capacity}` : ''} signed up
           </p>
@@ -277,7 +307,7 @@ export function CommunityEvents({
         </article>
       ))}
       {next !== null && (
-        <div>
+        <div className="community-event-load-more">
           <button
             className="btn btn-secondary"
             disabled={loading || busy}

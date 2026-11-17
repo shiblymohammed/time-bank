@@ -808,9 +808,10 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
         ───────────────────────────────────────────────────────────── */}
         {organizationId && section === 'beneficiaries' && (
           <>
-            <div className="ops-card">
+            <div className="ops-card ops-beneficiary-card">
               <ActionForm
                 title="Look Up Beneficiary"
+                className="ops-form-beneficiary-lookup"
                 submit="Load Eligibility & Caregivers"
                 onSubmit={(data) => viewBeneficiary(str(data, 'membershipId'))}
               >
@@ -821,7 +822,7 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
             </div>
 
             {eligibility && (
-              <div className="ops-card" style={{ borderLeft: '4px solid #10b981' }}>
+              <div className="ops-card ops-beneficiary-card" style={{ borderLeft: '4px solid #10b981' }}>
                 <div className="ops-card-header">
                   <h3 className="ops-card-title">
                     <Icon name="check" />
@@ -836,7 +837,7 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
             )}
 
             {caregivers.length > 0 && (
-              <div className="ops-card">
+              <div className="ops-card ops-beneficiary-card">
                 <div className="ops-card-header">
                   <h3 className="ops-card-title">
                     <Icon name="memberships" />
@@ -876,9 +877,10 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
               </div>
             )}
 
-            <div className="ops-card">
+            <div className="ops-card ops-beneficiary-card">
               <ActionForm
                 title="Grant or Renew Eligibility"
+                className="ops-form-beneficiary-eligibility"
                 submit="Save Eligibility"
                 onSubmit={(data) =>
                   save(`${base}/beneficiaries/eligibility`, {
@@ -908,7 +910,7 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
               </ActionForm>
             </div>
 
-            <div className="ops-card">
+            <div className="ops-card ops-beneficiary-card">
               <ActionForm
                 title="Request Caregiver Authorization"
                 submit="Request Authorization"
