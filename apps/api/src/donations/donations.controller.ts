@@ -1,10 +1,12 @@
-import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Param, ParseUUIDPipe, Post, Req, UseGuards, Header, NotFoundException, StreamableFile } from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
+import { ProfilePhotoService } from '../identity/profile-photo.service';
 import { Request } from 'express';
 import { UserRole } from '@ktb/shared-types';
 
 import { DonationsService } from './donations.service';
-import { CreateDonationDto } from './dto/create-donation.dto';
+import { CreateDonationDto, LookupDonationMemberDto } from './dto/create-donation.dto';
 import { CreateCommunityPoolDto } from './dto/create-community-pool.dto';
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { OrganizationAccessGuard } from '../authorization/guards/organization-access.guard';
@@ -16,7 +18,10 @@ import { CurrentUserId } from '../authorization/decorators/current-user.decorato
 @ApiBearerAuth('JWT-auth')
 @Controller()
 export class DonationsController {
-  constructor(private readonly donationsService: DonationsService) {}
+  constructor(
+    private readonly donationsService: DonationsService,
+    private readonly photos: ProfilePhotoService,
+  ) {}
 
   @Post('organizations/:id/donations')
   @UseGuards(AuthGuard, OrganizationAccessGuard)
@@ -37,6 +42,54 @@ export class DonationsController {
   ) {
     const ip = req.ip ?? req.socket.remoteAddress;
     return this.donationsService.donate(organizationId, userId, dto, ip);
+  }
+
+  @Post('organizations/:id/donations/local')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  donateLocally(
+    @Param('id', ParseUUIDPipe) org: string,
+    @Body() dto: CreateDonationDto,
+    @CurrentUserId() user: string,
+    @Req() req: Request,
+  ) {
+    return this.donationsService.donate(org, user, dto, req.ip ?? req.socket.remoteAddress, true);
+  }
+
+  @Post('organizations/:id/donations/recipient')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @Throttle({ default: { limit: 15, ttl: 60_000 } })
+  @Header('Cache-Control', 'private, no-store')
+  async lookupRecipient(
+    @Param('id', ParseUUIDPipe) org: string,
+    @Body() dto: LookupDonationMemberDto,
+    @CurrentUserId() user: string,
+  ) {
+    const { membershipId, membershipNumber, name, photoVersion } =
+      await this.donationsService.resolveLocalRecipient(org, user, { membershipNumber: dto.membershipNumber });
+    return { membershipId, membershipNumber, name, photoVersion };
+  }
+
+  @Get('organizations/:id/donations/recipient/:membershipId/photo/:version')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @Throttle({ default: { limit: 30, ttl: 60_000 } })
+  @Header('Cache-Control', 'private, no-store')
+  async recipientPhoto(
+    @Param('id', ParseUUIDPipe) org: string,
+    @Param('membershipId', ParseUUIDPipe) id: string,
+    @Param('version', ParseUUIDPipe) version: string,
+    @CurrentUserId() user: string,
+  ) {
+    const recipient = await this.donationsService.resolveLocalRecipient(org, user, { id });
+    if (recipient.photoVersion !== version) throw new NotFoundException('No shared profile photo');
+    return new StreamableFile(await this.photos.readVersion(recipient.userId, version), {
+      type: 'image/jpeg',
+    });
+  }
+
+  @Get('organizations/:id/donation-pools')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  listLocalPools(@Param('id', ParseUUIDPipe) org: string) {
+    return this.donationsService.listPools(org);
   }
 
   @Get('donation-pools')

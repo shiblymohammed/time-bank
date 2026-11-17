@@ -78,6 +78,21 @@ export function Loyalty({
     receipts: [],
     volume: {},
   });
+  const [ownerSearch, setOwnerSearch] = useState('');
+  const [owners, setOwners] = useState<Row[]>([]);
+  const [ownerFound, setOwnerFound] = useState(false);
+  const [onboarding, setOnboarding] = useState({
+    membershipId: '',
+    name: '',
+    address: '',
+    phone: '',
+  });
+  const [shopQr, setShopQr] = useState<{
+    id: string;
+    code: string;
+    qrSvg: string;
+    offers: Row[];
+  } | null>(null);
   const [campaigns, setCampaigns] = useState<Row[]>([]),
     [engagement, setEngagement] = useState<Row[]>([]);
   const keys = useRef(new Map<string, string>());
@@ -95,6 +110,67 @@ export function Loyalty({
   };
   const base = org ? `/organizations/${org}/loyalty` : '';
   const pending = busy || loading;
+  async function findOwners() {
+    const search = ownerSearch.trim();
+    if (!org || !search) return;
+    const params = new URLSearchParams({ status: 'APPROVED', search, limit: '20' });
+    const result = await backend<{ memberships: Row[] }>(
+      `/organizations/${org}/memberships?${params}`,
+      'GET',
+    );
+    setOwners(result.memberships);
+    setOwnerFound(true);
+    setOnboarding((form) => ({ ...form, membershipId: '' }));
+  }
+  async function loadShopQr(id: string) {
+    const [qr, shop] = await Promise.all([
+      backend<{ code: string; qrSvg: string }>(`${base}/shops/${id}/qr`, 'GET'),
+      backend<{ offers: Row[] }>(`${base}/shops/${id}/offers`, 'GET'),
+    ]);
+    if (alive.current) setShopQr({ ...qr, id, offers: shop.offers });
+  }
+  function qrControls(id: string) {
+    const selected = shopQr?.id === id ? shopQr : null;
+    const src = selected ? `data:image/svg+xml,${encodeURIComponent(selected.qrSvg)}` : null;
+    return (
+      <div className="detail-section">
+        <button
+          className="btn btn-secondary"
+          disabled={pending}
+          onClick={() => void run(() => loadShopQr(id), false)}
+        >
+          {selected ? 'Refresh shop QR and offers' : 'Show shop QR'}
+        </button>
+        {selected && src && (
+          <div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={src} width={200} height={200} alt="Shop QR to scan in the Time Bank Wallet" />
+            <p>
+              <a href={src} download="timebank-shop-qr.svg">
+                Download printable shop QR
+              </a>
+            </p>
+            <p>
+              Shop code <code>{selected.code}</code>
+            </p>
+            <h3>Offers customers can see</h3>
+            {selected.offers.length ? (
+              <ul>
+                {selected.offers.map((offer) => (
+                  <li key={words(offer.id)}>
+                    {words(offer.title)} · {words(offer.coins)} coins · {words(offer.remaining)}{' '}
+                    left
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p>There are no available offers right now.</p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
   const load = useCallback(
     async (signal: AbortSignal) => {
       if (isGlobal)
@@ -132,14 +208,14 @@ export function Loyalty({
       });
     return () => abort.abort();
   }, [load, revision, onExpired]);
-  async function run(action: () => Promise<unknown>) {
+  async function run(action: () => Promise<unknown>, writes = true) {
     if (pending) return;
     setBusy(true);
     setError('');
     setNotice('');
     try {
       await action();
-      if (!alive.current) return;
+      if (!alive.current || !writes) return;
       keys.current.clear();
       setNotice('Saved.');
       revise((n) => n + 1);
@@ -450,7 +526,93 @@ export function Loyalty({
           )}
           {canManage && (
             <section className="glass-panel">
-              <h2>Merchant applications</h2>
+              <h2>Merchants</h2>
+              <details>
+                <summary>Add merchant</summary>
+                <p>
+                  Choose an approved member to own the business. The shop is added as pending
+                  review.
+                </p>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void run(findOwners, false);
+                  }}
+                >
+                  <Field
+                    label="Find approved member by name, phone or member number"
+                    value={ownerSearch}
+                    onChange={(value) => {
+                      setOwnerSearch(value);
+                      setOwners([]);
+                      setOwnerFound(false);
+                      setOnboarding((form) => ({ ...form, membershipId: '' }));
+                    }}
+                  />
+                  <button className="btn btn-secondary" disabled={pending || !ownerSearch.trim()}>
+                    Find member
+                  </button>
+                </form>
+                {ownerFound && owners.length === 0 && <p>No approved members matched.</p>}
+                {owners.length > 0 && (
+                  <form
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void run(async () => {
+                        await post('/merchant/onboard', onboarding);
+                        setOnboarding({ membershipId: '', name: '', address: '', phone: '' });
+                        setOwnerSearch('');
+                        setOwners([]);
+                        setOwnerFound(false);
+                      });
+                    }}
+                  >
+                    <label className="form-label">
+                      Shop owner
+                      <select
+                        className="form-input"
+                        required
+                        value={onboarding.membershipId}
+                        onChange={(e) =>
+                          setOnboarding({ ...onboarding, membershipId: e.target.value })
+                        }
+                      >
+                        <option value="">Choose a member</option>
+                        {owners.map((member) => {
+                          const user = member.user as Row | undefined;
+                          return (
+                            <option key={words(member.id)} value={words(member.id)}>
+                              {words(user?.fullName || user?.phoneE164)} ·{' '}
+                              {words(member.membershipNumber)}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </label>
+                    <Field
+                      label="Business name"
+                      value={onboarding.name}
+                      onChange={(name) => setOnboarding({ ...onboarding, name })}
+                    />
+                    <Field
+                      label="Public business address"
+                      value={onboarding.address}
+                      onChange={(address) => setOnboarding({ ...onboarding, address })}
+                    />
+                    <Field
+                      label="Public business phone, including +country code"
+                      value={onboarding.phone}
+                      onChange={(phone) => setOnboarding({ ...onboarding, phone })}
+                    />
+                    <button
+                      className="btn btn-primary"
+                      disabled={pending || !onboarding.membershipId}
+                    >
+                      Add merchant for review
+                    </button>
+                  </form>
+                )}
+              </details>
               {review.merchants.length === 0 && <p>No applications.</p>}
               {review.merchants.map((m) => (
                 <article key={words(m.id)} className="detail-section">
@@ -460,6 +622,7 @@ export function Loyalty({
                   </p>
                   <Status row={m} />
                   {actionButtons('merchants', m, true)}
+                  {m.status === 'APPROVED' && qrControls(words(m.id))}
                   {m.status === 'APPROVED' && (
                     <button
                       className="btn btn-secondary"
@@ -539,6 +702,15 @@ export function Loyalty({
                   <h2>{words(own.merchant.name)}</h2>
                   <Status row={own.merchant} />
                   <p>{words(own.merchant.address)}</p>
+                </section>
+              )}
+              {own.merchant?.status === 'APPROVED' && (
+                <section className="glass-panel">
+                  <h2>Shop QR</h2>
+                  <p>
+                    Print this QR for your counter so members can open your offers in the Wallet.
+                  </p>
+                  {qrControls(words(own.merchant.id))}
                 </section>
               )}
               {own.merchant?.status === 'APPROVED' && (

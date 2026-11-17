@@ -1,4 +1,5 @@
 'use client';
+import { InstantHelpReviews } from '@/components/instant-help-reviews';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { Action } from '@/lib/admin-types';
@@ -33,6 +34,7 @@ type Tab =
   | 'overview'
   | 'organizations'
   | 'memberships'
+  | 'instant-help'
   | 'requests'
   | 'community'
   | 'safety'
@@ -209,6 +211,7 @@ const PAGES: {
     description: 'Review membership applications and manage member access',
     coordinatorDescription: 'Review applications and member eligibility for your municipality',
   },
+  { id: 'instant-help', text: 'Instant help', icon: 'requests', group: 'Staff Console', description: 'Verify unplanned help and approve time credits' },
   {
     id: 'requests',
     text: 'Requests & Matching',
@@ -1004,6 +1007,7 @@ export default function AdminDashboard(): React.JSX.Element {
         [
           'organizations',
           'memberships',
+          'instant-help',
           'requests',
           'community',
           'safety',
@@ -1753,6 +1757,7 @@ export default function AdminDashboard(): React.JSX.Element {
               </section>
             </div>
           )}
+          {tab === 'instant-help' && (tenant === 'GLOBAL' ? <p className="glass-panel empty-state">Choose an organization to review instant help.</p> : <InstantHelpReviews key={tenant} organizationId={tenant} onExpired={expired}/>)}
           {tab === 'requests' &&
             (tenant === 'GLOBAL' ? (
               <p className="glass-panel empty-state">

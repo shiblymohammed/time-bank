@@ -85,6 +85,9 @@ export class TimeCreditLedgerEntry {
   @JoinColumn({ name: 'originating_org_id' })
   originatingOrg?: Organization;
 
+  @Column({ name: 'instant_help_session_id', type: 'uuid', nullable: true })
+  instantHelpSessionId?: string | null;
+
   @Column({ name: 'service_request_id', type: 'uuid', nullable: true })
   serviceRequestId?: string | null;
 

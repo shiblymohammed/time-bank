@@ -17,6 +17,7 @@ import {
   IssueRedemptionDto,
   LoyaltyCampaignDto,
   MerchantApplicationDto,
+  MerchantOnboardingDto,
   MerchantOfferDto,
 } from './dto/merchant.dto';
 import { MerchantsService } from './merchants.service';
@@ -34,6 +35,27 @@ export class MerchantsController {
   }
   @Get('merchant') mine(@Param('id', ParseUUIDPipe) org: string, @CurrentUserId() user: string) {
     return this.merchants.mine(org, user);
+  }
+  @Post('merchant/onboard') onboard(
+    @Param('id', ParseUUIDPipe) org: string,
+    @CurrentUserId() user: string,
+    @Body() dto: MerchantOnboardingDto,
+  ) {
+    return this.merchants.onboard(org, user, dto);
+  }
+  @Get('shops/:shopId/offers') @Header('Cache-Control', 'no-store') shopOffers(
+    @Param('id', ParseUUIDPipe) org: string,
+    @CurrentUserId() user: string,
+    @Param('shopId', ParseUUIDPipe) shop: string,
+  ) {
+    return this.merchants.shopOffers(org, user, shop);
+  }
+  @Get('shops/:shopId/qr') @Header('Cache-Control', 'no-store') shopQr(
+    @Param('id', ParseUUIDPipe) org: string,
+    @CurrentUserId() user: string,
+    @Param('shopId', ParseUUIDPipe) shop: string,
+  ) {
+    return this.merchants.shopQr(org, user, shop);
   }
   @Get('review') review(@Param('id', ParseUUIDPipe) org: string, @CurrentUserId() user: string) {
     return this.merchants.review(org, user);

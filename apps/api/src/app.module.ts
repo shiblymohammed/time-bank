@@ -1,3 +1,4 @@
+import { InstantHelpModule } from './instant-help/instant-help.module';
 import { Module } from '@nestjs/common';
 import * as path from 'path';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -44,6 +45,7 @@ import { CommunityModule } from './community/community.module';
  */
 @Module({
   imports: [
+    InstantHelpModule,
     NearbyModule,
     CommunityModule,
     // ─── Configuration ──────────────────────────────────────────────

@@ -31,15 +31,14 @@ export function creditsForMinutes(minutes: number, policy: CreditPolicy): number
   return Math.round((counted * rate * multiplier) / 6000) / 100;
 }
 
-export interface ServiceEarning {
+export type ServiceEarning = {
   volunteerUserId: string;
   organizationId: string;
-  serviceRequestId: string;
-  volunteerAssignmentId: string;
   minutes: number;
   policy: CreditPolicy;
   reference?: string;
-}
+} & ({serviceRequestId: string; volunteerAssignmentId: string; instantHelpSessionId?: never}
+  | {instantHelpSessionId: string; serviceRequestId?: never; volunteerAssignmentId?: never});
 
 @Injectable()
 export class TimeLedgerService {
@@ -114,8 +113,9 @@ export class TimeLedgerService {
         frozenDelta: held ? amount : 0,
         txType: TimeCreditTxType.SERVICE_EARNED,
         originatingOrgId: earning.organizationId,
-        serviceRequestId: earning.serviceRequestId,
-        volunteerAssignmentId: earning.volunteerAssignmentId,
+        serviceRequestId: earning.serviceRequestId ?? null,
+        volunteerAssignmentId: earning.volunteerAssignmentId ?? null,
+        instantHelpSessionId: earning.instantHelpSessionId ?? null,
         minutes: earning.minutes,
         reference: earning.reference ?? null,
       }),
@@ -130,6 +130,7 @@ export class TimeLedgerService {
         payload: {
           walletId: wallet.id,
           volunteerAssignmentId: earning.volunteerAssignmentId,
+          instantHelpSessionId: earning.instantHelpSessionId ?? null,
           minutes: earning.minutes,
           amount,
         },
@@ -150,13 +151,14 @@ export class TimeLedgerService {
          COALESCE(wallet.balance_credits, 0) AS "balanceCredits",
          COALESCE(wallet.frozen_credits, 0) AS "frozenCredits",
          COALESCE(wallet.status, 'ACTIVE') AS status,
-         COALESCE((
+         (COALESCE((
            SELECT SUM(visit.confirmed_minutes)
            FROM organization_memberships member
            JOIN volunteer_assignments visit ON visit.volunteer_membership_id = member.id
            WHERE member.user_id = $1 AND visit.confirmed_at IS NOT NULL
              AND visit.status = 'COMPLETED'
-         ), 0)::text AS "minutesGiven",
+         ), 0) + COALESCE((SELECT SUM(instant.approved_minutes) FROM instant_help_sessions instant
+           WHERE instant.user_id=$1 AND instant.status='APPROVED'),0))::text AS "minutesGiven",
          COALESCE((
            SELECT SUM(visit.confirmed_minutes)
            FROM organization_memberships member
@@ -182,6 +184,25 @@ export class TimeLedgerService {
       minutesReceived: Number(summary?.minutesReceived ?? 0),
       creditsDonated: Number(summary?.creditsDonated ?? 0),
     };
+  }
+
+  async myMonthlyEarnings(userId: string) {
+    const points = await this.ledgerRepo.query(
+      `WITH days AS (
+         SELECT generate_series(date_trunc('month',now() AT TIME ZONE 'UTC')::date,
+           (now() AT TIME ZONE 'UTC')::date, interval '1 day')::date AS day
+       ), earnings AS (
+         SELECT (entry.created_at AT TIME ZONE 'UTC')::date AS day, sum(entry.amount) AS credits
+         FROM time_credit_ledger entry JOIN universal_time_wallets wallet ON wallet.id=entry.wallet_id
+         WHERE wallet.user_id=$1 AND entry.tx_type='SERVICE_EARNED'
+           AND entry.created_at >= date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
+           AND entry.created_at <= now()
+         GROUP BY 1
+       ) SELECT days.day::text, COALESCE(earnings.credits,0)::text AS credits
+       FROM days LEFT JOIN earnings ON earnings.day=days.day ORDER BY days.day`,
+      [userId],
+    );
+    return { points };
   }
 
   /** The signed-in user's universal wallet and newest-first credit history. */
@@ -221,6 +242,7 @@ export class TimeLedgerService {
         reviewId: entry.reviewId ?? null,
         operationId: entry.operationId ?? null,
         txType: entry.txType,
+        instantHelpSessionId: entry.instantHelpSessionId ?? null,
         minutes: entry.minutes ?? null,
         createdAt: entry.createdAt,
         organization: entry.originatingOrg
@@ -265,6 +287,7 @@ export class TimeLedgerService {
         : {
             type: 'MEMBER',
             membershipNumber: member?.membershipNumber ?? null,
+            organizationId: member?.organizationId ?? null,
             organizationName: member?.organization?.name ?? null,
           },
     };

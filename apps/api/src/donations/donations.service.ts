@@ -49,7 +49,9 @@ export class DonationsService {
    * transaction. Wallet rows are locked in id order, then the pool, so two
    * members giving to each other at once cannot deadlock or overspend.
    */
-  async donate(orgId: string, donorUserId: string, dto: CreateDonationDto, ipAddress?: string) {
+  async donate(
+    orgId: string, donorUserId: string, dto: CreateDonationDto, ipAddress?: string, localOnly = false,
+  ) {
     const toPool = dto.poolId !== undefined;
     const toMember =
       dto.recipientOrganizationId !== undefined || dto.recipientMembershipNumber !== undefined;
@@ -67,26 +69,15 @@ export class DonationsService {
       let membership: OrganizationMembership | null = null;
       let pool: CommunityCreditPool | null = null;
       if (toMember) {
-        membership = await manager.getRepository(OrganizationMembership).findOne({
-          where: {
-            organizationId: dto.recipientOrganizationId!,
-            membershipNumber: dto.recipientMembershipNumber!,
-            status: MembershipStatus.APPROVED,
-          },
-          relations: ['organization', 'user', 'user.verifiedIdentity'],
-        });
-        // D#19: only verified individuals may receive credits.
-        if (
-          !membership ||
-          membership.organization.status !== OrganizationStatus.ACTIVE ||
-          membership.user.status !== AccountStatus.ACTIVE ||
-          membership.user.verifiedIdentity?.verificationStatus !==
-            IdentityVerificationStatus.VERIFIED
-        ) {
-          throw new NotFoundException('No verified member has that membership number');
+        if (localOnly && (dto.recipientOrganizationId !== orgId || !dto.confirmedMembershipId)) {
+          throw new BadRequestException('Verify a recipient in this municipality before giving credits');
         }
-        if (membership.userId === donorUserId) {
-          throw new BadRequestException('You cannot give credits to yourself');
+        membership = await this.findRecipient(
+          manager, dto.recipientOrganizationId!, donorUserId,
+          { membershipNumber: dto.recipientMembershipNumber! },
+        );
+        if (localOnly && membership.id !== dto.confirmedMembershipId) {
+          throw new ConflictException('The recipient changed. Verify their membership number again.');
         }
         // Older accounts may predate automatic wallet provisioning.
         await manager.query(
@@ -95,7 +86,7 @@ export class DonationsService {
         );
       } else {
         pool = await manager.getRepository(CommunityCreditPool).findOne({
-          where: { id: dto.poolId!, status: CommunityPoolStatus.ACTIVE },
+          where: { id: dto.poolId!, status: CommunityPoolStatus.ACTIVE, ...(localOnly ? { organizationId: orgId } : {}) },
           relations: ['organization'],
         });
         if (!pool || pool.organization?.status !== OrganizationStatus.ACTIVE) {
@@ -250,6 +241,60 @@ export class DonationsService {
     });
   }
 
+  private async findRecipient(
+    manager: EntityManager,
+    organizationId: string,
+    donorUserId: string,
+    target: { membershipNumber: string } | { id: string },
+  ) {
+    const member = await manager.getRepository(OrganizationMembership).findOne({
+      where: { organizationId, status: MembershipStatus.APPROVED, ...target },
+      relations: ['organization', 'user', 'user.verifiedIdentity'],
+    });
+    if (
+      !member || member.organization.status !== OrganizationStatus.ACTIVE ||
+      member.user.status !== AccountStatus.ACTIVE ||
+      member.user.verifiedIdentity?.verificationStatus !== IdentityVerificationStatus.VERIFIED
+    ) {
+      throw new NotFoundException('No verified member has that membership number');
+    }
+    if (member.userId === donorUserId) {
+      throw new BadRequestException('You cannot give credits to yourself');
+    }
+    return member;
+  }
+
+  async resolveLocalRecipient(
+    organizationId: string,
+    donorUserId: string,
+    target: { membershipNumber: string } | { id: string },
+  ) {
+    const manager = this.donationRepo.manager;
+    const member = await this.findRecipient(manager, organizationId, donorUserId, target);
+    const [access] = await manager.query(
+      `SELECT EXISTS(
+          SELECT 1 FROM global_account_restrictions
+          WHERE user_id=ANY($1::uuid[]) AND status='ACTIVE'
+        ) OR EXISTS(
+          SELECT 1 FROM universal_time_wallets
+          WHERE user_id=$2 AND status<>'ACTIVE'
+        ) AS blocked,
+        EXISTS(
+          SELECT 1 FROM community_visibility
+          WHERE organization_id=$3 AND membership_id=$4 AND shared_photo_id=$5
+        ) AS photo_shared`,
+      [[donorUserId, member.userId], member.userId, organizationId, member.id, member.user.profilePhotoId],
+    );
+    if (access.blocked) throw new NotFoundException('This member cannot receive credits right now');
+    return {
+      membershipId: member.id,
+      membershipNumber: member.membershipNumber,
+      name: member.user.fullName?.trim() || 'Verified member',
+      photoVersion: access.photo_shared ? member.user.profilePhotoId : null,
+      userId: member.userId,
+    };
+  }
+
   private summary(
     donation: CreditDonation,
     balanceCredits: number,
@@ -281,9 +326,9 @@ export class DonationsService {
   }
 
   /** Approved pools of every participating organization, for any signed-in member. */
-  async listPools() {
+  async listPools(organizationId?: string) {
     const pools = await this.poolRepo.find({
-      where: { status: CommunityPoolStatus.ACTIVE },
+      where: { status: CommunityPoolStatus.ACTIVE, ...(organizationId ? { organizationId } : {}) },
       relations: ['organization'],
       order: { name: 'ASC' },
     });

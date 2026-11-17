@@ -16,11 +16,17 @@ const ID = '[a-f0-9-]+';
 const ORG = `/organizations/${ID}`;
 // Dashboard-reachable API surface. The API still authorizes every call; this only narrows the proxy.
 const ROUTES: [methods: string, pattern: RegExp][] = [
+  ['GET', new RegExp(`^${ORG}/instant-help/(?:reviews|${ID})$`, 'i')],
+  ['GET', new RegExp(`^${ORG}/instant-help/${ID}/photos/${ID}$`, 'i')],
+  ['GET', new RegExp(`^${ORG}/instant-help/${ID}/voice$`, 'i')],
+  ['POST', new RegExp(`^${ORG}/instant-help/${ID}/review$`, 'i')],
   [
     'GET POST',
     new RegExp(`^${ORG}/loyalty/(?:settings|merchant|offers|campaigns|engagement)$`, 'i'),
   ],
   ['GET', new RegExp(`^${ORG}/loyalty/(?:review|wallet|leaderboard)$`, 'i')],
+  ['POST', new RegExp(`^${ORG}/loyalty/merchant/onboard$`, 'i')],
+  ['GET', new RegExp(`^${ORG}/loyalty/shops/${ID}/(?:offers|qr)$`, 'i')],
   [
     'POST',
     new RegExp(
@@ -96,8 +102,10 @@ const allowed = (method: string, resource: string) =>
       (methods === '*' || methods.split(' ').includes(method)) && pattern.test(resource),
   );
 const FILE_DOWNLOADS =
-  /(?:\/reports(?:\/sponsor\/[a-f0-9-]+)?\/download|\/loyalty\/achievements\/[a-f0-9-]+\/certificate|\/memberships\/documents\/[a-f0-9-]+\/file|\/community\/posts\/[a-f0-9-]+\/photo)$/i;
+  /(?:\/reports(?:\/sponsor\/[a-f0-9-]+)?\/download|\/loyalty\/achievements\/[a-f0-9-]+\/certificate|\/memberships\/documents\/[a-f0-9-]+\/file|\/community\/posts\/[a-f0-9-]+\/photo|\/instant-help\/[a-f0-9-]+\/(?:photos\/[a-f0-9-]+|voice))$/i;
 const POST_PHOTO = new RegExp(`^${ORG}/community/posts/${ID}/photo$`, 'i');
+const INSTANT_PHOTO = new RegExp(`^${ORG}/instant-help/${ID}/photos/${ID}$`, 'i');
+const INSTANT_VOICE = new RegExp(`^${ORG}/instant-help/${ID}/voice$`, 'i');
 async function proxy(request: NextRequest, context: Context) {
   try {
     if (!['GET', 'POST', 'PATCH', 'PUT', 'DELETE'].includes(request.method))
@@ -114,9 +122,14 @@ async function proxy(request: NextRequest, context: Context) {
         upstreamFile(resource + request.nextUrl.search, token),
       );
       const content = file.body as GatewayFile;
-      if (POST_PHOTO.test(resource)) {
+      if (POST_PHOTO.test(resource) || INSTANT_PHOTO.test(resource)) {
         if (content.contentType !== 'image/jpeg')
           throw new GatewayError('Unexpected photo type', 502);
+        return respondFile({ ...content, disposition: 'inline' }, file.renewed);
+      }
+      if (INSTANT_VOICE.test(resource)) {
+        if (content.contentType !== 'audio/wav')
+          throw new GatewayError('Unexpected voice note type', 502);
         return respondFile({ ...content, disposition: 'inline' }, file.renewed);
       }
       return respondFile(content, file.renewed);

@@ -20,6 +20,13 @@ export class TimeLedgerController {
     return this.timeLedgerService.mySummary(userId);
   }
 
+  @Get('earnings')
+  @Header('Cache-Control', 'private, no-store')
+  @UseGuards(AuthGuard)
+  myMonthlyEarnings(@CurrentUserId() userId: string) {
+    return this.timeLedgerService.myMonthlyEarnings(userId);
+  }
+
   @Get('transactions')
   @UseGuards(AuthGuard)
   @ApiOperation({

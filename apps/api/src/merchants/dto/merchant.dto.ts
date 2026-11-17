@@ -15,6 +15,9 @@ export class MerchantApplicationDto {
   @IsString() @Matches(/\S/) @MinLength(5) @MaxLength(500) address!: string;
   @Matches(/^\+[1-9]\d{7,14}$/) phone!: string;
 }
+export class MerchantOnboardingDto extends MerchantApplicationDto {
+  @IsUUID() membershipId!: string;
+}
 export class MerchantOfferDto {
   @IsString() @Matches(/\S/) @MinLength(2) @MaxLength(150) title!: string;
   @IsString() @Matches(/\S/) @MinLength(5) @MaxLength(1500) description!: string;

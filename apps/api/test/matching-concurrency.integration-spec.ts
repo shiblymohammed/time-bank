@@ -3683,6 +3683,39 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       await loyalty.setProgram(orgA, admin, { enabled: true, leaderboardEnabled: true });
     });
 
+    it('onboards an approved shop owner and resolves only active offers for that shop', async () => {
+      const details = {
+        membershipId: memberA,
+        name: 'QA print shop',
+        address: 'QA market, shop 2',
+        phone: '+919000000065',
+      };
+      await expect(merchants.onboard(orgA, merchant, details)).rejects.toThrow();
+      const pending = await merchants.onboard(orgA, admin, details);
+      expect(pending.status).toBe('PENDING');
+      expect((await merchants.onboard(orgA, admin, details)).id).toBe(pending.id);
+      await expect(merchants.shopOffers(orgA, merchant, pending.id)).rejects.toThrow();
+      await merchants.decideMerchant(orgA, admin, pending.id, 'APPROVED');
+      const printable = await merchants.shopQr(orgA, volunteer, pending.id);
+      expect(printable.code).toBe(`ktb-shop:${pending.id}`);
+      expect(printable.qrSvg).toContain('<svg');
+      await expect(merchants.shopQr(orgA, merchant, pending.id)).rejects.toThrow();
+      const offer = await openOffer();
+      const otherShop = (await merchants.mine(orgA, merchant)).merchant;
+      expect(await merchants.shopOffers(orgA, merchant, pending.id)).toMatchObject({
+        name: details.name,
+        offers: [],
+      });
+      expect(
+        (await merchants.shopOffers(orgA, volunteer, otherShop.id)).offers.map(
+          (row: { id: string }) => row.id,
+        ),
+      ).toEqual([offer.id]);
+      await expect(merchants.shopOffers(orgB, volunteer, otherShop.id)).rejects.toThrow();
+      await merchants.decideMerchant(orgA, admin, pending.id, 'SUSPENDED');
+      await expect(merchants.shopOffers(orgA, merchant, pending.id)).rejects.toThrow();
+    });
+
     it('awards service and a milestone atomically, separately from time credits, once per assignment', async () => {
       const visit = await paid();
       expect(await wallet()).toEqual({ balance: 80, frozen: 0, status: 'ACTIVE' });
@@ -3699,6 +3732,13 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
             [volunteer],
           )
         )[0].balance,
+      ).toBe(1);
+      const monthly = await ledger.myMonthlyEarnings(volunteer);
+      expect(
+        monthly.points.reduce(
+          (sum: number, row: { credits: string }) => sum + Number(row.credits),
+          0,
+        ),
       ).toBe(1);
       await paid();
       expect(await wallet()).toEqual({ balance: 140, frozen: 0, status: 'ACTIVE' });

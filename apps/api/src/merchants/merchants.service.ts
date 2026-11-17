@@ -16,10 +16,14 @@ import {
   IssueRedemptionDto,
   LoyaltyCampaignDto,
   MerchantApplicationDto,
+  MerchantOnboardingDto,
   MerchantOfferDto,
 } from './dto/merchant.dto';
 
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+const activeShop = `m.status='APPROVED' AND u.status='ACTIVE' AND om.status='APPROVED'
+  AND EXISTS(SELECT 1 FROM membership_role_grants g WHERE g.membership_id=om.id AND g.role='MERCHANT' AND g.status='ACTIVE')
+  AND NOT EXISTS(SELECT 1 FROM global_account_restrictions r WHERE r.user_id=u.id AND r.status='ACTIVE')`;
 
 @Injectable()
 export class MerchantsService {
@@ -56,34 +60,73 @@ export class MerchantsService {
   async apply(org: string, user: string, dto: MerchantApplicationDto) {
     return this.db.transaction(async (m) => {
       await this.loyalty.actor(m, org, user, [UserRole.MERCHANT]);
-      await m.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
-        `merchant:${org}:${user}`,
-      ]);
-      const [prior] = await m.query(
-        'SELECT * FROM organization_merchants WHERE organization_id=$1 AND owner_user_id=$2 FOR UPDATE',
-        [org, user],
-      );
-      if (prior && prior.status !== 'REJECTED') {
-        if (
-          prior.name === dto.name.trim() &&
-          prior.address === dto.address.trim() &&
-          prior.phone === dto.phone
-        )
-          return prior;
-        throw new ConflictException('Your business already has an application or approval');
-      }
-      const [row] = prior
-        ? await m.query(
-            "WITH changed AS (UPDATE organization_merchants SET name=$2,address=$3,phone=$4,status='PENDING',decided_by=NULL,decided_at=NULL WHERE id=$1 RETURNING *) SELECT * FROM changed",
-            [prior.id, dto.name.trim(), dto.address.trim(), dto.phone],
-          )
-        : await m.query(
-            'INSERT INTO organization_merchants(organization_id,owner_user_id,name,address,phone) VALUES($1,$2,$3,$4,$5) RETURNING *',
-            [org, user, dto.name.trim(), dto.address.trim(), dto.phone],
-          );
-      await this.loyalty.event(m, org, user, 'MERCHANT_APPLIED', row.id, {});
-      return row;
+      return this.register(m, org, user, user, dto);
     });
+  }
+
+  async onboard(org: string, admin: string, dto: MerchantOnboardingDto) {
+    return this.db.transaction(async (m) => {
+      await this.loyalty.actor(m, org, admin, [UserRole.MUNICIPALITY_ADMIN]);
+      const [member] = await m.query(
+        `SELECT user_id FROM organization_memberships
+         WHERE organization_id=$1 AND id=$2 AND status='APPROVED' FOR UPDATE`,
+        [org, dto.membershipId],
+      );
+      if (!member) throw new NotFoundException('Choose an approved member of this municipality');
+      if (member.user_id === admin)
+        throw new ForbiddenException('Another administrator must add your shop');
+      const state = await this.loyalty.state(m, org, member.user_id);
+      if (state?.status !== 'ACTIVE' || state.restricted)
+        throw new ConflictException('The shop owner’s account is not eligible');
+      const [grant] = await m.query(
+        `WITH added AS (INSERT INTO membership_role_grants(membership_id,role,granted_by)
+         VALUES($1,'MERCHANT',$2) ON CONFLICT (membership_id,role) WHERE status='ACTIVE'
+         DO NOTHING RETURNING id) SELECT id FROM added`,
+        [dto.membershipId, admin],
+      );
+      if (grant) {
+        await this.loyalty.event(m, org, admin, 'MERCHANT_ROLE_GRANTED', grant.id, {
+          membershipId: dto.membershipId,
+        });
+      }
+      return this.register(m, org, member.user_id, admin, dto);
+    });
+  }
+
+  private async register(
+    m: EntityManager,
+    org: string,
+    user: string,
+    actor: string,
+    dto: MerchantApplicationDto,
+  ) {
+    await m.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
+      `merchant:${org}:${user}`,
+    ]);
+    const [prior] = await m.query(
+      'SELECT * FROM organization_merchants WHERE organization_id=$1 AND owner_user_id=$2 FOR UPDATE',
+      [org, user],
+    );
+    if (prior && prior.status !== 'REJECTED') {
+      if (
+        prior.name === dto.name.trim() &&
+        prior.address === dto.address.trim() &&
+        prior.phone === dto.phone
+      )
+        return prior;
+      throw new ConflictException('Your business already has an application or approval');
+    }
+    const [row] = prior
+      ? await m.query(
+          "WITH changed AS (UPDATE organization_merchants SET name=$2,address=$3,phone=$4,status='PENDING',decided_by=NULL,decided_at=NULL WHERE id=$1 RETURNING *) SELECT * FROM changed",
+          [prior.id, dto.name.trim(), dto.address.trim(), dto.phone],
+        )
+      : await m.query(
+          'INSERT INTO organization_merchants(organization_id,owner_user_id,name,address,phone) VALUES($1,$2,$3,$4,$5) RETURNING *',
+          [org, user, dto.name.trim(), dto.address.trim(), dto.phone],
+        );
+    await this.loyalty.event(m, org, actor, 'MERCHANT_APPLIED', row.id, {});
+    return row;
   }
 
   async mine(org: string, user: string) {
@@ -284,17 +327,53 @@ export class MerchantsService {
 
   async offers(org: string, user: string) {
     await this.loyalty.actor(this.db.manager, org, user);
+    return this.availableOffers(org);
+  }
+
+  private async findShop(org: string, id: string) {
+    const [shop] = await this.db.query(
+      `SELECT m.id,m.name,m.address,m.phone,m.owner_user_id
+       FROM organization_merchants m JOIN users u ON u.id=m.owner_user_id
+       JOIN organization_memberships om ON om.user_id=u.id AND om.organization_id=m.organization_id
+       WHERE m.organization_id=$1 AND m.id=$2 AND ${activeShop}`,
+      [org, id],
+    );
+    if (!shop) throw new NotFoundException('This shop is unavailable in your municipality');
+    return shop;
+  }
+
+  async shopOffers(org: string, user: string, id: string) {
+    await this.loyalty.actor(this.db.manager, org, user);
+    const { name, address, phone } = await this.findShop(org, id);
+    return { name, address, phone, offers: await this.availableOffers(org, id) };
+  }
+
+  async shopQr(org: string, user: string, id: string) {
+    const actor = await this.loyalty.actor(this.db.manager, org, user, [
+      UserRole.MERCHANT,
+      UserRole.MUNICIPALITY_ADMIN,
+    ]);
+    const shop = await this.findShop(org, id);
+    if (
+      shop.owner_user_id !== user &&
+      !actor.isSuperAdmin &&
+      !actor.roles.includes(UserRole.MUNICIPALITY_ADMIN)
+    )
+      throw new ForbiddenException('You can only print the QR for your own shop');
+    const code = `ktb-shop:${shop.id}`;
+    return { code, qrSvg: await QRCode.toString(code, { type: 'svg', margin: 4 }) };
+  }
+
+  private async availableOffers(org: string, shop: string | null = null) {
     if (!(await this.loyalty.program(this.db.manager, org)).enabled) return [];
     return this.db.query(
       `SELECT o.id,o.title,o.description,o.terms,o.coins,o.starts_at,o.ends_at,m.name AS merchant_name,m.address,m.phone,
       o.redemption_limit-o.redeemed_count AS remaining FROM merchant_offers o JOIN organization_merchants m ON m.id=o.merchant_id
       JOIN users u ON u.id=m.owner_user_id JOIN organization_memberships om ON om.user_id=u.id AND om.organization_id=m.organization_id
-      WHERE o.organization_id=$1 AND o.status='APPROVED' AND m.status='APPROVED' AND o.starts_at<=now() AND o.ends_at>now()
-        AND o.redeemed_count<o.redemption_limit AND u.status='ACTIVE' AND om.status='APPROVED'
-        AND EXISTS(SELECT 1 FROM membership_role_grants g WHERE g.membership_id=om.id AND g.role='MERCHANT' AND g.status='ACTIVE')
-        AND NOT EXISTS(SELECT 1 FROM global_account_restrictions r WHERE r.user_id=u.id AND r.status='ACTIVE')
+      WHERE o.organization_id=$1 AND ($2::uuid IS NULL OR m.id=$2) AND o.status='APPROVED'
+        AND o.starts_at<=now() AND o.ends_at>now() AND o.redeemed_count<o.redemption_limit AND ${activeShop}
       ORDER BY o.ends_at,o.id LIMIT 100`,
-      [org],
+      [org, shop],
     );
   }
 

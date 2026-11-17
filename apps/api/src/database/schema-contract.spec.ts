@@ -31,6 +31,8 @@ import { WardsAndNoc1729118400027 } from './migrations/1729118400027-WardsAndNoc
 import { ProfilePhoto1729118400028 } from './migrations/1729118400028-ProfilePhoto';
 import { Nearby1729118400029 } from './migrations/1729118400029-Nearby';
 import { NearbyRequestPins1729118400037 } from './migrations/1729118400037-NearbyRequestPins';
+import { InstantHelp1729118400038 } from './migrations/1729118400038-InstantHelp';
+import { InstantHelpVoiceNotes1729118400040 } from './migrations/1729118400040-InstantHelpVoiceNotes';
 describe('entity and migration schema contract', () => {
   it('defines every mapped entity column in the migration SQL', async () => {
     const queries: string[] = [];
@@ -71,6 +73,8 @@ describe('entity and migration schema contract', () => {
       new ProfilePhoto1729118400028(),
       new Nearby1729118400029(),
       new NearbyRequestPins1729118400037(),
+      new InstantHelp1729118400038(),
+      new InstantHelpVoiceNotes1729118400040(),
     ]) {
       await migration.up(runner);
     }

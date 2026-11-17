@@ -86,7 +86,7 @@ function refusal(body: unknown, status: number) {
     status,
   );
 }
-/** Only report files pass through as files. Anything else stays behind the JSON gateway. */
+/** File responses must use one of the dashboard's supported content types. */
 const FILE_TYPES = [
   'application/pdf',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -94,6 +94,7 @@ const FILE_TYPES = [
   // Ward NOCs: a photo or a scan.
   'image/jpeg',
   'image/png',
+  'audio/wav',
 ];
 export type GatewayFile = { bytes: ArrayBuffer; contentType: string; disposition: string };
 export async function upstreamFile(path: string, token: string): Promise<GatewayFile> {

@@ -28,6 +28,7 @@ import { RolesGuard } from './authorization/guards/roles.guard';
 
 import { DonationsController } from './donations/donations.controller';
 import { DonationsService } from './donations/donations.service';
+import { ProfilePhotoService } from './identity/profile-photo.service';
 import { TimeLedgerController } from './time-ledger/time-ledger.controller';
 import { TimeLedgerService } from './time-ledger/time-ledger.service';
 
@@ -46,7 +47,6 @@ const controllers = [
 ];
 const services = [
   FirebaseTokenService,
-  DonationsService,
   TimeLedgerService,
   AuthService,
   AdminService,
@@ -101,6 +101,25 @@ describe('HTTP route dispatch contracts', () => {
       controllers,
       providers: [
         ...services.map((provide) => ({ provide, useValue: serviceStub() })),
+        {
+          provide: DonationsService,
+          useValue: {
+            donate: async () => ({ ok: true }),
+            listPools: async () => [],
+            createPool: async () => ({ ok: true }),
+            resolveLocalRecipient: async () => ({
+              userId: uuid,
+              membershipId: uuid,
+              membershipNumber: 'QA-001',
+              name: 'Fictional member',
+              photoVersion: uuid,
+            }),
+          },
+        },
+        {
+          provide: ProfilePhotoService,
+          useValue: { readVersion: async () => Buffer.from([0xff, 0xd8, 0xff, 0xd9]) },
+        },
         { provide: HealthCheckService, useValue: { check: async () => ({ status: 'ok' }) } },
         {
           provide: TypeOrmHealthIndicator,

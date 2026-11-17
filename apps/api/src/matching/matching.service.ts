@@ -506,6 +506,21 @@ export class MatchingService {
           relations: ['volunteerMembership', 'volunteerMembership.user'],
         })
       : [];
+    const completedIds = assignments
+      .filter((assignment) => assignment.confirmedAt != null)
+      .map((assignment) => assignment.id);
+    const earnings: { assignment_id: string; credits: string }[] = completedIds.length
+      ? await this.dataSource.query(
+          `SELECT l.volunteer_assignment_id AS assignment_id, sum(l.amount)::text AS credits
+           FROM time_credit_ledger l
+           JOIN universal_time_wallets w ON w.id=l.wallet_id AND w.user_id=$2
+           WHERE l.volunteer_assignment_id=ANY($1::uuid[])
+             AND l.originating_org_id=$3 AND l.tx_type='SERVICE_EARNED'
+           GROUP BY l.volunteer_assignment_id`,
+          [completedIds, actorId, orgId],
+        )
+      : [];
+    const creditsByAssignment = new Map(earnings.map((row) => [row.assignment_id, Number(row.credits)]));
     return assignments.map((assignment) => ({
       id: assignment.id,
       organizationId: assignment.organizationId,
@@ -521,6 +536,10 @@ export class MatchingService {
       reportedMinutes: assignment.reportedMinutes ?? null,
       confirmedAt: assignment.confirmedAt ?? null,
       confirmedMinutes: assignment.confirmedMinutes ?? null,
+      completionNotes: assignment.completionNotes ?? null,
+      creditedCredits: assignment.confirmedAt
+        ? (creditsByAssignment.get(assignment.id) ?? 0)
+        : null,
       invitedByName: assignment.invitedByMembership?.user?.fullName ?? null,
       team: needsAddress(assignment.status) ? teamView(assignment, booked) : null,
       ...safetyState(assignment),
@@ -536,9 +555,23 @@ export class MatchingService {
         ? {
             id: assignment.serviceRequest.id,
             requestNumber: assignment.serviceRequest.requestNumber,
+            serviceCatalog: {
+              customLabelEn: assignment.serviceRequest.serviceCatalog?.customLabelEn ?? null,
+              globalService: {
+                nameEn: assignment.serviceRequest.serviceCatalog?.globalService?.nameEn ?? null,
+              },
+            },
             status: assignment.serviceRequest.status,
             scheduledStartTime: assignment.serviceRequest.scheduledStartTime,
             expectedDurationMinutes: assignment.serviceRequest.expectedDurationMinutes,
+            ...(needsAddress(assignment.status)
+              ? {
+                  beneficiaryNotes: assignment.serviceRequest.beneficiaryNotes ?? null,
+                  locationLandmark: assignment.serviceRequest.locationLandmark ?? null,
+                  preparationNotes:
+                    assignment.serviceRequest.serviceCatalog?.localInstructionsEn ?? null,
+                }
+              : {}),
             locationAddressText: needsAddress(assignment.status)
               ? assignment.serviceRequest.locationAddressText
               : null,
@@ -1516,6 +1549,14 @@ export class MatchingService {
     dto: VisitOperationDto = {},
   ): Promise<VolunteerAssignment> {
     return this.dataSource.transaction('READ COMMITTED', async (manager) => {
+      const [timerOwner] = await manager.query('SELECT user_id FROM organization_memberships WHERE id=$1 AND organization_id=$2',[volunteerMembershipId,orgId]);
+      if(timerOwner) {
+        await manager.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))',['help-timer:'+timerOwner.user_id]);
+        const [activeTimer] = await manager.query(`SELECT id FROM instant_help_sessions WHERE user_id=$1 AND status='RUNNING'
+          UNION ALL SELECT a.id FROM volunteer_assignments a JOIN organization_memberships m ON m.id=a.volunteer_membership_id
+          WHERE m.user_id=$1 AND a.id<>$2 AND (a.status='IN_PROGRESS' OR (a.status='ACCEPTED' AND a.arrived_at IS NOT NULL)) LIMIT 1`,[timerOwner.user_id,assignmentId]);
+        if(activeTimer) throw new ConflictException('Finish your active timer or team visit before starting another');
+      }
       // A banned or removed volunteer may not begin a visit at someone's home.
       await this.lockVolunteer(manager, orgId, volunteerMembershipId);
       const { assignment, request } = await this.lockOwnAssignment(
@@ -1532,6 +1573,17 @@ export class MatchingService {
         return assignment;
       }
       const time = phoneTime(dto.occurredAt, now);
+      if (dto.occurredAt) {
+        const [overlap] = await manager.query(`SELECT s.id FROM instant_help_sessions s
+          JOIN organization_memberships member ON member.user_id=s.user_id
+          WHERE member.id=$1 AND s.status<>'REJECTED' AND s.started_at<=now()
+            AND COALESCE(s.finished_at,'infinity'::timestamptz)>$2 LIMIT 1`,[volunteerMembershipId,time.at]);
+        if (overlap) {
+          if (time.receivedLate) throw new ConflictException('This offline visit overlaps an instant help session. Ask your coordinator to review it.');
+          // Small online clock skew must not create overlapping credited time.
+          time.at = now;
+        }
+      }
       const saved = await this.beginVisit(manager, assignment, request, time, ipAddress);
       await recordOperation(manager, {
         organizationId: orgId,

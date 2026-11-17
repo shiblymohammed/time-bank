@@ -18,6 +18,13 @@ const trimmed = ({ value }: { value: unknown }) =>
  * A gift to one verified member (their organization and membership number)
  * or to one community pool, never both.
  */
+export class LookupDonationMemberDto {
+  @Transform(trimmed)
+  @IsString()
+  @Length(1, 50)
+  membershipNumber!: string;
+}
+
 export class CreateDonationDto {
   @ApiProperty({ example: 1.5, description: 'Credits to give, in hundredths' })
   @IsNumber({ maxDecimalPlaces: 2 })
@@ -36,6 +43,10 @@ export class CreateDonationDto {
   @Length(1, 50)
   @IsOptional()
   recipientMembershipNumber?: string;
+
+  @IsUUID()
+  @IsOptional()
+  confirmedMembershipId?: string;
 
   @ApiPropertyOptional({ description: 'Approved community pool' })
   @IsUUID()
