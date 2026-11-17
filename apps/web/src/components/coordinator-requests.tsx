@@ -531,53 +531,59 @@ export function CoordinatorRequests({
 
       {/* Filter Toolbar */}
       <div className="coordinator-filter-toolbar">
-        <div className="filter-left">
-          <div className="filter-group">
-            <span className="filter-label">Status</span>
-            <select
-              aria-label="Status"
-              value={status}
-              onChange={(e) => {
-                setStatus(e.target.value);
-                setPage(1);
-              }}
-            >
-              <option value="">All statuses</option>
-              {REQUEST_STATUSES.map((s) => (
-                <option key={s} value={s}>
-                  {title(s)}
-                </option>
-              ))}
-            </select>
+        <details className="request-advanced-filters" open={hasRequestFilters}>
+          <summary>
+            Filters
+            {hasRequestFilters && <span className="request-filter-count">Active</span>}
+          </summary>
+          <div className="filter-left">
+            <div className="filter-group">
+              <span className="filter-label">Status</span>
+              <select
+                aria-label="Status"
+                value={status}
+                onChange={(e) => {
+                  setStatus(e.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="">All statuses</option>
+                {REQUEST_STATUSES.map((s) => (
+                  <option key={s} value={s}>
+                    {title(s)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="filter-group">
+              <span className="filter-label">Urgency</span>
+              <select
+                aria-label="Urgency"
+                value={urgency}
+                onChange={(e) => {
+                  setUrgency(e.target.value);
+                  setPage(1);
+                }}
+              >
+                <option value="">All urgencies</option>
+                <option value="SCHEDULED">Scheduled</option>
+                <option value="IMMEDIATE">Immediate</option>
+              </select>
+            </div>
+            <div className="filter-group">
+              <span className="filter-label">Ward</span>
+              <input
+                placeholder="Filter ward"
+                value={ward}
+                maxLength={20}
+                onChange={(e) => {
+                  setWard(e.target.value);
+                  setPage(1);
+                }}
+              />
+            </div>
           </div>
-          <div className="filter-group">
-            <span className="filter-label">Urgency</span>
-            <select
-              aria-label="Urgency"
-              value={urgency}
-              onChange={(e) => {
-                setUrgency(e.target.value);
-                setPage(1);
-              }}
-            >
-              <option value="">All urgencies</option>
-              <option value="SCHEDULED">Scheduled</option>
-              <option value="IMMEDIATE">Immediate</option>
-            </select>
-          </div>
-          <div className="filter-group">
-            <span className="filter-label">Ward</span>
-            <input
-              placeholder="Filter ward"
-              value={ward}
-              maxLength={20}
-              onChange={(e) => {
-                setWard(e.target.value);
-                setPage(1);
-              }}
-            />
-          </div>
-        </div>
+        </details>
         <div className="filter-right">
           <label className="coordinator-filter-checkbox inline-check">
             <input

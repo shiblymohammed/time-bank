@@ -162,6 +162,9 @@ const iso = (data: FormData, key: string) => new Date(str(data, key)).toISOStrin
 
 export function ServiceOperations({ organizationId, isGlobal, onError }: Props) {
   const [section, setSection] = useState('catalogue');
+  const [beneficiaryTask, setBeneficiaryTask] = useState<
+    'lookup' | 'eligibility' | 'caregivers'
+  >('lookup');
   const [categories, setCategories] = useState<Category[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [proposals, setProposals] = useState<Proposal[]>([]);
@@ -808,11 +811,31 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
         ───────────────────────────────────────────────────────────── */}
         {organizationId && section === 'beneficiaries' && (
           <>
+            <div className="beneficiary-task-switch" role="group" aria-label="Beneficiary tasks">
+              {([
+                ['lookup', 'Find a member'],
+                ['eligibility', 'Eligibility'],
+                ['caregivers', 'Caregiver access'],
+              ] as const).map(([task, label]) => (
+                <button
+                  key={task}
+                  type="button"
+                  className={`beneficiary-task-button${beneficiaryTask === task ? ' is-active' : ''}`}
+                  aria-pressed={beneficiaryTask === task}
+                  onClick={() => setBeneficiaryTask(task)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            {beneficiaryTask === 'lookup' && (
+              <>
             <div className="ops-card ops-beneficiary-card">
               <ActionForm
-                title="Look Up Beneficiary"
+                title="Find a member’s service access"
                 className="ops-form-beneficiary-lookup"
-                submit="Load Eligibility & Caregivers"
+                submit="View member details"
                 onSubmit={(data) => viewBeneficiary(str(data, 'membershipId'))}
               >
                 <Select name="membershipId" label="Select Member">
@@ -833,6 +856,11 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
                 <p style={{ margin: 0, color: '#334155', fontSize: '0.85rem' }}>
                   Review Due Date: <strong>{new Date(eligibility.reviewDueAt).toLocaleDateString()}</strong>
                 </p>
+              </div>
+            )}
+            {beneficiary && !eligibility && (
+              <div className="ops-card ops-beneficiary-card ops-beneficiary-empty">
+                No eligibility record is currently set for this member.
               </div>
             )}
 
@@ -876,8 +904,16 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
                 ))}
               </div>
             )}
+            {beneficiary && !caregivers.length && (
+              <div className="ops-card ops-beneficiary-card ops-beneficiary-empty">
+                No caregiver authorizations are recorded for this member.
+              </div>
+            )}
+              </>
+            )}
 
-            <div className="ops-card ops-beneficiary-card">
+            {beneficiaryTask === 'eligibility' && (
+              <div className="ops-card ops-beneficiary-card">
               <ActionForm
                 title="Grant or Renew Eligibility"
                 className="ops-form-beneficiary-eligibility"
@@ -908,9 +944,11 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
                   value="*"
                 />
               </ActionForm>
-            </div>
+              </div>
+            )}
 
-            <div className="ops-card ops-beneficiary-card">
+            {beneficiaryTask === 'caregivers' && (
+              <div className="ops-card ops-beneficiary-card">
               <ActionForm
                 title="Request Caregiver Authorization"
                 submit="Request Authorization"
@@ -934,7 +972,8 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
                   ))}
                 </Select>
               </ActionForm>
-            </div>
+              </div>
+            )}
           </>
         )}
 
