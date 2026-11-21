@@ -32,10 +32,10 @@ import { AuthGuard } from '../auth/guards/auth.guard';
 import { CurrentUserId } from '../authorization/decorators/current-user.decorator';
 import { OrganizationAccessGuard } from '../authorization/guards/organization-access.guard';
 import { prepareProfilePhoto, PROFILE_PHOTO_MAX_BYTES } from '../identity/profile-photo.service';
-import { CommunityService } from './community.service';
+import { COMMUNITY_POST_TYPES, CommunityPostType, CommunityService } from './community.service';
 
 class CreateCommunityPostDto {
-  @IsIn(['ANNOUNCEMENT', 'OPPORTUNITY', 'STORY', 'RECOGNITION']) postType!: string;
+  @IsIn(COMMUNITY_POST_TYPES) postType!: string;
   @IsString() @MinLength(1) @MaxLength(2000) body!: string;
   @IsOptional() @Matches(/^[a-zA-Z0-9_-]{16,80}$/) submissionKey?: string;
 }
@@ -54,7 +54,7 @@ const postPhotoUpload = FileInterceptor('file', {
 });
 class FeedQueryDto {
   @IsOptional() @IsString() before?: string;
-  @IsOptional() @IsIn(['ANNOUNCEMENT', 'RECOGNITION']) type?: 'ANNOUNCEMENT' | 'RECOGNITION';
+  @IsOptional() @IsIn(COMMUNITY_POST_TYPES) type?: CommunityPostType;
 }
 class PhotoQueryDto {
   @IsOptional() @Type(() => Number) @IsInt() @Min(1) v?: number;

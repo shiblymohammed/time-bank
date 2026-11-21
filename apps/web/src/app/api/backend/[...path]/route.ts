@@ -75,6 +75,11 @@ const ROUTES: [methods: string, pattern: RegExp][] = [
   ['GET', new RegExp(`^${ORG}/community/impact$`, 'i')],
   ['PUT', new RegExp(`^${ORG}/community/impact/goal$`, 'i')],
   ['POST', new RegExp(`^${ORG}/community/events/${ID}/cancel$`, 'i')],
+  ['GET', new RegExp(`^${ORG}/community/events/${ID}/photo$`, 'i')],
+  ['GET', new RegExp(`^${ORG}/community/events/${ID}/attendees$`, 'i')],
+  ['GET', new RegExp(`^${ORG}/community/events/${ID}/check-in-qr$`, 'i')],
+  ['POST', new RegExp(`^${ORG}/community/events/${ID}/attendees/confirm-all$`, 'i')],
+  ['POST', new RegExp(`^${ORG}/community/events/${ID}/attendees/${ID}/confirm$`, 'i')],
   ['DELETE', new RegExp(`^${ORG}/community/announcements/${ID}$`, 'i')],
   ['GET', new RegExp(`^${ORG}/community/posts/pending$`, 'i')],
   ['GET', new RegExp(`^${ORG}/community/posts/${ID}/photo$`, 'i')],
@@ -102,8 +107,8 @@ const allowed = (method: string, resource: string) =>
       (methods === '*' || methods.split(' ').includes(method)) && pattern.test(resource),
   );
 const FILE_DOWNLOADS =
-  /(?:\/reports(?:\/sponsor\/[a-f0-9-]+)?\/download|\/loyalty\/achievements\/[a-f0-9-]+\/certificate|\/memberships\/documents\/[a-f0-9-]+\/file|\/community\/posts\/[a-f0-9-]+\/photo|\/instant-help\/[a-f0-9-]+\/(?:photos\/[a-f0-9-]+|voice))$/i;
-const POST_PHOTO = new RegExp(`^${ORG}/community/posts/${ID}/photo$`, 'i');
+  /(?:\/reports(?:\/sponsor\/[a-f0-9-]+)?\/download|\/loyalty\/achievements\/[a-f0-9-]+\/certificate|\/memberships\/documents\/[a-f0-9-]+\/file|\/community\/posts\/[a-f0-9-]+\/photo|\/community\/events\/[a-f0-9-]+\/photo|\/instant-help\/[a-f0-9-]+\/(?:photos\/[a-f0-9-]+|voice))$/i;
+const POST_PHOTO = new RegExp(`^${ORG}/community/(?:posts|events)/${ID}/photo$`, 'i');
 const INSTANT_PHOTO = new RegExp(`^${ORG}/instant-help/${ID}/photos/${ID}$`, 'i');
 const INSTANT_VOICE = new RegExp(`^${ORG}/instant-help/${ID}/voice$`, 'i');
 async function proxy(request: NextRequest, context: Context) {

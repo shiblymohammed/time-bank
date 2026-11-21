@@ -70,9 +70,10 @@ export function toRequestView(
   isStaff: boolean,
   stageAssignments: VolunteerAssignment[] | undefined = request.assignments,
 ) {
-  const { beneficiaryMembership, assignments, ...details } = request;
+  const { beneficiaryMembership, assignments, creditPayerUserId, ...details } = request;
   return {
     ...details,
+    creditBacked: Boolean(creditPayerUserId),
     stage: visitStage(request.status, stageAssignments, Boolean(request.belowMinimumAt)),
     beneficiaryMembership: beneficiaryMembership
       ? {

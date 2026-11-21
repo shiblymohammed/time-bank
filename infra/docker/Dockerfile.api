@@ -17,7 +17,7 @@ COPY packages/tsconfig/package.json ./packages/tsconfig/
 COPY packages/shared-types/package.json ./packages/shared-types/
 COPY packages/eslint-config/package.json ./packages/eslint-config/
 COPY apps/api/package.json ./apps/api/
-RUN pnpm install --frozen-lockfile
+RUN pnpm install --frozen-lockfile --filter @ktb/api...
 
 # ─── Stage 3: development ─────────────────────────────────────────────────────
 # Used by docker-compose.yml for local dev with hot reload

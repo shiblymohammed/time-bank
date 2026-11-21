@@ -59,6 +59,8 @@ type RequestRow = {
   status: string;
   urgency: string;
   scheduledStartTime: string;
+  creditBacked?: boolean;
+  creditUncovered?: number;
 };
 type Snapshot = {
   request: RequestRow & {
@@ -66,6 +68,13 @@ type Snapshot = {
     beneficiaryMembershipNumber: string;
     beneficiaryName: string | null;
     expectedDurationMinutes: number;
+    creditPayerUserId?: string | null;
+    creditLimit?: number;
+    creditRemaining?: number;
+    creditCharged?: number;
+    creditReleased?: number;
+    creditUncovered?: number;
+    creditPolicy?: { baseCreditRateHourly: number; creditMultiplier: number; allowPartialHours: boolean } | null;
     minVolunteers: number;
     preferredVolunteers: number;
     matchingTier: number;
@@ -165,7 +174,7 @@ function People({
     setError('');
     const query =
       kind === 'beneficiary'
-        ? `status=APPROVED&role=BENEFICIARY&offset=${(page - 1) * 10}&limit=10`
+        ? `status=APPROVED&canRequestHelp=true&offset=${(page - 1) * 10}&limit=10`
         : `page=${page}&limit=10`;
     backend<{ memberships?: Person[]; volunteers?: Person[]; total: number }>(
       `${path}?${query}&search=${encodeURIComponent(search)}`,
@@ -188,7 +197,7 @@ function People({
   }, [path, kind, search, page]);
   return (
     <section className="detail-panel glass-panel">
-      <h3>{kind === 'beneficiary' ? 'Choose a beneficiary' : 'Choose an eligible volunteer'}</h3>
+      <h3>{kind === 'beneficiary' ? 'Choose a requester (Beneficiary or Volunteer with credits)' : 'Choose an eligible volunteer'}</h3>
       <label>
         Search by name, membership number or phone
         <input
@@ -329,8 +338,8 @@ export function CoordinatorRequests({
   function create(person: Person) {
     const key = crypto.randomUUID();
     openAction({
-      title: 'Create service request',
-      description: `For ${personLabel(person)}. All dates and times use India time (IST).`,
+      title: 'Create free recipient request',
+      description: `For ${personLabel(person)}. Credit-backed volunteer requests must be confirmed by the member in their app. All dates and times use India time (IST).`,
       fields: [
         {
           key: 'serviceCatalogId',
@@ -392,8 +401,12 @@ export function CoordinatorRequests({
     openAction({
       title: pay ? 'Pay for this visit' : 'Mark as not delivered',
       description: pay
-        ? 'Time credits go to the volunteer. This cannot be undone here.'
-        : 'No time credits are paid for this visit.',
+        ? request?.creditPayerUserId
+          ? `Verified time pays the helper and uses the member’s reserved credits, up to their accepted maximum of ${Number(request.creditLimit).toFixed(2)} credits. Extra verified time is recorded for review; it never creates an additional member charge. This cannot be undone here.`
+          : 'Time credits go to the volunteer. This cannot be undone here.'
+        : request?.creditPayerUserId
+          ? 'No credits are paid or charged for this visit. Any unused reservation returns when the request is closed.'
+          : 'No time credits are paid for this visit.',
       submitLabel: pay ? 'Pay credits' : 'Not delivered',
       fields: [
         ...(pay
@@ -626,6 +639,9 @@ export function CoordinatorRequests({
                     <span className="mono" style={{ fontWeight: 700, fontSize: '0.86rem', color: '#0f172a' }}>
                       {row.requestNumber}
                     </span>
+                    <div style={{ marginTop: 5 }}><span className={`kpi-card-pill kpi-tone-${row.creditBacked ? 'purple' : 'slate'}`}>
+                      {row.creditBacked ? 'Time credits' : 'Free assistance'}
+                    </span>{Number(row.creditUncovered ?? 0) > 0 && <span className="kpi-card-pill kpi-tone-amber">Extra help to review</span>}</div>
                   </td>
                   <td>
                     <RequestStatusBadge status={row.status} />
@@ -801,6 +817,30 @@ export function CoordinatorRequests({
               </div>
             </div>
           </div>
+
+          {request.creditPayerUserId && (
+            <div className="request-detail-card" style={{ marginTop: 16 }}>
+              <h4 className="request-detail-card-title"><Icon name="operations" size={16} /> Credit-backed volunteer request</h4>
+              <p style={{ fontSize: '0.82rem', color: 'var(--text-muted)', margin: '0 0 12px' }}>
+                The member accepted this maximum at booking. Only verified work uses reserved credits.
+              </p>
+              {([
+                ['Accepted maximum', request.creditLimit], ['Still reserved', request.creditRemaining],
+                ['Charged for verified help', request.creditCharged], ['Returned to member', request.creditReleased],
+              ] as const).map(([label, value]) => (
+                <div className="request-detail-row" key={label}><span className="row-label">{label}</span>
+                  <span className="row-value">{Number(value ?? 0).toFixed(2)} credits</span></div>
+              ))}
+              {request.creditPolicy && <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+                Booked rate: {request.creditPolicy.baseCreditRateHourly} × {request.creditPolicy.creditMultiplier} credits/hour/volunteer
+                {' · '}{request.preferredVolunteers} planned {request.preferredVolunteers === 1 ? 'volunteer' : 'volunteers'}{' · '}{request.creditPolicy.allowPartialHours ? 'Partial hours counted' : 'Whole hours counted'}
+              </p>}
+              {Number(request.creditUncovered ?? 0) > 0 && <div role="status" className="feedback error">
+                {Number(request.creditUncovered).toFixed(2)} credits of verified help exceeded the member’s maximum.
+                Review this additional community-supported time. The member has not been charged extra.
+              </div>}
+            </div>
+          )}
 
           {/* Understaffed Alert if short */}
           {short && (

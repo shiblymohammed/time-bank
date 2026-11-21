@@ -33,6 +33,11 @@ import { Nearby1729118400029 } from './migrations/1729118400029-Nearby';
 import { NearbyRequestPins1729118400037 } from './migrations/1729118400037-NearbyRequestPins';
 import { InstantHelp1729118400038 } from './migrations/1729118400038-InstantHelp';
 import { InstantHelpVoiceNotes1729118400040 } from './migrations/1729118400040-InstantHelpVoiceNotes';
+import { VolunteerCreditRequests1729118400041 } from './migrations/1729118400041-VolunteerCreditRequests';
+import { CommunityEventCredits1729118400042 } from './migrations/1729118400042-CommunityEventCredits';
+import { CommunityEventCheckIn1729118400043 } from './migrations/1729118400043-CommunityEventCheckIn';
+import { CommunityEventPhotos1729118400044 } from './migrations/1729118400044-CommunityEventPhotos';
+import { CommunityEventQrCheckIn1729118400045 } from './migrations/1729118400045-CommunityEventQrCheckIn';
 describe('entity and migration schema contract', () => {
   it('defines every mapped entity column in the migration SQL', async () => {
     const queries: string[] = [];
@@ -75,6 +80,11 @@ describe('entity and migration schema contract', () => {
       new NearbyRequestPins1729118400037(),
       new InstantHelp1729118400038(),
       new InstantHelpVoiceNotes1729118400040(),
+      new VolunteerCreditRequests1729118400041(),
+      new CommunityEventCredits1729118400042(),
+      new CommunityEventCheckIn1729118400043(),
+      new CommunityEventPhotos1729118400044(),
+      new CommunityEventQrCheckIn1729118400045(),
     ]) {
       await migration.up(runner);
     }

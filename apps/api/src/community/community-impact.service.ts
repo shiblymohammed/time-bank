@@ -30,8 +30,18 @@ export class CommunityImpactService {
         JOIN users volunteer ON volunteer.id=helper.user_id AND volunteer.status<>'TEST_ACCOUNT_RETIRED'
         JOIN users recipient ON recipient.id=helped.user_id AND recipient.status<>'TEST_ACCOUNT_RETIRED'
         WHERE r.status NOT IN ('CANCELLED','EXPIRED_UNMATCHED')
+      ), event_minutes AS (
+        SELECT COALESCE(sum(a.attended_minutes),0) AS minutes
+        FROM bounds b JOIN community_event_attendance a ON a.organization_id=$1
+          AND a.confirmed_at>=b.starts AND a.confirmed_at<b.ends
+        JOIN community_events e ON e.organization_id=a.organization_id AND e.id=a.event_id
+          AND e.earns_credits AND e.cancelled_at IS NULL
+        JOIN organization_memberships attendee ON attendee.id=a.membership_id
+        JOIN users member ON member.id=attendee.user_id AND member.status<>'TEST_ACCOUNT_RETIRED'
       ), totals AS (
-        SELECT COALESCE(sum(confirmed_minutes),0) AS minutes FROM in_period
+        SELECT (SELECT COALESCE(sum(confirmed_minutes),0) FROM in_period)
+          + (SELECT minutes FROM event_minutes) AS minutes,
+          (SELECT minutes FROM event_minutes) AS event_minutes
       ), visit_candidates AS (
         SELECT DISTINCT service_request_id FROM in_period WHERE request_status='COMPLETED'
       ), visits AS (
@@ -44,7 +54,8 @@ export class CommunityImpactService {
         )
       )
       SELECT to_char(b.month,'YYYY-MM') AS month, b.starts AS "startsAt", b.ends AS "endsBefore",
-        g.target_hours AS "targetHours", t.minutes AS "verifiedMinutes", visits.count AS "completedVisits"
+        g.target_hours AS "targetHours", t.minutes AS "verifiedMinutes",
+        t.event_minutes AS "eventMinutes", visits.count AS "completedVisits"
       FROM bounds b CROSS JOIN totals t CROSS JOIN visits
       LEFT JOIN community_impact_goals g ON g.organization_id=$1 AND g.month=b.month
     `,
@@ -54,6 +65,7 @@ export class CommunityImpactService {
       ...row,
       timezone: 'Asia/Kolkata',
       verifiedMinutes: Number(row.verifiedMinutes),
+      eventMinutes: Number(row.eventMinutes),
       completedVisits: Number(row.completedVisits),
     };
   }

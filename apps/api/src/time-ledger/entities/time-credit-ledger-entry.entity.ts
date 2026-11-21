@@ -14,7 +14,13 @@ import { CommunityCreditPool } from '../../donations/entities/community-credit-p
 import { CreditDonation } from '../../donations/entities/credit-donation.entity';
 
 export enum TimeCreditTxType {
+  REQUEST_CREDITS_SPENT = 'REQUEST_CREDITS_SPENT',
+  REQUEST_RESERVED = 'REQUEST_RESERVED',
+  REQUEST_RESERVE_APPLIED = 'REQUEST_RESERVE_APPLIED',
+  REQUEST_RESERVE_RELEASED = 'REQUEST_RESERVE_RELEASED',
   SERVICE_EARNED = 'SERVICE_EARNED',
+  /** Confirmed attendance at a community event that earns credits. */
+  EVENT_EARNED = 'EVENT_EARNED',
   DONATION_SENT = 'DONATION_SENT',
   DONATION_RECEIVED = 'DONATION_RECEIVED',
   ASSISTANCE_SPENT = 'ASSISTANCE_SPENT',
@@ -87,6 +93,10 @@ export class TimeCreditLedgerEntry {
 
   @Column({ name: 'instant_help_session_id', type: 'uuid', nullable: true })
   instantHelpSessionId?: string | null;
+
+  /** Set only on EVENT_EARNED entries. */
+  @Column({ name: 'community_event_id', type: 'uuid', nullable: true })
+  communityEventId?: string | null;
 
   @Column({ name: 'service_request_id', type: 'uuid', nullable: true })
   serviceRequestId?: string | null;

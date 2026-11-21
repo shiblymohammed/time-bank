@@ -14,7 +14,14 @@ import { CommunityPostEditingAndPhotos1729118400034 } from '../src/database/migr
 import { CommunityVisibility1729118400035 } from '../src/database/migrations/1729118400035-CommunityVisibility';
 import { CommunityImpact1729118400036 } from '../src/database/migrations/1729118400036-CommunityImpact';
 import { NearbyRequestPins1729118400037 } from '../src/database/migrations/1729118400037-NearbyRequestPins';
+import { InstantHelp1729118400038 } from '../src/database/migrations/1729118400038-InstantHelp';
+import { CommunityPostEvents1729118400039 } from '../src/database/migrations/1729118400039-CommunityPostEvents';
+import { InstantHelpVoiceNotes1729118400040 } from '../src/database/migrations/1729118400040-InstantHelpVoiceNotes';
+import { VolunteerCreditRequests1729118400041 } from '../src/database/migrations/1729118400041-VolunteerCreditRequests';
+import { CreationChannel, UrgencyType, ServiceRequestStatus } from '@ktb/shared-types';
 import { NearbyService } from '../src/nearby/nearby.service';
+import { NearbyRequestsService } from '../src/nearby/nearby-requests.service';
+import { ServiceRequestPhotos1729118400046 } from '../src/database/migrations/1729118400046-ServiceRequestPhotos';
 import { ProfilePhotoService } from '../src/identity/profile-photo.service';
 import { DocumentStorage } from '../src/wards/noc-storage';
 import sharp from 'sharp';
@@ -187,6 +194,11 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       CommunityVisibility1729118400035,
       CommunityImpact1729118400036,
       NearbyRequestPins1729118400037,
+      InstantHelp1729118400038,
+      CommunityPostEvents1729118400039,
+      InstantHelpVoiceNotes1729118400040,
+      VolunteerCreditRequests1729118400041,
+      ServiceRequestPhotos1729118400046,
     ],
     synchronize: false,
     extra: {
@@ -262,6 +274,220 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         first.profilePhotoVersion,
       );
       expect(files.size).toBe(1);
+    });
+  });
+
+  describe('credit-backed volunteer requests', () => {
+    const dto = (key = randomUUID()) => ({
+      serviceCatalogId: catalogueA, creationChannel: CreationChannel.DIRECT_BENEFICIARY,
+      urgency: UrgencyType.SCHEDULED, scheduledStartTime: new Date(Date.now() + 60 * 60_000).toISOString(),
+      expectedDurationMinutes: 60, acceptedCreditLimit: 1,
+      locationAddressText: 'Credit request test address', locationWardNumber: '1',
+      locationPostalCode: '676503', idempotencyKey: key,
+    });
+    const balance = async (user = volunteer) => Number((await db.query('SELECT balance_credits FROM universal_time_wallets WHERE user_id=$1', [user]))[0]?.balance_credits ?? 0);
+    beforeEach(async () => {
+      await db.query(`UPDATE global_service_definitions SET base_credit_rate_hourly=1,credit_multiplier=1,allow_partial_hours=true`);
+      await db.query(`INSERT INTO universal_time_wallets(user_id,balance_credits) VALUES($1,2) ON CONFLICT(user_id) DO UPDATE SET balance_credits=2`, [volunteer]);
+    });
+    async function finished(minutes: number) {
+      const booking = await requests.createRequest(orgA, volunteer, dto());
+      const assignment = await id('SELECT id FROM volunteer_assignments WHERE service_request_id=$1 AND volunteer_membership_id=$2', [booking.id, otherMember]);
+      await db.query(`UPDATE volunteer_assignments SET status='COMPLETED',accepted_at=now()-interval '3 hours',
+        started_at=now()-($2::int * interval '1 minute'),finished_at=now(),reported_minutes=$2 WHERE id=$1`, [assignment, minutes]);
+      await db.query(`UPDATE service_requests SET status='IN_PROGRESS' WHERE id=$1`, [booking.id]);
+      const context = await authorization.evaluateOrganizationAccess(volunteer, orgA);
+      return { booking, assignment, context };
+    }
+    it('quotes and reserves a volunteer wallet without recipient eligibility; retry reserves once', async () => {
+      expect(await requests.creditQuote(orgA, volunteer, catalogueA, 60)).toMatchObject({ maximumCredits: 1, availableCredits: 2, canBook: true });
+      await db.query('UPDATE universal_time_wallets SET balance_credits=1 WHERE user_id=$1', [volunteer]);
+      const body = dto();
+      const first = await requests.createRequest(orgA, volunteer, body);
+      const again = await requests.createRequest(orgA, volunteer, body);
+      expect(again.id).toBe(first.id);
+      expect(await balance()).toBe(0);
+      expect(Number(first.creditRemaining)).toBe(1);
+      expect(await db.query("SELECT id FROM time_credit_ledger WHERE tx_type='REQUEST_RESERVED'")).toHaveLength(1);
+    });
+    it('requires explicit consent to the latest price and rolls booking back', async () => {
+      const { acceptedCreditLimit: _ignored, ...withoutConsent } = dto();
+      await expect(requests.createRequest(orgA, volunteer, withoutConsent)).rejects.toThrow('latest credit quote');
+      await db.query('UPDATE global_service_definitions SET credit_multiplier=2');
+      await expect(requests.createRequest(orgA, volunteer, dto())).rejects.toThrow('latest credit quote');
+      expect(await balance()).toBe(2);
+      expect(await db.query('SELECT id FROM service_requests')).toHaveLength(0);
+    });
+    it('does not reserve unavailable or frozen credits', async () => {
+      await db.query('UPDATE universal_time_wallets SET balance_credits=0.5 WHERE user_id=$1', [volunteer]);
+      await expect(requests.createRequest(orgA, volunteer, dto())).rejects.toThrow('Not enough');
+      await db.query("UPDATE universal_time_wallets SET balance_credits=2,status='FROZEN' WHERE user_id=$1", [volunteer]);
+      await expect(requests.createRequest(orgA, volunteer, dto())).rejects.toThrow('unavailable');
+      expect(await db.query('SELECT id FROM service_requests')).toHaveLength(0);
+    });
+    it('serializes competing reservations against the same available credits', async () => {
+      await db.query('UPDATE universal_time_wallets SET balance_credits=1 WHERE user_id=$1', [volunteer]);
+      const a = dto(), b = dto();
+      b.serviceCatalogId = catalogueB;
+      b.scheduledStartTime = new Date(Date.parse(a.scheduledStartTime) + 60000).toISOString();
+      const outcomes = await Promise.allSettled([requests.createRequest(orgA, volunteer, a), requests.createRequest(orgB, volunteer, b)]);
+      expect(outcomes.filter(x => x.status === 'fulfilled')).toHaveLength(1);
+      expect(await balance()).toBe(0);
+    });
+    it('charges only verified minutes, pays the helper once, and returns unused credits', async () => {
+      const { booking, assignment, context } = await finished(30);
+      await requests.confirmCompletion(orgA, booking.id, assignment, volunteer, context, {});
+      expect(await balance()).toBe(1.5);
+      expect(await balance(otherVolunteer)).toBe(0.5);
+      const row = await db.getRepository(ServiceRequest).findOneByOrFail({ id: booking.id });
+      expect([row.creditCharged, row.creditReleased, row.creditRemaining].map(Number)).toEqual([0.5, 0.5, 0]);
+      await expect(requests.confirmCompletion(orgA, booking.id, assignment, volunteer, context, {})).rejects.toThrow();
+      expect(await balance(otherVolunteer)).toBe(0.5);
+    });
+    it('keeps charges within consent while recording extra independently verified help', async () => {
+      const { booking, assignment, context } = await finished(75);
+      await requests.confirmCompletion(orgA, booking.id, assignment, volunteer, context, {});
+      expect(await balance()).toBe(1);
+      expect(await balance(otherVolunteer)).toBe(1.25);
+      const row = await db.getRepository(ServiceRequest).findOneByOrFail({ id: booking.id });
+      expect([row.creditCharged, row.creditUncovered].map(Number)).toEqual([1, 0.25]);
+    });
+    it('keeps disputed help uncharged and returns credits when staff decide it was not delivered', async () => {
+      const { booking, assignment, context } = await finished(30);
+      await requests.disputeCompletion(orgA, booking.id, assignment, volunteer, context, { reason: 'The help was not delivered' });
+      expect(await balance()).toBe(1);
+      expect(await balance(otherVolunteer)).toBe(0);
+      const staff = await authorization.evaluateOrganizationAccess(coordinator, orgA);
+      await requests.resolveServiceReview(orgA, booking.id, assignment, coordinator, staff, {
+        decision: AssignmentReviewDecision.REJECT, notes: 'Checked with both members; the help was not given',
+      });
+      expect(await balance()).toBe(2);
+      expect(await balance(otherVolunteer)).toBe(0);
+    });
+    it('rolls back charging, helper earnings and confirmation together when final auditing fails', async () => {
+      const { booking, assignment, context } = await finished(30);
+      const original = audit.logEvent.bind(audit);
+      jest.spyOn(audit, 'logEvent').mockImplementation(async (event: any, manager?: any) => {
+        if (event.eventType === 'SERVICE_CONFIRMED') throw new Error('Final audit failed');
+        return original(event, manager);
+      });
+      await expect(requests.confirmCompletion(orgA, booking.id, assignment, volunteer, context, {})).rejects.toThrow('Final audit failed');
+      expect(await balance()).toBe(1);
+      expect(await balance(otherVolunteer)).toBe(0);
+      expect(Number((await db.getRepository(ServiceRequest).findOneByOrFail({ id: booking.id })).creditRemaining)).toBe(1);
+    });
+    it('returns the reservation on cancellation without issuing a second return on retry', async () => {
+      const booking = await requests.createRequest(orgA, volunteer, dto());
+      const context = await authorization.evaluateOrganizationAccess(volunteer, orgA);
+      await requests.cancelRequest(orgA, booking.id, volunteer, context, { reasonCode: 'PLANS_CHANGED', notes: 'Test booking cancelled' });
+      await expect(requests.cancelRequest(orgA, booking.id, volunteer, context, { reasonCode: 'PLANS_CHANGED', notes: 'Test booking cancelled' })).rejects.toThrow('already cancelled');
+      expect(await balance()).toBe(2);
+      expect(await db.query("SELECT id FROM time_credit_ledger WHERE tx_type='REQUEST_RESERVE_RELEASED'")).toHaveLength(1);
+    });
+    it('returns reserved credits when an unmatched request expires', async () => {
+      const booking = await requests.createRequest(orgA, volunteer, dto());
+      await service.expireUnfilledRequest(booking.id, new Date(Date.now() + 24 * 60 * 60_000));
+      expect(await balance()).toBe(2);
+      expect((await db.getRepository(ServiceRequest).findOneByOrFail({ id: booking.id })).status).toBe(ServiceRequestStatus.EXPIRED_UNMATCHED);
+    });
+    it('does not allow optional funding to charge an already credit-backed request again', async () => {
+      const booking = await requests.createRequest(orgA, volunteer, dto());
+      await expect(new CreditControlsService(db, audit).spend(orgA, volunteer, booking.id, { amount: 1, reason: 'Do not pay twice', idempotencyKey: randomUUID() })).rejects.toThrow('already funded');
+    });
+    it('refuses a schema rollback after credit-backed bookings exist', async () => {
+      await requests.createRequest(orgA, volunteer, dto());
+      const runner = db.createQueryRunner();
+      try { await expect(new VolunteerCreditRequests1729118400041().down(runner)).rejects.toThrow('roll forward'); }
+      finally { await runner.release(); }
+    });
+    it('keeps recipient assistance free while retaining its eligibility requirement', async () => {
+      const [{ user_id: recipient }] = await db.query('SELECT user_id FROM organization_memberships WHERE id=$1', [beneficiaryA]);
+      await db.query("INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,'BENEFICIARY',$2)", [beneficiaryA, coordinator]);
+      const { acceptedCreditLimit: _unused, ...body } = dto();
+      await expect(requests.createRequest(orgA, recipient, body)).rejects.toThrow('eligibility');
+      await db.query(`INSERT INTO beneficiary_eligibilities(organization_id,membership_id,review_due_at,approved_by_user_id,monthly_request_quota)
+        VALUES($1,$2,now()+interval '1 year',$3,20)`, [orgA, beneficiaryA, coordinator]);
+      const free = await requests.createRequest(orgA, recipient, body);
+      expect(free.creditPayerUserId).toBeNull();
+      expect(Number(free.creditLimit)).toBe(0);
+      expect(await db.query('SELECT id FROM time_credit_ledger')).toHaveLength(0);
+    });
+  });
+
+  describe('Nearby request discovery', () => {
+    let feed: NearbyRequestsService;
+    const photos = {readVersion: jest.fn(async()=>Buffer.from('shared-avatar'))};
+    beforeEach(()=>{ feed=new NearbyRequestsService(db,authorization,photos as any); });
+    async function shared(org=orgA,ward='1') {
+      const requestId=await request(undefined,org);
+      await db.query(`UPDATE service_requests SET status='MATCHING_ACTIVE',scheduled_start_time=now()+interval '2 hours',
+        location_ward_number=$2,location_lat=10.9982,location_lng=75.9921,share_nearby_pin=true,
+        beneficiary_notes='PRIVATE MEDICAL NOTE',location_address_text='PRIVATE HOME ADDRESS' WHERE id=$1`,[requestId,ward]);
+      return requestId;
+    }
+    it('returns opted-in local open requests with visibility-safe member data and credit estimates',async()=>{
+      const req=await shared();await shared(orgB);
+      await db.query('UPDATE users SET full_name=$2 WHERE id=(SELECT user_id FROM organization_memberships WHERE id=$1)',[beneficiaryA,'PRIVATE LEGAL NAME']);
+      const offerId=await offer(req);
+      let result=await feed.list(orgA,volunteer,{});
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0]).toMatchObject({memberName:null,ward:'1',durationMinutes:60,estimatedCredits:1,assignment:{id:offerId,status:'OFFERED'}});
+      expect(JSON.stringify(result)).not.toMatch(/PRIVATE|phone|locationLat|locationLng|beneficiaryMembershipId/);
+      expect(result.items[0].id).toMatch(/^[a-f0-9]{24}$/);expect(result.items[0].ownRequestId).toBeNull();
+      await db.query('INSERT INTO community_visibility(organization_id,membership_id,display_name) VALUES($1,$2,$3)',[orgA,beneficiaryA,'Meera']);
+      result=await feed.list(orgA,otherVolunteer,{});expect(result.items[0].memberName).toBe('Meera');expect(result.items[0].assignment).toBeNull();
+      const [{user_id:recipient}]=await db.query('SELECT user_id FROM organization_memberships WHERE id=$1',[beneficiaryA]);
+      expect((await feed.list(orgA,recipient,{})).canBrowse).toBe(false);
+      await expect(feed.list(orgB,otherVolunteer,{})).rejects.toThrow();
+    });
+    it('omits filled, closed, expired and unshared requests',async()=>{
+      const req=await shared();const assignment=await offer(req);
+      await db.query("UPDATE volunteer_assignments SET status='ACCEPTED',accepted_at=now() WHERE id=$1",[assignment]);
+      expect((await feed.list(orgA,otherVolunteer,{})).items).toEqual([]);
+      await db.query("UPDATE volunteer_assignments SET status='DECLINED' WHERE id=$1",[assignment]);
+      expect((await feed.list(orgA,otherVolunteer,{})).items).toHaveLength(1);
+      for(const update of ["share_nearby_pin=false","share_nearby_pin=true,status='CANCELLED'","status='MATCHING_ACTIVE',scheduled_start_time=now()-interval '2 hours'"]){
+        await db.query('UPDATE service_requests SET '+update+' WHERE id=$1',[req]);
+        expect((await feed.list(orgA,otherVolunteer,{})).items).toEqual([]);
+      }
+    });
+    it('filters and paginates without exposing another volunteer’s assignments',async()=>{
+      for(let i=0;i<22;i++)await shared(orgA,i===21?'2':'1');
+      const first=await feed.list(orgA,volunteer,{}),second=await feed.list(orgA,volunteer,{offset:20});
+      expect(first.items).toHaveLength(20);expect(first.hasMore).toBe(true);expect(second.items).toHaveLength(2);
+      expect(new Set([...first.items,...second.items].map(i=>i.id)).size).toBe(22);
+      expect((await feed.list(orgA,volunteer,{ward:'2'})).items).toHaveLength(1);
+      expect((await feed.list(orgA,volunteer,{q:'does not exist'})).items).toEqual([]);
+      expect((await feed.list(orgA,volunteer,{category:randomUUID()})).items).toEqual([]);
+    });
+    it('keeps private request photos limited to owners, staff and current authorized assignments',async()=>{
+      jest.spyOn(Date,'now').mockReturnValue(new Date().getTime());
+      const req=await shared();
+      await db.query('INSERT INTO service_request_photos(request_id,jpeg,sha256) VALUES($1,$2,$3)',[req,Buffer.from('private-jpeg'),'a'.repeat(64)]);
+      expect(await requests.requestPhoto(orgA,req,coordinator)).toEqual(Buffer.from('private-jpeg'));
+      await expect(requests.requestPhoto(orgA,req,volunteer)).rejects.toThrow();
+      const assignment=await offer(req);
+      expect(await requests.requestPhoto(orgA,req,volunteer)).toEqual(Buffer.from('private-jpeg'));
+      await db.query("UPDATE volunteer_assignments SET offer_expires_at=now()-interval '1 minute' WHERE id=$1",[assignment]);
+      await expect(requests.requestPhoto(orgA,req,volunteer)).rejects.toThrow();
+      await expect(requests.requestPhoto(orgB,req,volunteer)).rejects.toThrow();
+    });
+    it('rechecks photo consent, blocking and request visibility for every image read',async()=>{
+      const req=await shared();const photoId=randomUUID();
+      await db.query('UPDATE users SET profile_photo_id=$2 WHERE id=(SELECT user_id FROM organization_memberships WHERE id=$1)',[beneficiaryA,photoId]);
+      await db.query('INSERT INTO community_visibility(organization_id,membership_id,shared_photo_id) VALUES($1,$2,$3)',[orgA,beneficiaryA,photoId]);
+      await db.query("INSERT INTO service_request_photos(request_id,jpeg,sha256) VALUES($1,$2,$3)",[req,Buffer.from('normalized-jpeg'),'a'.repeat(64)]);
+      const token=(await feed.list(orgA,volunteer,{})).items[0].id;
+      expect(await feed.image(orgA,volunteer,token,'request')).toEqual(Buffer.from('normalized-jpeg'));
+      expect(await feed.image(orgA,volunteer,token,'member')).toEqual(Buffer.from('shared-avatar'));
+      await db.query('UPDATE community_visibility SET shared_photo_id=NULL');
+      await expect(feed.image(orgA,volunteer,token,'member')).rejects.toThrow('private');
+      await db.query('INSERT INTO community_member_blocks(organization_id,blocker_id,blocked_id) VALUES($1,$2,$3)',[orgA,beneficiaryA,memberA]);
+      expect((await feed.list(orgA,volunteer,{})).items).toEqual([]);
+      await expect(feed.image(orgA,volunteer,token,'request')).rejects.toThrow('unavailable');
+      await expect(feed.image(orgB,volunteer,token,'request')).rejects.toThrow('unavailable');
+      await db.query('DELETE FROM community_member_blocks');await db.query('UPDATE service_requests SET share_nearby_pin=false WHERE id=$1',[req]);
+      await expect(feed.image(orgA,volunteer,token,'request')).rejects.toThrow('unavailable');
     });
   });
 
@@ -636,6 +862,27 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
         approved_by_user_id,monthly_request_quota) VALUES($1,$2,NOW()+interval '1 year',$3,20)`,
         [orgA, beneficiaryA, coordinator],
       );
+    });
+    const withPhoto=(key: string,buffer: Buffer)=>requests.createRequest(orgA,coordinator,{
+      creationChannel:CreationChannel.COORDINATOR_ON_BEHALF,beneficiaryMembershipId:beneficiaryA,
+      serviceCatalogId:catalogueA,urgency:UrgencyType.SCHEDULED,scheduledStartTime:'2030-01-02T10:00:00Z',
+      locationAddressText:'Test community centre',locationWardNumber:'1',locationPostalCode:'676503',idempotencyKey:key,
+    },undefined,{buffer});
+    it('saves one normalized request photo across retries and rejects a different retry photo',async()=>{
+      const image=await sharp({create:{width:24,height:24,channels:3,background:'#5566aa'}}).png().toBuffer();
+      const key=randomUUID(),one=await withPhoto(key,image),two=await withPhoto(key,image);
+      expect(one.id).toBe(two.id);const stored=await db.query('SELECT jpeg FROM service_request_photos');expect(stored).toHaveLength(1);
+      expect((await sharp(stored[0].jpeg).metadata()).format).toBe('jpeg');
+      const other=await sharp({create:{width:24,height:24,channels:3,background:'#ffaa00'}}).png().toBuffer();
+      await expect(withPhoto(key,other)).rejects.toThrow('different photo');
+      expect(await db.query('SELECT request_id FROM service_request_photos')).toHaveLength(1);
+    });
+    it('rolls back photos and bookings together when matching fails',async()=>{
+      const image=await sharp({create:{width:24,height:24,channels:3,background:'#5566aa'}}).png().toBuffer();
+      jest.spyOn(service,'findCandidatesAndDispatchOffers').mockRejectedValueOnce(new Error('matching unavailable'));
+      await expect(withPhoto(randomUUID(),image)).rejects.toThrow('matching unavailable');
+      expect(await db.query('SELECT request_id FROM service_request_photos')).toHaveLength(0);
+      expect(await db.getRepository(ServiceRequest).count()).toBe(0);
     });
     it('fits request numbers even when the organization code has its allowed maximum length', async () => {
       await db.query('UPDATE organizations SET code=$2 WHERE id=$1', [orgA, 'A'.repeat(50)]);

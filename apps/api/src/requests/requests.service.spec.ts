@@ -142,7 +142,7 @@ describe('RequestsService', () => {
         { provide: BeneficiariesService, useValue: mockBeneficiariesService },
         { provide: MatchingService, useValue: mockMatchingService },
         { provide: AuditService, useValue: mockAuditService },
-        { provide: TimeLedgerService, useValue: {} },
+        { provide: TimeLedgerService, useValue: { mySummary: jest.fn().mockResolvedValue({ balanceCredits: 0, status: 'ACTIVE' }) } },
         { provide: NotificationsService, useValue: mockNotifications },
         {
           provide: AuthorizationService,

@@ -1,5 +1,5 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsInt, IsOptional, Max, Min } from 'class-validator';
+import { IsInt, IsOptional, IsString, Max, MaxLength, Min, MinLength } from 'class-validator';
 
 export class ConfirmServiceCompletionDto {
   @ApiPropertyOptional({
@@ -11,4 +11,11 @@ export class ConfirmServiceCompletionDto {
   @Min(1)
   @Max(720)
   minutes?: number;
+
+  @ApiPropertyOptional({ description: 'Explanation when the recipient adjusts the reported time.' })
+  @IsOptional()
+  @IsString()
+  @MinLength(3)
+  @MaxLength(1000)
+  reason?: string;
 }

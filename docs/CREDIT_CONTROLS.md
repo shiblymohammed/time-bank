@@ -1,5 +1,7 @@
 # Milestone 4 credit controls
 
+Volunteer self-requests can now use an explicitly accepted time-credit maximum, reserved at booking and settled against verified minutes. This separate paid path does not require recipient eligibility. See [Volunteer credit-backed requests](VOLUNTEER_CREDIT_REQUESTS.md). The free assistance and optional funding rules below apply to recipient/caregiver requests; credit-backed requests cannot also make an optional contribution.
+
 Eligible beneficiaries, including older people and people with disabilities, receive approved assistance free,
 regardless of their credit balance. This is the product rule confirmed on 2 November 2026. Creating, matching, starting,
 finishing and confirming a request never charges the beneficiary. These controls do not change eligibility.

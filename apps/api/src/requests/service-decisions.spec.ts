@@ -178,6 +178,16 @@ describe('Service decisions', () => {
       await expect(confirm()).resolves.toMatchObject({ reviewRequired: false });
     });
 
+    it('keeps the recipient explanation when adjusted time needs review', async () => {
+      assignment.finishedAt = minutesAfterStart(1);
+
+      await confirm(beneficiary, { minutes: 50, reason: 'Checked the visit duration' });
+
+      expect(assignment.reviewNotes).toBe('Checked the visit duration');
+      expect(assignment.reviewMinutes).toBe(50);
+      expect(ledger.postServiceEarning).not.toHaveBeenCalled();
+    });
+
     it('sends a forgotten Finish to a coordinator', async () => {
       assignment.finishedAt = minutesAfterStart(720);
       assignment.reportedMinutes = 720;
@@ -381,3 +391,4 @@ describe('Service decisions', () => {
     });
   });
 });
+

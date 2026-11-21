@@ -27,6 +27,60 @@ Examples at the default rates: 20 minutes pay 0.33 credits, 40 minutes 0.67, and
 - Each payment writes an audit event, `TIME_CREDITS_EARNED` or `TIME_CREDITS_HELD`. The `SERVICE_CONFIRMED` event and
   the confirm response carry `creditsEarned` and `creditsHeld`.
 
+## Community events
+
+Migration `1729118400042-CommunityEventCredits` lets a community event pay credits for attendance.
+
+- Staff choose **Members earn time credits for attending** when publishing (`earnsCredits: true`). Other events pay
+  nothing. A credit-earning event needs a check-in location (`latitude`, `longitude`) and a range
+  (`checkInRadiusMeters`, 50–1000, default 200), added by migration `1729118400043-CommunityEventCheckIn`.
+- Members sign up as before. Signing up alone earns nothing.
+- **Venue QR code.** Every event gets a secret check-in code (`checkin_token`, 64 hex characters, migration
+  `1729118400045-CommunityEventQrCheckIn`). Staff open **Show check-in QR** on the dashboard event card, which calls
+  `GET .../events/:eventId/check-in-qr` (staff only, `no-store`). It returns the QR as an SVG; its text is
+  `ktb-event:<eventId>:<secret>`. The secret is never part of a member-facing or staff list response. The dashboard
+  opens the QR as soon as a credit event is published, and the organiser shows or prints it at the venue. The QR route
+  stops working once the event has ended or been cancelled.
+- **Check-in.** While the event is running (from its start until its end, never earlier or later), a member taps
+  **Scan QR to check in** (or **Scan QR to join** if they have not signed up) and scans the venue QR. The app then reads
+  the phone's position and sends it with the scanned secret to `POST .../events/:eventId/check-in`
+  (`{ latitude, longitude, accuracyMeters, code }`). The server accepts the check-in only if the secret matches this
+  event (compared in constant time) and the measured distance is within the range, plus the phone's reported accuracy up
+  to 100 m. A member who had not signed up joins on the spot if the event is not full, in the same locked step, so a
+  walk-in and a sign-up cannot both take the last place. The check-in time, position and distance are stored, and the
+  audit entry records that it was a QR check-in. A second check-in is harmless and changes nothing.- **Event ended.** After the end time, the card shows "Event ended", check-in closes, and members who checked in see
+  that their coordinator will approve their time.
+- **Approval.** In the dashboard, staff open **Review and approve attendance**. Each person's limit runs from their
+  check-in (or the start, if they checked in on time) until the event ended. Staff approve one person at a time
+  (`POST .../attendees/:membershipId/confirm` with `{ minutes }`, up to that limit), or everyone who checked in at once
+  (`POST .../attendees/confirm-all`, with an optional `maxMinutes` cap that never raises anyone above their own limit).
+  Members who did not check in cannot be paid; `chk_event_confirmed_after_checkin` enforces this for new rows.
+- Events published before check-in existed (no location) keep the original manual confirmation, up to the event
+  length.
+- **Event images.** Staff may attach one cover image when publishing any event (migration
+  `1729118400044-CommunityEventPhotos`). The publish request is JSON as before, or `multipart/form-data` with the
+  same fields plus a `file` part. Only staff reach image processing; the server accepts JPEG, PNG and WebP up to
+  5 MB (not animated), re-encodes it to a JPEG no larger than 1440 px, and drops all embedded metadata, including
+  location. The event and its image are saved in one transaction, so a failed publish leaves neither. An image
+  cannot be changed after publishing. A retried publish with the same id must carry the same details and the same
+  image, otherwise it is refused (409). Event lists report `photo_version` (null when there is no image), and
+  approved members of the event's community fetch it from `GET .../community/events/:eventId/photo`. The dashboard
+  and the app show it on each event card.
+- `scripts/event-photos-qa.cjs` checks the image rules against the disposable interface-QA API and database.
+- Events pay the fixed Instant Help rate: one credit per hour, partial hours counted (90 minutes = 1.5 credits).
+- The confirmation and its `EVENT_EARNED` ledger entry commit in one transaction. `uq_ledger_event_earning` pays each
+  wallet at most once per event, and `chk_ledger_event_earning` requires the event reference.
+- A confirmation is final. Repeating it with the same minutes returns `replayed: true` and pays nothing; a different
+  amount is refused. A confirmed member can no longer withdraw from the event.
+- Staff cannot confirm their own attendance, and members cannot confirm anyone's.
+- Held wallets and restricted accounts receive the credits as frozen credits, like visit earnings.
+- Confirmed event minutes count in the member's minutes given, the monthly earnings chart, and the community's
+  monthly verified time (`eventMinutes` is also returned separately). They are not counted as completed visits.
+- `scripts/event-credits-qa.cjs` checks all of this against the disposable interface-QA API and database.
+- Location is self-reported by the phone, so a determined member could fake GPS. The venue QR adds a second proof, but a
+  photo of it could be shared, so it is only as private as the poster. The stored check-in position and distance, and
+  staff approval, are the safeguards; the server does not trust a check-in it did not measure.
+
 Credits can also be given away; see `CREDIT_DONATIONS.md`. Voluntary assistance spending, fraud review and frozen-credit
 release are described in [CREDIT_CONTROLS.md](CREDIT_CONTROLS.md). Eligible beneficiaries are never automatically
 charged.

@@ -9,9 +9,14 @@ import {
   UseGuards,
   ParseUUIDPipe,
   ForbiddenException,
+  UseInterceptors,
+  UploadedFile,
+  Res,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
-import { Request } from 'express';
+import { Request, Response } from 'express';
+import { FileInterceptor } from '@nestjs/platform-express';
+import { PROFILE_PHOTO_MAX_BYTES } from '../identity/profile-photo.service';
 import { CreationChannel, UserRole } from '@ktb/shared-types';
 
 import { RequestsService } from './requests.service';
@@ -22,6 +27,7 @@ import { ConfirmServiceCompletionDto } from './dto/confirm-service-completion.dt
 import { DisputeServiceCompletionDto } from './dto/dispute-service-completion.dto';
 import { ResolveServiceReviewDto } from './dto/resolve-service-review.dto';
 import { RequestQueryDto } from './dto/request-query.dto';
+import { RequestCreditQuoteDto } from './dto/request-credit-quote.dto';
 
 import { AuthGuard } from '../auth/guards/auth.guard';
 import { OrganizationAccessGuard } from '../authorization/guards/organization-access.guard';
@@ -33,7 +39,28 @@ import { CurrentUserId } from '../authorization/decorators/current-user.decorato
 export class RequestsController {
   constructor(private readonly requestsService: RequestsService) {}
 
+  @Get('credit-quote')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  @ApiOperation({ summary: 'Quote the maximum for a volunteer credit-backed self-request' })
+  creditQuote(
+    @Param('id', ParseUUIDPipe) orgId: string,
+    @CurrentUserId() userId: string,
+    @Query() dto: RequestCreditQuoteDto,
+  ) {
+    return this.requestsService.creditQuote(
+      orgId,
+      userId,
+      dto.serviceCatalogId,
+      dto.expectedDurationMinutes,
+    );
+  }
+
   @Post()
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: { fileSize: PROFILE_PHOTO_MAX_BYTES, files: 1, fields: 24 },
+    }),
+  )
   @UseGuards(AuthGuard, OrganizationAccessGuard)
   @ApiOperation({
     summary: 'Create service request with mandatory manual location (D#8, D#59, D#60, D#61)',
@@ -44,6 +71,7 @@ export class RequestsController {
     @Body() dto: CreateServiceRequestDto,
     @CurrentUserId() userId: string,
     @Req() req: Request,
+    @UploadedFile() photo?: { buffer: Buffer },
   ) {
     const context = (req as any).organizationMembership;
     if (
@@ -62,7 +90,7 @@ export class RequestsController {
     if (typeof idempotencyHeader === 'string' && !dto.idempotencyKey) {
       dto.idempotencyKey = idempotencyHeader;
     }
-    return this.requestsService.createRequest(organizationId, userId, dto, ip);
+    return this.requestsService.createRequest(organizationId, userId, dto, ip, photo);
   }
 
   @Get()
@@ -77,6 +105,23 @@ export class RequestsController {
   ) {
     const membershipContext = (req as any).organizationMembership;
     return this.requestsService.listRequests(organizationId, userId, membershipContext, query);
+  }
+
+  @Get(':requestId/photo')
+  @UseGuards(AuthGuard, OrganizationAccessGuard)
+  async requestPhoto(
+    @Param('id', ParseUUIDPipe) org: string,
+    @Param('requestId', ParseUUIDPipe) id: string,
+    @CurrentUserId() user: string,
+    @Res() response: Response,
+  ) {
+    const bytes = await this.requestsService.requestPhoto(org, id, user);
+    response.set({
+      'Cache-Control': 'private, no-store',
+      'Content-Type': 'image/jpeg',
+      'X-Content-Type-Options': 'nosniff',
+    });
+    return response.send(bytes);
   }
 
   @Get(':requestId')

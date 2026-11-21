@@ -27,6 +27,27 @@ import { RequestRescheduleHistory } from './request-reschedule.entity';
 @Entity('service_requests')
 @Unique('uq_service_requests_org_number', ['organizationId', 'requestNumber'])
 export class ServiceRequest {
+  @Column({ name: 'credit_payer_user_id', type: 'uuid', nullable: true })
+  creditPayerUserId?: string | null;
+
+  @Column({ name: 'credit_limit', type: 'numeric', precision: 10, scale: 2, default: 0 })
+  creditLimit!: number;
+
+  @Column({ name: 'credit_remaining', type: 'numeric', precision: 10, scale: 2, default: 0 })
+  creditRemaining!: number;
+
+  @Column({ name: 'credit_charged', type: 'numeric', precision: 10, scale: 2, default: 0 })
+  creditCharged!: number;
+
+  @Column({ name: 'credit_released', type: 'numeric', precision: 10, scale: 2, default: 0 })
+  creditReleased!: number;
+
+  @Column({ name: 'credit_uncovered', type: 'numeric', precision: 10, scale: 2, default: 0 })
+  creditUncovered!: number;
+
+  @Column({ name: 'credit_policy', type: 'jsonb', nullable: true })
+  creditPolicy?: { baseCreditRateHourly: number; creditMultiplier: number; allowPartialHours: boolean } | null;
+
   @PrimaryGeneratedColumn('uuid')
   id!: string;
 

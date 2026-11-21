@@ -1,4 +1,4 @@
-import { creditsForMinutes } from './time-ledger.service';
+import { EVENT_CREDIT_POLICY, creditsForMinutes } from './time-ledger.service';
 
 describe('creditsForMinutes (FR-TIME-02)', () => {
   const policy = { baseCreditRateHourly: 1, creditMultiplier: 1, allowPartialHours: true };
@@ -23,5 +23,18 @@ describe('creditsForMinutes (FR-TIME-02)', () => {
     expect(creditsForMinutes(59, whole)).toBe(0);
     expect(creditsForMinutes(119, whole)).toBe(1);
     expect(creditsForMinutes(120, whole)).toBe(2);
+  });
+});
+
+describe('community event credits', () => {
+  it('pays one credit per hour and counts partial hours', () => {
+    expect(EVENT_CREDIT_POLICY).toEqual({
+      baseCreditRateHourly: 1,
+      creditMultiplier: 1,
+      allowPartialHours: true,
+    });
+    expect(creditsForMinutes(120, EVENT_CREDIT_POLICY)).toBe(2);
+    expect(creditsForMinutes(45, EVENT_CREDIT_POLICY)).toBe(0.75);
+    expect(creditsForMinutes(1440, EVENT_CREDIT_POLICY)).toBe(24);
   });
 });

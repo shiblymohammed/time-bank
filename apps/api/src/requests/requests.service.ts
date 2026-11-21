@@ -9,7 +9,8 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, In, Repository } from 'typeorm';
-import { randomUUID } from 'crypto';
+import { randomUUID, createHash } from 'crypto';
+import { prepareProfilePhoto } from '../identity/profile-photo.service';
 import {
   AssignmentReviewDecision,
   AssignmentReviewReason,
@@ -37,6 +38,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { VolunteerAssignment } from '../matching/entities/volunteer-assignment.entity';
 import { AuditService } from '../audit/audit.service';
 import { TimeLedgerService } from '../time-ledger/time-ledger.service';
+import { chargeRequestCredits, creditCents, releaseRequestCredits, requestCreditEstimate, reserveRequestCredits } from './request-credit-accounting';
 import {
   AuthorizationService,
   EvaluatedMembershipContext,
@@ -102,23 +104,64 @@ export class RequestsService {
     private readonly loyalty: LoyaltyService,
   ) {}
 
+  async creditQuote(orgId: string, userId: string, serviceCatalogId: string, minutes: number) {
+    const context = await this.authorizationService.evaluateOrganizationAccess(userId, orgId);
+    if (!context.roles.includes(UserRole.VOLUNTEER) || context.roles.includes(UserRole.BENEFICIARY)) {
+      throw new ForbiddenException('Credit quotes are for volunteers requesting help for themselves.');
+    }
+    const item = await this.catalogRepo.findOne({ where: { id: serviceCatalogId, organizationId: orgId }, relations: ['globalService'] });
+    if (!item?.isEnabled || !item.globalService || item.globalService.isActive === false) {
+      throw new BadRequestException('This service is not available.');
+    }
+    const policy = { baseCreditRateHourly: Number(item.globalService.baseCreditRateHourly),
+      creditMultiplier: Number(item.globalService.creditMultiplier), allowPartialHours: item.globalService.allowPartialHours };
+    const maximumCredits = requestCreditEstimate(policy, minutes, item.preferredVolunteers);
+    const summary = await this.timeLedgerService.mySummary(userId);
+    return { maximumCredits, availableCredits: summary.balanceCredits, expectedDurationMinutes: minutes,
+      helpers: item.preferredVolunteers, policy,
+      canBook: summary.status === 'ACTIVE' && creditCents(summary.balanceCredits) >= creditCents(maximumCredits),
+      unavailableReason: summary.status !== 'ACTIVE' ? 'Your time-credit wallet is currently unavailable for booking.' : null,
+      balanceAfterReservation: Math.max(0, (creditCents(summary.balanceCredits) - creditCents(maximumCredits)) / 100) };
+  }
+
+  async requestPhoto(org: string, id: string, user: string): Promise<Buffer> {
+    const context = await this.authorizationService.evaluateOrganizationAccess(user,org);
+    try {
+      await this.getRequestById(org,id,user,context);
+    } catch (error) {
+      if (!(error instanceof ForbiddenException) || context.membershipStatus!=='APPROVED' ||
+        !context.roles.includes(UserRole.VOLUNTEER)) throw error;
+      const assignment = await this.assignmentRepo.findOne({where:{serviceRequestId:id,
+        volunteerMembershipId:context.membershipId,status:In([VolunteerAssignmentStatus.OFFERED,
+          VolunteerAssignmentStatus.ACCEPTED,VolunteerAssignmentStatus.IN_PROGRESS,VolunteerAssignmentStatus.COMPLETED])}});
+      if (!assignment || (assignment.status === VolunteerAssignmentStatus.OFFERED &&
+        new Date(assignment.offerExpiresAt).getTime() <= Date.now())) throw error;
+    }
+    const [photo] = await this.requestRepo.manager.query(
+      'SELECT p.jpeg FROM service_request_photos p JOIN service_requests r ON r.id=p.request_id WHERE r.organization_id=$1 AND r.id=$2',[org,id]);
+    if (!photo) throw new NotFoundException('No request photo');
+    return photo.jpeg;
+  }
+
   // ─── Create Service Request (D#8, D#59, D#60, D#61) ─────────────────────────
   async createRequest(
     orgId: string,
     callingUserId: string,
     dto: CreateServiceRequestDto,
     ipAddress?: string,
+    upload?: { buffer: Buffer },
   ): Promise<ServiceRequest> {
     if (dto.shareNearbyPin === true && (dto.locationLat == null || dto.locationLng == null)) {
       throw new BadRequestException('Choose a service location before sharing a map pin.');
     }
+    const photo = upload?.buffer ? await prepareProfilePhoto(upload.buffer, true) : undefined;
     return this.requestRepo.manager.transaction('READ COMMITTED', async (manager) => {
       // Serialize creation per organization: retries, duplicate checks and the
       // last monthly quota slot must observe the preceding committed request.
       await manager.query('SELECT pg_advisory_xact_lock(hashtextextended($1,0))', [
         `request-create:${orgId}`,
       ]);
-      return this.createRequestInTransaction(orgId, callingUserId, dto, manager, ipAddress);
+      return this.createRequestInTransaction(orgId, callingUserId, dto, manager, ipAddress, photo);
     });
   }
 
@@ -128,6 +171,7 @@ export class RequestsService {
     dto: CreateServiceRequestDto,
     manager: EntityManager,
     ipAddress?: string,
+    photo?: Buffer,
   ): Promise<ServiceRequest> {
     const requestRepo = manager.getRepository(ServiceRequest);
     const org = await manager.withRepository(this.orgRepo).findOne({ where: { id: orgId } });
@@ -188,6 +232,13 @@ export class RequestsService {
         if (!sameRequestDetails(existing, dto)) {
           throw new ConflictException('This request key was already used for a different request');
         }
+        if (photo) {
+          const [stored] = await manager.query(
+            'SELECT sha256 FROM service_request_photos WHERE request_id=$1', [existing.id]);
+          if (stored?.sha256 !== createHash('sha256').update(photo).digest('hex')) {
+            throw new ConflictException('This request key was already used with a different photo');
+          }
+        }
         return existing;
       }
     }
@@ -218,6 +269,7 @@ export class RequestsService {
     let beneficiaryMembershipId: string;
     const creationChannel = dto.creationChannel ?? CreationChannel.DIRECT_BENEFICIARY;
     let caregiverAuthId: string | null = null;
+    let creditBacked = false;
 
     if (creationChannel === CreationChannel.DIRECT_BENEFICIARY) {
       // Find calling user's membership in this organization
@@ -235,11 +287,25 @@ export class RequestsService {
       const hasBeneficiaryRole = callerMembership.roleGrants?.some(
         (rg) => rg.role === UserRole.BENEFICIARY && rg.status === RoleGrantStatus.ACTIVE,
       );
+      const hasVolunteerRole = callerMembership.roleGrants?.some(
+        (rg) => rg.role === UserRole.VOLUNTEER && rg.status === RoleGrantStatus.ACTIVE,
+      );
 
       if (!hasBeneficiaryRole) {
-        throw new ForbiddenException(
-          'Caller must hold approved BENEFICIARY role to submit requests directly',
-        );
+        if (hasVolunteerRole) {
+          creditBacked = true;
+          // Volunteers can ask for help if they have spendable time credits
+          const summary = await this.timeLedgerService.mySummary(callingUserId);
+          if (summary.balanceCredits <= 0) {
+            throw new ForbiddenException(
+              'Volunteers require an active time credit balance to request assistance. Earn credits by helping first!',
+            );
+          }
+        } else {
+          throw new ForbiddenException(
+            'Caller must hold approved BENEFICIARY role or VOLUNTEER role with time credits to submit requests directly',
+          );
+        }
       }
 
       beneficiaryMembershipId = callerMembership.id;
@@ -293,12 +359,11 @@ export class RequestsService {
     }
 
     // 3. Verify Beneficiary Eligibility and Frequency Quota (D#24, D#26, FR-BEN-04)
-    await this.beneficiariesService.checkEligibilityAndQuota(
-      orgId,
-      beneficiaryMembershipId,
-      catalogItem.globalService?.categoryId,
-      manager,
-    );
+    if (!creditBacked) {
+      await this.beneficiariesService.checkEligibilityAndQuota(
+        orgId, beneficiaryMembershipId, catalogItem.globalService?.categoryId, manager,
+      );
+    }
 
     // 4. Duplicate active request check for safety
     const existingDuplicate = await requestRepo.findOne({
@@ -349,6 +414,18 @@ export class RequestsService {
     });
 
     const saved = await requestRepo.save(request);
+    if (photo) {
+      await manager.query(
+        'INSERT INTO service_request_photos(request_id,jpeg,sha256) VALUES ($1,$2,$3)',
+        [saved.id, photo, createHash('sha256').update(photo).digest('hex')]);
+    }
+
+    if (creditBacked) {
+      const global = catalogItem.globalService!;
+      await reserveRequestCredits(manager, this.auditService, saved, callingUserId,
+        dto.acceptedCreditLimit, { baseCreditRateHourly: Number(global.baseCreditRateHourly),
+          creditMultiplier: Number(global.creditMultiplier), allowPartialHours: global.allowPartialHours });
+    }
 
     // 7. Mandatory Immediate Candidate Matching Dispatch (D#60, D#61)
     // Runs candidate search and sends offers immediately for BOTH immediate and scheduled requests
@@ -684,6 +761,7 @@ export class RequestsService {
 
       request.status = ServiceRequestStatus.CANCELLED;
       const saved = await manager.getRepository(ServiceRequest).save(request);
+      await releaseRequestCredits(manager, this.auditService, saved);
       const notice = {
         organizationId: orgId,
         requestId: request.id,
@@ -917,7 +995,7 @@ export class RequestsService {
         const saved = await this.sendForReview(manager, request, assignment, {
           reason,
           minutes,
-          notes: null,
+          notes: dto.reason?.trim() || null,
           requestedBy: callingUserId,
           ipAddress,
           now,
@@ -952,6 +1030,7 @@ export class RequestsService {
             confirmerRole,
             reportedMinutes: assignment.reportedMinutes,
             confirmedMinutes: minutes,
+            adjustmentReason: dto.reason?.trim() || null,
             requestCompleted,
             creditsEarned: credit?.amount ?? 0,
             creditsHeld: credit?.held ?? false,
@@ -1260,6 +1339,15 @@ export class RequestsService {
     confirmedBy: string,
     now: Date,
   ) {
+    const previousUncovered = Number(request.creditUncovered ?? 0);
+    await chargeRequestCredits(manager, this.auditService, request, assignment.id, volunteer.userId, minutes);
+    if (previousUncovered === 0 && Number(request.creditUncovered ?? 0) > 0) {
+      await this.notifications.notifyCoordinators(manager, {
+        organizationId: request.organizationId, requestId: request.id,
+        type: 'REQUEST_CREDIT_LIMIT_EXCEEDED', title: 'Extra verified help needs review',
+        body: 'Verified help exceeded the member’s accepted credit maximum. The member has not been charged extra.',
+      });
+    }
     assignment.confirmedAt = now;
     assignment.confirmedByUserId = confirmedBy;
     assignment.confirmedMinutes = minutes;
@@ -1306,10 +1394,12 @@ export class RequestsService {
     if (delivered) {
       request.status = ServiceRequestStatus.COMPLETED;
       await manager.getRepository(ServiceRequest).save(request);
+      await releaseRequestCredits(manager, this.auditService, request);
       return true;
     }
     request.status = ServiceRequestStatus.CANCELLED;
     await manager.getRepository(ServiceRequest).save(request);
+    await releaseRequestCredits(manager, this.auditService, request);
     const cancellations = manager.getRepository(RequestCancellation);
     await cancellations.save(
       cancellations.create({
@@ -1345,6 +1435,7 @@ const sameCoordinate = (saved: unknown, sent: number | undefined): boolean =>
  */
 export function sameRequestDetails(saved: ServiceRequest, dto: CreateServiceRequestDto): boolean {
   return (
+    (saved.creditPayerUserId ? creditCents(saved.creditLimit) === creditCents(dto.acceptedCreditLimit) : dto.acceptedCreditLimit == null) &&
     saved.serviceCatalogId === dto.serviceCatalogId &&
     saved.urgency === dto.urgency &&
     (!dto.beneficiaryMembershipId ||

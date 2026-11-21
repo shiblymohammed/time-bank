@@ -6,13 +6,17 @@ work.
 
 ## Member experience
 
-- Choose a community area manually; switch between List and Map. No location permission, device GPS, background tracking
-  or moving person markers are used.
-- Both views use the same published operational areas and selected-area filter. Centres are rounded to two decimal
-  places and displayed circles have a minimum radius of 1 km. Areas without map centres remain available in the list.
+- Nearby opens on a map of open help requests shared by the requester. Tap a pin to see the service, ward, and scheduled
+  time. Overlapping pins open a chooser with each request shown separately. List and Home still use published
+  operational areas. No device GPS, background tracking, or moving person markers are used.
+- In **Ask for help**, the written location is required. A service pin is optional. The requester must explicitly opt in
+  to show its approximate location to approved volunteers in the same municipality. Exact pins remain in authorized
+  request details and booked or in-progress volunteer assignments. Existing requests stay private until explicitly tagged.
+- Pin coordinates are rounded to two decimal places. The discovery feed includes up to 100 eligible requests, soonest
+  first, and drops pins when a request is filled, cancelled or closed. Area availability remains a separate opt-in.
 - Activity is grouped into `0`, `1-4`, `5-9`, and `10+`. These are ranges rather than exact headcounts; they do not
-  guarantee anonymity in a small community. The response contains no request/member identifiers, names, photos,
-  addresses, private notes, phone numbers or individual coordinates.
+  guarantee anonymity in a small community. The response contains no direct request/member identifiers, people's names,
+  photos, addresses, private notes, phone numbers or exact coordinates.
 - Open needs are requests in `MATCHING_ACTIVE`, `PARTIALLY_ACCEPTED`, or `ESCALATED_TO_COORDINATOR`, scheduled from one
   hour ago through the next 24 hours, for active, unrestricted, approved recipients in the area's wards. The one-hour
   grace window includes recently due requests. Areas may overlap: never sum their counts.
@@ -53,9 +57,8 @@ the same transaction. No push/location permission is required.
 
 ## Coordinator setup and deployment
 
-1. Apply migrations through **`1729118400029-Nearby`**, after the existing profile-photo migration
-   `1729118400028-ProfilePhoto`, before deploying this API version. Migration 29 adds the publication flag, constrained
-   availability table and query indexes.
+1. Apply migrations through **`1729118400037-NearbyRequestPins`** before deploying this API version. Migration 29 adds
+   published areas and timed availability. Migration 37 adds per-request consent and defaults existing records to private.
 2. In the web dashboard, open **Service operations → Operational zones**. Check the ward coverage and area name. **Set
    approximate area map centre** adds coordinates and radius using the existing zone editor. Use an area centre, not a
    person's home.
@@ -70,8 +73,13 @@ error rather than silently dropping areas.
 
 ## Map tiles
 
-`flutter_map` 8.3.2 and `latlong2` 0.10.1 render area circles. Tile requests start only when Map is opened. The default
-is `https://tile.openstreetmap.org/{z}/{x}/{y}.png`, with an identified application user agent, the library's built-in
+`flutter_map` 8.3.2 and `latlong2` 0.10.1 render request pins. Tile requests start when Nearby opens in Map view.
+Set `--dart-define=NEARBY_MAPTILER_KEY=<browser map key>` to enable MapTiler raster tiles. The default MapTiler style is
+`dataviz-v4-light`. Set `--dart-define=NEARBY_MAPTILER_STYLE=<map ID>` to use a custom style. For the web preview, restrict
+the browser key to the preview hostname in MapTiler Cloud and use an account with raster tile access.
+
+Without a MapTiler key, or when MapTiler tiles fail, the fallback is a grayscale rendering of
+`https://tile.openstreetmap.org/{z}/{x}/{y}.png`, with an identified application user agent, the library's built-in
 caching and visible linked OpenStreetMap attribution. There is no bulk download/offline prefetch feature. Tiles receive
 the coarse viewport, not app credentials or participant locations.
 
@@ -102,3 +110,13 @@ References: [flutter_map OSM guidance](https://docs.fleaflet.dev/tile-servers/us
 
 Physical-device/network validation remains a rollout check. The wider Flutter test suite has pre-existing failures;
 focused results must not be presented as a completely green Flutter suite.
+
+## Exchange request list (2026-11-20)
+
+**Exchange → Nearby** now lists individual available requests directly. Home and the map retain the coarse snapshot described above. The new list uses `GET nearby/requests`, with 20 rows per page and bounded search, ward, service category, today/week and soonest/newest filters. It covers the next seven days and excludes filled, closed, expired, unshared or blocked requests. Only approved local volunteers can browse.
+
+Cards show the service, public service description, shared display name/avatar, ward and approximate area, schedule, duration, open helper places and estimated credits per volunteer. Names and avatars follow existing community visibility preferences, including consent for the current photo version. Exact addresses, contact details, private notes and exact coordinates are excluded. Own requests and the caller’s own current assignment may link to their protected workflows; discovery never creates or accepts an assignment.
+
+Request creation accepts an optional `file` upload (JPG/PNG/WebP, maximum 5 MB). It is re-encoded as JPEG without source metadata and saved atomically with the booking; matching/credit failures roll it back. A retry with different photo bytes is rejected. Apply migration **46 — ServiceRequestPhotos**. `GET nearby/requests/:token/photo` and `.../member-photo` recheck access, sharing and blocks on every download and return private, no-store JPEGs. `GET requests/:requestId/photo` remains limited to authorized request viewers or current assigned volunteers.
+
+The Exchange list loads on tab activation, refreshes on foreground return, and checks for changes every 60 seconds while visible. Search is debounced, list rows are lazy-built, and further pages use “More requests”. No pull-to-refresh or header loading bar is added. Photos and list data remain in memory and are cleared when the account or access changes.

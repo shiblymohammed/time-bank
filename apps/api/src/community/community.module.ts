@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { TimeLedgerModule } from '../time-ledger/time-ledger.module';
 import { CommunityController } from './community.controller';
 import { CommunityImpactController } from './community-impact.controller';
 import { CommunityImpactService } from './community-impact.service';
@@ -9,6 +10,7 @@ import { CommunityVisibilityController } from './community-visibility.controller
 import { CommunityVisibilityService } from './community-visibility.service';
 
 @Module({
+  imports: [TimeLedgerModule],
   controllers: [
     CommunityController,
     CommunityImpactController,

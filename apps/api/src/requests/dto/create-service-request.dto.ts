@@ -1,3 +1,4 @@
+import { Transform } from 'class-transformer';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import {
   IsBoolean,
@@ -18,6 +19,19 @@ import {
 import { CreationChannel, UrgencyType } from '@ktb/shared-types';
 
 export class CreateServiceRequestDto {
+  @ApiPropertyOptional({
+    description:
+      'Exact maximum from the server credit quote; required for a volunteer self-request.',
+  })
+  @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() !== '' ? Number(value) : value,
+  )
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(1000)
+  acceptedCreditLimit?: number;
+
   @ApiProperty({ description: 'OrganizationServiceCatalog UUID' })
   @IsUUID()
   @IsNotEmpty()
@@ -72,6 +86,9 @@ export class CreateServiceRequestDto {
     default: 60,
     description: 'Expected duration in minutes (15 to 480)',
   })
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() !== '' ? Number(value) : value,
+  )
   @IsInt()
   @Min(15)
   @Max(480)
@@ -107,6 +124,9 @@ export class CreateServiceRequestDto {
   locationPostalCode!: string;
 
   @ApiPropertyOptional({ example: 10.9982, description: 'Optional transient map pin latitude' })
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() !== '' ? Number(value) : value,
+  )
   @IsNumber()
   @Min(8.0)
   @Max(38.0)
@@ -114,6 +134,9 @@ export class CreateServiceRequestDto {
   locationLat?: number;
 
   @ApiPropertyOptional({ example: 75.9921, description: 'Optional transient map pin longitude' })
+  @Transform(({ value }) =>
+    typeof value === 'string' && value.trim() !== '' ? Number(value) : value,
+  )
   @IsNumber()
   @Min(68.0)
   @Max(98.0)
@@ -121,6 +144,7 @@ export class CreateServiceRequestDto {
   locationLng?: number;
 
   @ApiPropertyOptional({ description: 'Show an approximate pin to approved local volunteers' })
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
   @IsBoolean()
   @IsOptional()
   shareNearbyPin?: boolean;
@@ -135,6 +159,7 @@ export class CreateServiceRequestDto {
     default: false,
     description: 'Allows cross-org volunteers for community drives (ITB-006)',
   })
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
   @IsBoolean()
   @IsOptional()
   allowsCrossOrgVolunteers?: boolean;

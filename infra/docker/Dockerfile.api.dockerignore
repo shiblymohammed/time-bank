@@ -1,0 +1,18 @@
+# This build context is for the Nest API image only. Keep the monorepo sources
+# the API Dockerfile copies, and omit other apps and local generated data.
+.git/
+.env
+.env.*
+**/node_modules/
+**/.next/
+**/.next-*/
+**/.expo/
+apps/web/
+apps/landing/
+apps/mobile/
+apps/timebank-expo/
+apps/api/var/
+output/
+build/
+docs/
+.claude/

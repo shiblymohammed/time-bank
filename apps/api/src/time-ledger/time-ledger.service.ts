@@ -31,6 +31,13 @@ export function creditsForMinutes(minutes: number, policy: CreditPolicy): number
   return Math.round((counted * rate * multiplier) / 6000) / 100;
 }
 
+/** Community events pay one credit per hour, counting partial hours, like Instant Help. */
+export const EVENT_CREDIT_POLICY: CreditPolicy = {
+  baseCreditRateHourly: 1,
+  creditMultiplier: 1,
+  allowPartialHours: true,
+};
+
 export type ServiceEarning = {
   volunteerUserId: string;
   organizationId: string;
@@ -80,29 +87,7 @@ export class TimeLedgerService {
     const amount = creditsForMinutes(earning.minutes, earning.policy);
     if (amount <= 0) return null;
 
-    // Older accounts may predate automatic wallet provisioning.
-    await manager.query(
-      'INSERT INTO universal_time_wallets(user_id) VALUES($1) ON CONFLICT (user_id) DO NOTHING',
-      [earning.volunteerUserId],
-    );
-    const wallet = await manager.getRepository(UniversalTimeWallet).findOneOrFail({
-      where: { userId: earning.volunteerUserId },
-      lock: { mode: 'pessimistic_write' },
-    });
-    const user = await manager
-      .getRepository(User)
-      .findOneOrFail({ where: { id: earning.volunteerUserId } });
-    const restrictions = await manager.query(
-      "SELECT id FROM global_account_restrictions WHERE user_id=$1 AND status='ACTIVE'",
-      [earning.volunteerUserId],
-    );
-    const held =
-      wallet.status !== 'ACTIVE' || user.status !== AccountStatus.ACTIVE || restrictions.length > 0;
-
-    const cents = (value: number) => Math.round(Number(value) * 100);
-    if (held) wallet.frozenCredits = (cents(wallet.frozenCredits) + cents(amount)) / 100;
-    else wallet.balanceCredits = (cents(wallet.balanceCredits) + cents(amount)) / 100;
-    await manager.getRepository(UniversalTimeWallet).save(wallet);
+    const { wallet, held } = await this.creditWallet(manager, earning.volunteerUserId, amount);
 
     const entry = await manager.getRepository(TimeCreditLedgerEntry).save(
       manager.getRepository(TimeCreditLedgerEntry).create({
@@ -141,6 +126,79 @@ export class TimeLedgerService {
   }
 
   /**
+   * Pays confirmed attendance at a community event, inside the caller's transaction.
+   * Events use the fixed rate of one credit per hour, with partial hours counted.
+   * A partial unique index pays each wallet at most once per event.
+   */
+  async postEventEarning(
+    manager: EntityManager,
+    earning: { userId: string; organizationId: string; eventId: string; minutes: number },
+  ): Promise<TimeCreditLedgerEntry | null> {
+    const amount = creditsForMinutes(earning.minutes, EVENT_CREDIT_POLICY);
+    if (amount <= 0) return null;
+    const { wallet, held } = await this.creditWallet(manager, earning.userId, amount);
+    const entry = await manager.getRepository(TimeCreditLedgerEntry).save(
+      manager.getRepository(TimeCreditLedgerEntry).create({
+        walletId: wallet.id,
+        amount,
+        balanceAfter: wallet.balanceCredits,
+        held,
+        frozenDelta: held ? amount : 0,
+        txType: TimeCreditTxType.EVENT_EARNED,
+        originatingOrgId: earning.organizationId,
+        communityEventId: earning.eventId,
+        minutes: earning.minutes,
+      }),
+    );
+    await this.auditService.logEvent(
+      {
+        eventType: held ? 'TIME_CREDITS_HELD' : 'TIME_CREDITS_EARNED',
+        actorId: null,
+        targetId: entry.id,
+        targetType: 'time_credit_ledger',
+        organizationId: earning.organizationId,
+        payload: {
+          walletId: wallet.id,
+          communityEventId: earning.eventId,
+          minutes: earning.minutes,
+          amount,
+        },
+      },
+      manager,
+    );
+    return entry;
+  }
+
+  /**
+   * Adds earned credits to a member's wallet under a row lock. Credits for an
+   * inactive wallet, inactive account or restricted account are held in frozen credits.
+   */
+  private async creditWallet(manager: EntityManager, userId: string, amount: number) {
+    // Older accounts may predate automatic wallet provisioning.
+    await manager.query(
+      'INSERT INTO universal_time_wallets(user_id) VALUES($1) ON CONFLICT (user_id) DO NOTHING',
+      [userId],
+    );
+    const wallet = await manager.getRepository(UniversalTimeWallet).findOneOrFail({
+      where: { userId },
+      lock: { mode: 'pessimistic_write' },
+    });
+    const user = await manager.getRepository(User).findOneOrFail({ where: { id: userId } });
+    const restrictions = await manager.query(
+      "SELECT id FROM global_account_restrictions WHERE user_id=$1 AND status='ACTIVE'",
+      [userId],
+    );
+    const held =
+      wallet.status !== 'ACTIVE' || user.status !== AccountStatus.ACTIVE || restrictions.length > 0;
+
+    const cents = (value: number) => Math.round(Number(value) * 100);
+    if (held) wallet.frozenCredits = (cents(wallet.frozenCredits) + cents(amount)) / 100;
+    else wallet.balanceCredits = (cents(wallet.balanceCredits) + cents(amount)) / 100;
+    await manager.getRepository(UniversalTimeWallet).save(wallet);
+    return { wallet, held };
+  }
+
+  /**
    * Minutes come from confirmed visits, including services which earned no credits.
    * Each helper contributes their own minutes to a team visit. Donations are
    * recorded separately from service time and from optional funding of a visit.
@@ -150,6 +208,7 @@ export class TimeLedgerService {
       `SELECT
          COALESCE(wallet.balance_credits, 0) AS "balanceCredits",
          COALESCE(wallet.frozen_credits, 0) AS "frozenCredits",
+         COALESCE((SELECT SUM(r.credit_remaining) FROM service_requests r WHERE r.credit_payer_user_id=account.id),0) AS "reservedCredits",
          COALESCE(wallet.status, 'ACTIVE') AS status,
          (COALESCE((
            SELECT SUM(visit.confirmed_minutes)
@@ -158,7 +217,12 @@ export class TimeLedgerService {
            WHERE member.user_id = $1 AND visit.confirmed_at IS NOT NULL
              AND visit.status = 'COMPLETED'
          ), 0) + COALESCE((SELECT SUM(instant.approved_minutes) FROM instant_help_sessions instant
-           WHERE instant.user_id=$1 AND instant.status='APPROVED'),0))::text AS "minutesGiven",
+           WHERE instant.user_id=$1 AND instant.status='APPROVED'),0)
+         + COALESCE((SELECT SUM(attended.attended_minutes)
+           FROM community_event_attendance attended
+           JOIN organization_memberships member ON member.id=attended.membership_id
+           JOIN community_events event ON event.id=attended.event_id AND event.earns_credits
+           WHERE member.user_id=$1 AND attended.confirmed_at IS NOT NULL),0))::text AS "minutesGiven",
          COALESCE((
            SELECT SUM(visit.confirmed_minutes)
            FROM organization_memberships member
@@ -179,6 +243,7 @@ export class TimeLedgerService {
     return {
       balanceCredits: Number(summary?.balanceCredits ?? 0),
       frozenCredits: Number(summary?.frozenCredits ?? 0),
+      reservedCredits: Number(summary?.reservedCredits ?? 0),
       status: summary?.status ?? 'ACTIVE',
       minutesGiven: Number(summary?.minutesGiven ?? 0),
       minutesReceived: Number(summary?.minutesReceived ?? 0),
@@ -194,7 +259,7 @@ export class TimeLedgerService {
        ), earnings AS (
          SELECT (entry.created_at AT TIME ZONE 'UTC')::date AS day, sum(entry.amount) AS credits
          FROM time_credit_ledger entry JOIN universal_time_wallets wallet ON wallet.id=entry.wallet_id
-         WHERE wallet.user_id=$1 AND entry.tx_type='SERVICE_EARNED'
+         WHERE wallet.user_id=$1 AND entry.tx_type IN ('SERVICE_EARNED','EVENT_EARNED')
            AND entry.created_at >= date_trunc('month',now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC'
            AND entry.created_at <= now()
          GROUP BY 1
@@ -228,8 +293,25 @@ export class TimeLedgerService {
       skip: (page - 1) * limit,
       take: limit,
     });
+    const [reservation] = await this.walletRepo.manager.query(
+      'SELECT COALESCE(SUM(credit_remaining),0) AS reserved FROM service_requests WHERE credit_payer_user_id=$1', [userId],
+    );
+    const eventIds = [
+      ...new Set(entries.map((entry) => entry.communityEventId).filter((id): id is string => !!id)),
+    ];
+    const eventTitles = new Map<string, string>(
+      eventIds.length
+        ? (
+            await this.walletRepo.manager.query(
+              'SELECT id,title FROM community_events WHERE id = ANY($1::uuid[])',
+              [eventIds],
+            )
+          ).map((event: { id: string; title: string }) => [event.id, event.title])
+        : [],
+    );
     return {
       balanceCredits: wallet.balanceCredits,
+      reservedCredits: Number(reservation?.reserved ?? 0),
       frozenCredits: wallet.frozenCredits,
       status: wallet.status,
       total,
@@ -243,6 +325,12 @@ export class TimeLedgerService {
         operationId: entry.operationId ?? null,
         txType: entry.txType,
         instantHelpSessionId: entry.instantHelpSessionId ?? null,
+        communityEvent: entry.communityEventId
+          ? {
+              id: entry.communityEventId,
+              title: eventTitles.get(entry.communityEventId) ?? null,
+            }
+          : null,
         minutes: entry.minutes ?? null,
         createdAt: entry.createdAt,
         organization: entry.originatingOrg
@@ -252,6 +340,7 @@ export class TimeLedgerService {
           ? {
               id: entry.serviceRequest.id,
               requestNumber: entry.serviceRequest.requestNumber,
+              creditBacked: Boolean(entry.serviceRequest.creditPayerUserId),
               serviceName:
                 entry.serviceRequest.serviceCatalog?.customLabelEn ??
                 entry.serviceRequest.serviceCatalog?.globalService?.nameEn ??

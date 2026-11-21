@@ -714,6 +714,13 @@ export class MembershipsService {
         'EXISTS (SELECT 1 FROM membership_role_grants selected_role WHERE selected_role.membership_id = m.id AND selected_role.role = :selectedRole AND selected_role.status = :activeRole)',
         { selectedRole: query.role, activeRole: RoleGrantStatus.ACTIVE },
       );
+    if (query.canRequestHelp) {
+      qb.leftJoin('user.universalWallet', 'wallet');
+      qb.andWhere(
+        `(EXISTS (SELECT 1 FROM membership_role_grants ben WHERE ben.membership_id = m.id AND ben.role = 'BENEFICIARY' AND ben.status = 'ACTIVE') OR
+          (EXISTS (SELECT 1 FROM membership_role_grants vol WHERE vol.membership_id = m.id AND vol.role = 'VOLUNTEER' AND vol.status = 'ACTIVE') AND COALESCE(wallet.balance_credits, 0) > 0))`,
+      );
+    }
     if (query.search?.trim())
       qb.andWhere(
         '(m.membershipNumber ILIKE :search OR user.phoneE164 ILIKE :search OR user.fullName ILIKE :search)',

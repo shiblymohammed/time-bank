@@ -19,6 +19,10 @@ export class MembershipQueryDto {
   @IsEnum(UserRole)
   role?: UserRole;
 
+  @ApiPropertyOptional({ description: 'Filter by eligible requesters (BENEFICIARY or VOLUNTEER with credits)' })
+  @IsOptional()
+  canRequestHelp?: boolean;
+
   @ApiPropertyOptional({ description: 'Search membership number or phone' })
   @IsOptional()
   @IsString()

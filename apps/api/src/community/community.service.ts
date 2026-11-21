@@ -11,6 +11,9 @@ import { UserRole } from '@ktb/shared-types';
 import { AuditService } from '../audit/audit.service';
 import { AuthorizationService } from '../authorization/authorization.service';
 
+export const COMMUNITY_POST_TYPES = ['ANNOUNCEMENT', 'OPPORTUNITY', 'STORY', 'RECOGNITION'] as const;
+export type CommunityPostType = (typeof COMMUNITY_POST_TYPES)[number];
+
 function parseCursor(before?: string): [string | null, string | null] {
   if (before === undefined) return [null, null];
   const parts = /^([\d-]{10}T[\d:]{8}\.\d{6}Z)~([\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12})$/i.exec(
@@ -47,7 +50,7 @@ export class CommunityService {
       throw new ForbiddenException('Approved community membership required');
     return access;
   }
-  async feed(org: string, user: string, before?: string, type?: 'ANNOUNCEMENT' | 'RECOGNITION') {
+  async feed(org: string, user: string, before?: string, type?: CommunityPostType) {
     const actor = await this.actor(org, user);
     return this.published(org, actor.membershipId, before, type);
   }
@@ -62,12 +65,14 @@ export class CommunityService {
     org: string,
     membershipId: string,
     before?: string,
-    type?: 'ANNOUNCEMENT' | 'RECOGNITION',
+    type?: CommunityPostType,
     staffView = false,
   ) {
     const [date, id] = parseCursor(before);
     const rows = await this.db.query(
       `SELECT p.id,p.post_type,p.body,p.created_at,p.published_at,
+      CASE WHEN event.id IS NOT NULL THEN jsonb_build_object('starts_at',event.starts_at,
+        'ends_at',event.ends_at,'venue',event.venue,'cancelled_at',event.cancelled_at) END AS event,
       CASE WHEN EXISTS(SELECT 1 FROM community_post_photos ph WHERE ph.post_id=p.id) THEN p.content_version END AS photo_version,
       CASE WHEN m.id<>$2 THEN m.id END AS blockable_member_id,
       CASE WHEN NOT $6::boolean AND m.status='APPROVED' AND u.status='ACTIVE'
@@ -81,12 +86,21 @@ export class CommunityService {
         WHEN m.status='APPROVED' AND u.status='ACTIVE'
           AND NOT EXISTS(SELECT 1 FROM global_account_restrictions r WHERE r.user_id=u.id AND r.status='ACTIVE')
         THEN visibility.display_name END AS author_name,
-      (SELECT count(*)::int FROM community_post_reactions r WHERE r.post_id=p.id) reactions,
+      reaction_totals.reactions, reaction_totals.reaction_counts,
       EXISTS (SELECT 1 FROM community_post_reports report WHERE report.post_id=p.id AND report.reporter_membership_id=$2) AS my_reported,
       (SELECT r.reaction FROM community_post_reactions r WHERE r.post_id=p.id AND r.membership_id=$2) my_reaction
       FROM community_posts p JOIN organization_memberships m ON m.id=p.author_membership_id AND m.organization_id=p.organization_id
       JOIN users u ON u.id=m.user_id
       JOIN organizations organization ON organization.id=p.organization_id
+      LEFT JOIN community_events event ON event.organization_id=p.organization_id AND event.id=p.event_id
+      CROSS JOIN LATERAL (
+        SELECT count(*)::int AS reactions, jsonb_build_object(
+          'SUPPORT', count(*) FILTER (WHERE r.reaction='SUPPORT'),
+          'THANKS', count(*) FILTER (WHERE r.reaction='THANKS'),
+          'INSPIRED', count(*) FILTER (WHERE r.reaction='INSPIRED')
+        ) AS reaction_counts
+        FROM community_post_reactions r WHERE r.post_id=p.id
+      ) reaction_totals
       LEFT JOIN community_visibility visibility ON visibility.organization_id=p.organization_id AND visibility.membership_id=m.id
       LEFT JOIN loyalty_ledger award ON award.id=p.achievement_id AND award.organization_id=p.organization_id
         AND award.user_id=m.user_id AND award.tx_type='MILESTONE_EARNED'
@@ -487,10 +501,20 @@ export class CommunityService {
         );
       }
       const [total] = await manager.query(
-        'SELECT count(*)::int AS reactions FROM community_post_reactions WHERE post_id=$1',
+        `SELECT count(*)::int AS reactions, jsonb_build_object(
+        'SUPPORT', count(*) FILTER (WHERE reaction='SUPPORT'),
+        'THANKS', count(*) FILTER (WHERE reaction='THANKS'),
+        'INSPIRED', count(*) FILTER (WHERE reaction='INSPIRED')
+      ) AS reaction_counts
+         FROM community_post_reactions WHERE post_id=$1`,
         [post],
       );
-      return { ok: true, my_reaction: reaction, reactions: total.reactions };
+      return {
+        ok: true,
+        my_reaction: reaction,
+        reactions: total.reactions,
+        reaction_counts: total.reaction_counts,
+      };
     });
   }
   async report(org: string, post: string, user: string, dto: { reason: string; details?: string }) {

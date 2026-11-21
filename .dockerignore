@@ -12,6 +12,8 @@ node_modules/
 # Build outputs (rebuilt inside container)
 dist/
 .next/
+**/.next/
+**/.next-*/
 build/
 .turbo/
 coverage/
@@ -50,3 +52,8 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Local previews, test artifacts, and uploaded files are mounted or generated at runtime.
+output/
+apps/api/var/
+apps/timebank-expo/

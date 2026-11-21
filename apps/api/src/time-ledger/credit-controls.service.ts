@@ -612,7 +612,7 @@ export class CreditControlsService {
     return this.db.transaction(async (m) => {
       const grants = await this.authority(m, org, actor);
       const [request] = await m.query(
-        'SELECT request_number,status,beneficiary_membership_id,created_by_user_id FROM service_requests WHERE id=$1 AND organization_id=$2',
+        'SELECT * FROM service_requests WHERE id=$1 AND organization_id=$2',
         [requestId, org],
       );
       if (!request) throw new NotFoundException('Service request not found');
@@ -637,6 +637,12 @@ export class CreditControlsService {
         requestNumber: request.request_number,
         status: request.status,
         verifiedCredits: Number(earned),
+        creditReservation: request.credit_payer_user_id ? {
+          creditBacked: true,
+          creditLimit: Number(request.credit_limit), creditRemaining: Number(request.credit_remaining),
+          creditCharged: Number(request.credit_charged), creditReleased: Number(request.credit_released),
+          creditUncovered: Number(request.credit_uncovered),
+        } : null,
         funding: funding
           ? {
               amount: Number(funding.amount),
@@ -998,6 +1004,9 @@ export class CreditControlsService {
         throw new ForbiddenException(
           'Only the recipient or request creator can volunteer their credits',
         );
+      }
+      if (request.credit_payer_user_id) {
+        throw new ConflictException('This request is already funded by its reserved credits.');
       }
       let walletId: string | null = null;
       if (!dto.poolId) {

@@ -33,6 +33,7 @@ import { MatchingRound } from './entities/matching-round.entity';
 import { RequestRescheduleHistory } from '../requests/entities/request-reschedule.entity';
 import { RequestCancellation } from '../requests/entities/request-cancellation.entity';
 import { ServiceRequest } from '../requests/entities/service-request.entity';
+import { releaseRequestCredits } from '../requests/request-credit-accounting';
 import { OrganizationMembership } from '../memberships/entities/organization-membership.entity';
 import { GlobalAccountRestriction } from '../identity/entities/global-account-restriction.entity';
 import { User } from '../identity/entities/user.entity';
@@ -1454,6 +1455,7 @@ export class MatchingService {
       if (open === 0) {
         request.status = ServiceRequestStatus.COMPLETED;
         await manager.save(ServiceRequest, request);
+        await releaseRequestCredits(manager, this.auditService, request);
       }
       return;
     }
@@ -2331,6 +2333,7 @@ export class MatchingService {
           ? ServiceRequestStatus.COMPLETED
           : ServiceRequestStatus.CANCELLED;
         await manager.save(ServiceRequest, request);
+        await releaseRequestCredits(manager, this.auditService, request);
         await this.closeStaleOffers(manager, request.id);
         if (!delivered) {
           await manager.save(
@@ -2461,6 +2464,13 @@ export class MatchingService {
         request: {
           id: request.id,
           requestNumber: request.requestNumber,
+          creditPayerUserId: request.creditPayerUserId ?? null,
+          creditLimit: Number(request.creditLimit ?? 0),
+          creditRemaining: Number(request.creditRemaining ?? 0),
+          creditCharged: Number(request.creditCharged ?? 0),
+          creditReleased: Number(request.creditReleased ?? 0),
+          creditUncovered: Number(request.creditUncovered ?? 0),
+          creditPolicy: request.creditPolicy ?? null,
           status: request.status,
           urgency: request.urgency,
           scheduledStartTime: request.scheduledStartTime,
@@ -3342,6 +3352,7 @@ export class MatchingService {
       if (helping > 0) return;
       request.status = ServiceRequestStatus.EXPIRED_UNMATCHED;
       await manager.save(ServiceRequest, request);
+      await releaseRequestCredits(manager, this.auditService, request);
       await manager.update(
         VolunteerAssignment,
         { serviceRequestId: request.id, status: VolunteerAssignmentStatus.OFFERED },

@@ -1701,6 +1701,29 @@ pre {
   border-radius: 999px;
 }
 
+/* The image picker, credit option and check-in location each take the full form width. */
+.community-event-photo-field,
+.community-event-credits,
+.community-event-location {
+  grid-column: 1 / -1;
+}
+
+.community-event-photo-link {
+  display: block;
+  line-height: 0;
+}
+
+.community-event-photo {
+  display: block;
+  width: 100%;
+  max-height: 240px;
+  aspect-ratio: 16 / 7;
+  border: 1px solid #e1e8f1;
+  border-radius: 12px;
+  background: #f7f9fc;
+  object-fit: cover;
+}
+
 .community-workspace {
   width: min(100%, 1440px);
   margin-inline: auto;

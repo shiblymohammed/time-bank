@@ -280,7 +280,7 @@ async function creditFigures(m: EntityManager, org: string | null, p: ReportPeri
     `SELECT
        COALESCE(sum(l.amount) FILTER (WHERE l.tx_type='SERVICE_EARNED'),0) AS earned,
        COALESCE(sum(-l.amount) FILTER (WHERE l.tx_type='DONATION_SENT'),0) AS donated,
-       COALESCE(sum(-l.amount) FILTER (WHERE l.tx_type='ASSISTANCE_SPENT'),0) AS spent,
+       COALESCE(sum(-l.amount) FILTER (WHERE l.tx_type IN ('ASSISTANCE_SPENT','REQUEST_CREDITS_SPENT')),0) AS spent,
        COALESCE(sum(l.frozen_delta) FILTER (WHERE l.frozen_delta>0),0) AS held,
        COALESCE(sum(l.amount) FILTER (WHERE l.tx_type IN ('FRAUD_RELEASED','FROZEN_RELEASED')),0) AS released,
        COALESCE(sum(-l.amount) FILTER (WHERE l.tx_type='CREDIT_CORRECTED'),0) AS corrected
