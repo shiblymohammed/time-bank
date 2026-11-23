@@ -2648,10 +2648,18 @@ describe('Volunteer booking concurrency against PostgreSQL', () => {
       await db.query('UPDATE global_service_definitions SET credit_multiplier=1.5');
       const { req, assignment } = await finished(90);
       expect(await wallet()).toBeUndefined();
+      const awaiting = await service.getRequestMatching(orgA, req, coordinator);
+      expect(awaiting.assignments).toEqual([
+        expect.objectContaining({ id: assignment, reportedMinutes: 90, awardedCredits: null }),
+      ]);
 
       const confirmed = await confirm(req, assignment);
       expect(confirmed.creditsEarned).toBe(2.25);
       expect(confirmed.creditsHeld).toBe(false);
+      const booking = await service.getRequestMatching(orgA, req, coordinator);
+      expect(booking.assignments).toEqual([
+        expect.objectContaining({ id: assignment, confirmedMinutes: 90, awardedCredits: 2.25 }),
+      ]);
       expect(await wallet()).toEqual({ balance: 2.25, frozen: 0 });
       await expect(confirm(req, assignment)).rejects.toThrow('already been confirmed');
       expect(await wallet()).toEqual({ balance: 2.25, frozen: 0 });

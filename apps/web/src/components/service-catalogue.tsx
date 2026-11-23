@@ -34,7 +34,9 @@ type Local = {
   localInstructionsMl?: string | null;
 };
 
-type Data = { services: Service[]; local: Local[] };
+type Category = { id: string; nameEn: string; isActive: boolean };
+type PublishOrganization = { id: string; name: string };
+type Data = { services: Service[]; local: Local[]; categories: Category[] };
 type ServiceProposal = {
   id: string;
   organizationId: string;
@@ -210,6 +212,7 @@ function resizeImageToDataUri(file: File, maxDim = 400, quality = 0.75): Promise
 
 export function ServiceCatalogue({
   organizationId,
+  publishOrganizations,
   isGlobal,
   canPropose,
   revision,
@@ -218,6 +221,7 @@ export function ServiceCatalogue({
   onExpired,
 }: {
   organizationId: string | null;
+  publishOrganizations: PublishOrganization[];
   isGlobal: boolean;
   canPropose: boolean;
   revision: number;
@@ -255,6 +259,7 @@ export function ServiceCatalogue({
     setError('');
     Promise.all([
       backend<Service[]>('/catalogue/global?activeOnly=false', 'GET', undefined, controller.signal),
+      backend<Category[]>('/catalogue/categories', 'GET', undefined, controller.signal),
       organizationId
         ? backend<Local[]>(
             `/organizations/${organizationId}/catalogue?all=true`,
@@ -264,7 +269,7 @@ export function ServiceCatalogue({
           )
         : Promise.resolve([]),
     ])
-      .then(([services, local]) => setData({ services, local }))
+      .then(([services, categories, local]) => setData({ services, categories, local }))
       .catch((e) => {
         if (controller.signal.aborted) return;
         setError(e.message);
@@ -301,11 +306,11 @@ export function ServiceCatalogue({
   }, [organizationId, isGlobal, canPropose, revision, localRevision, onExpired]);
 
   const entries = new Map(data?.local.map((entry) => [entry.globalServiceId, entry]));
-  const categories = [
-    ...new Map(
-      data?.services.filter((s) => s.category).map((s) => [s.category!.id, s.category!]),
-    ).values(),
-  ];
+  const categories = data?.categories ?? [];
+  const activeCategories = categories.filter((category) => category.isActive);
+  function rememberCategory(category: Category) {
+    setData((current) => current && { ...current, categories: [...current.categories, category] });
+  }
 
   const matches = (data?.services ?? []).filter((service) => {
     const local = entries.get(service.id);
@@ -358,6 +363,23 @@ export function ServiceCatalogue({
       if (e instanceof ApiError && e.status === 401) onExpired();
       else setError(e instanceof Error ? e.message : 'Failed to update service status');
     }
+  }
+
+  function setLocalAvailability(service: Service, local?: Local) {
+    const isEnabled = !local?.isEnabled;
+    const action = isEnabled ? 'Enable' : 'Pause';
+    openAction({
+      title: `${action} ${local?.customLabelEn || service.nameEn}`,
+      description: isEnabled
+        ? 'Members in the selected municipality will be able to request this service.'
+        : 'This stops new requests and matching for this municipality. Already accepted commitments stay recorded.',
+      fields: [],
+      submitLabel: `${action} service`,
+      submit: () => backend(`/organizations/${organizationId}/catalogue/configure`, 'POST', {
+        globalServiceId: service.id,
+        isEnabled,
+      }),
+    });
   }
 
   function configure(service: Service, local?: Local) {
@@ -481,6 +503,7 @@ export function ServiceCatalogue({
               <button
                 type="button"
                 className="btn btn-primary"
+                disabled={!data}
                 onClick={() => setShowAddService(true)}
               >
                 <Icon name="plus" />
@@ -815,13 +838,20 @@ export function ServiceCatalogue({
                       <td style={{ textAlign: 'right' }}>
                         <div className="service-actions-row">
                           {organizationId && (
+                            <>
+                            {(service.isActive || local?.isEnabled) && (
+                              <button className="btn btn-secondary btn-sm" disabled={pending} onClick={() => setLocalAvailability(service, local)}>
+                                {local?.isEnabled ? 'Pause' : 'Enable'}
+                              </button>
+                            )}
                             <button
                               className="btn btn-secondary btn-sm"
                               disabled={pending || (!service.isActive && !local)}
                               onClick={() => configure(service, local)}
                             >
-                              {local ? 'Configure' : 'Set up locally'}
+                              Local settings
                             </button>
+                            </>
                           )}
                           {isGlobal && (
                             <>
@@ -895,25 +925,26 @@ export function ServiceCatalogue({
       {/* DEDICATED MODAL: ADD SERVICE (WITH FILE UPLOAD & PHOTO GALLERY) */}
       {showAddService && (
         <AddServiceModal
-          categories={categories}
+          categories={activeCategories}
+          publishOrganizations={publishOrganizations}
+          initialOrganizationId={organizationId}
           onClose={() => setShowAddService(false)}
           onExpired={onExpired}
-          onSuccess={(newService) => {
+          onSuccess={(newService, publishedCount) => {
             setShowAddService(false);
-            setNotice(`Service "${newService.nameEn}" successfully added to the catalogue!`);
+            setNotice(publishedCount
+              ? `"${newService.nameEn}" is now available in ${publishedCount} ${publishedCount === 1 ? 'municipality' : 'municipalities'}.`
+              : `"${newService.nameEn}" was added to the shared catalogue.`);
             setLocalRevision((v) => v + 1);
           }}
-          onOpenAddCategory={() => {
-            setShowAddService(false);
-            setShowAddCategory(true);
-          }}
+          onCategoryCreated={rememberCategory}
         />
       )}
 
       {showProposal && organizationId && (
         <ServiceProposalModal
           organizationId={organizationId}
-          categories={categories}
+          categories={activeCategories}
           onClose={() => setShowProposal(false)}
           onExpired={onExpired}
           onSuccess={(proposal) => {
@@ -926,7 +957,7 @@ export function ServiceCatalogue({
 
       {reviewingProposal && (
         <AddServiceModal
-          categories={categories}
+          categories={activeCategories}
           initial={{
             categoryId: reviewingProposal.categoryId,
             nameEn: reviewingProposal.proposedName,
@@ -941,10 +972,7 @@ export function ServiceCatalogue({
             setReviewingProposal(null);
             if (proposal) void linkApprovedProposal(proposal, service);
           }}
-          onOpenAddCategory={() => {
-            setReviewingProposal(null);
-            setShowAddCategory(true);
-          }}
+          onCategoryCreated={rememberCategory}
         />
       )}
 
@@ -1102,13 +1130,17 @@ function ServiceProposalModal({
 
 function AddServiceModal({
   categories,
+  publishOrganizations,
+  initialOrganizationId,
   initial,
   onClose,
   onExpired,
   onSuccess,
-  onOpenAddCategory,
+  onCategoryCreated,
 }: {
   categories: { id: string; nameEn: string }[];
+  publishOrganizations?: PublishOrganization[];
+  initialOrganizationId?: string | null;
   initial?: {
     categoryId?: string;
     nameEn?: string;
@@ -1118,11 +1150,20 @@ function AddServiceModal({
   };
   onClose: () => void;
   onExpired: () => void;
-  onSuccess: (service: Service) => void;
-  onOpenAddCategory: () => void;
+  onSuccess: (service: Service, publishedCount: number) => void;
+  onCategoryCreated: (category: Category) => void;
 }) {
   const embedded = getEmbeddedServiceImage(initial?.descriptionEn);
   const [categoryId, setCategoryId] = useState(initial?.categoryId || categories[0]?.id || '');
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [selectedOrganizations, setSelectedOrganizations] = useState<string[]>(
+    initialOrganizationId && publishOrganizations?.some((org) => org.id === initialOrganizationId)
+      ? [initialOrganizationId]
+      : [],
+  );
+  const publishOrganizationIds = (publishOrganizations ?? [])
+    .filter((org) => selectedOrganizations.includes(org.id))
+    .map((org) => org.id);
   const [code, setCode] = useState(
     initial?.nameEn?.trim().toUpperCase().replace(/[^A-Z0-9]+/g, '_').slice(0, 32) ?? '',
   );
@@ -1279,10 +1320,11 @@ function AddServiceModal({
           : [],
         isEmergencyProhibited: isEmergencyProhibited,
         baseCreditRateHourly: Number(baseRate) || 1.0,
+        ...(publishOrganizationIds.length ? { publishOrganizationIds } : {}),
       };
 
       const result = await backend<Service>('/catalogue/global', 'POST', payload);
-      onSuccess(result);
+      onSuccess(result, publishOrganizationIds.length);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 401) {
         onExpired();
@@ -1295,7 +1337,8 @@ function AddServiceModal({
   }
 
   return (
-    <div className="modern-modal-backdrop" onClick={(e) => e.target === e.currentTarget && onClose()}>
+    <>
+    <div className="modern-modal-backdrop" style={addingCategory ? { display: 'none' } : undefined} onClick={(e) => !saving && e.target === e.currentTarget && onClose()}>
       <div className="modern-modal-card modal-service-optimized" role="dialog" aria-modal="true" aria-labelledby="add-service-title">
         <header className="modern-modal-header">
           <div className="modern-modal-title-group">
@@ -1307,7 +1350,7 @@ function AddServiceModal({
               <p>Configure service identity, visual photo, volunteer staffing, and platform rules</p>
             </div>
           </div>
-          <button type="button" className="modern-modal-close" onClick={onClose} aria-label="Close">
+          <button type="button" className="modern-modal-close" onClick={onClose} aria-label="Close" disabled={saving}>
             <Icon name="close" />
           </button>
         </header>
@@ -1332,7 +1375,7 @@ function AddServiceModal({
                   <button
                     type="button"
                     className="quick-action-link"
-                    onClick={onOpenAddCategory}
+                    onClick={() => setAddingCategory(true)}
                   >
                     + New Category
                   </button>
@@ -1347,6 +1390,7 @@ function AddServiceModal({
                       value={categoryId}
                       onChange={(e) => setCategoryId(e.target.value)}
                     >
+                      <option value="" disabled>Choose a category</option>
                       {categories.map((c) => (
                         <option key={c.id} value={c.id}>
                           {c.nameEn}
@@ -1435,7 +1479,8 @@ function AddServiceModal({
                 </div>
               </div>
 
-              {/* CARD 2: SERVICE PHOTO */}
+              <details>
+                <summary>Service photo</summary>
               <div className="modal-section-card">
                 <div className="modal-section-card-title">
                   <div className="modal-section-title-left">
@@ -1537,6 +1582,32 @@ function AddServiceModal({
                 )}
               </div>
 
+              </details>
+              {publishOrganizations && (
+                <fieldset className="modal-section-card">
+                  <legend>Publish to municipalities</legend>
+                  <p className="help-text">Members can request this service in the municipalities you select. Leave all unchecked to add it to the shared catalogue only.</p>
+                  <div className="stack">
+                    {publishOrganizations.map((org) => (
+                      <label key={org.id}>
+                        <input
+                          type="checkbox"
+                          checked={selectedOrganizations.includes(org.id)}
+                          onChange={(event) => {
+                            const checked = event.target.checked;
+                            setSelectedOrganizations((current) => checked
+                              ? [...current, org.id]
+                              : current.filter((id) => id !== org.id));
+                          }}
+                        />{' '}{org.name}
+                      </label>
+                    ))}
+                    {!publishOrganizations.length && <p className="help-text">No active municipalities available.</p>}
+                  </div>
+                </fieldset>
+              )}
+              <details>
+                <summary>Advanced settings</summary>
               {/* CARD 3: STAFFING & CREDITS */}
               <div className="modal-section-card">
                 <div className="modal-section-card-title">
@@ -1669,14 +1740,14 @@ function AddServiceModal({
                   </label>
                 </div>
               </div>
+              </details>
             </div>
 
             {/* RIGHT COLUMN: STICKY LIVE PREVIEW */}
             <div className="service-modal-preview-col">
               <div className="live-preview-box">
                 <div className="live-preview-header">
-                  <span>Live Member View</span>
-                  <span className="live-preview-indicator">Interactive</span>
+                  <span>Service preview</span>
                 </div>
 
                 <div className="service-card-mockup">
@@ -1733,9 +1804,6 @@ function AddServiceModal({
                   </div>
                 </div>
 
-                <div className="preview-info-box">
-                  <strong>Platform Tip:</strong> Canonical services are published across all platform organizations. Organizations can activate and adapt instructions locally.
-                </div>
               </div>
             </div>
           </div>
@@ -1745,12 +1813,24 @@ function AddServiceModal({
               Cancel
             </button>
             <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? 'Creating Service…' : '+ Create Service'}
+              {saving ? 'Saving…' : publishOrganizationIds.length ? 'Publish service' : 'Create service'}
             </button>
           </footer>
         </form>
       </div>
     </div>
+    {addingCategory && (
+      <AddCategoryModal
+        onClose={() => setAddingCategory(false)}
+        onExpired={onExpired}
+        onSuccess={(category) => {
+          onCategoryCreated(category);
+          setCategoryId(category.id);
+          setAddingCategory(false);
+        }}
+      />
+    )}
+    </>
   );
 }
 
@@ -1764,7 +1844,7 @@ function AddCategoryModal({
 }: {
   onClose: () => void;
   onExpired: () => void;
-  onSuccess: (cat: { id: string; nameEn: string }) => void;
+  onSuccess: (category: Category) => void;
 }) {
   const [code, setCode] = useState('');
   const [nameEn, setNameEn] = useState('');
@@ -1784,7 +1864,7 @@ function AddCategoryModal({
     setError('');
 
     try {
-      const result = await backend<{ id: string; nameEn: string }>('/catalogue/categories', 'POST', {
+      const result = await backend<Category>('/catalogue/categories', 'POST', {
         code: code.trim().toUpperCase().replace(/\s+/g, '_'),
         nameEn: nameEn.trim(),
         nameMl: nameMl.trim(),

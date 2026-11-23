@@ -66,6 +66,7 @@ describe('RequestsController', () => {
         'user-1',
         dto,
         '127.0.0.1',
+        undefined,
       );
     });
 
@@ -90,6 +91,7 @@ describe('RequestsController', () => {
         'user-1',
         expect.objectContaining({ idempotencyKey: 'idem-header-123' }),
         '127.0.0.1',
+        undefined,
       );
     });
   });

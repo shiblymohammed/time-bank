@@ -26,10 +26,14 @@ type Session = {
 };
 export function InstantHelpReviews({
   organizationId,
+  initialCaseId = '',
   onExpired,
+  dashboardRevision,
 }: {
   organizationId: string;
+  initialCaseId?: string;
   onExpired: () => void;
+  dashboardRevision: number;
 }) {
   const [status, setStatus] = useState('PENDING');
   const [refresh, setRefresh] = useState(0);
@@ -38,17 +42,36 @@ export function InstantHelpReviews({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [loadError, setLoadError] = useState('');
+  const loadedStatus = useRef<string | null>(null);
   const [message, setMessage] = useState('');
   const [minutes, setMinutes] = useState('');
   const [notes, setNotes] = useState('');
   const epoch = useRef(0);
+  const mounted = useRef(false);
   useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
+  const caseToOpen = useRef(initialCaseId);
+  const openedFromAttention = useRef(false);
+  useEffect(() => {
+    if (!initialCaseId || selected?.id !== initialCaseId || openedFromAttention.current) return;
+    const panel = document.getElementById('instant-help-review-detail');
+    if (!panel) return;
+    openedFromAttention.current = true;
+    panel.focus();
+    panel.scrollIntoView({ block: 'start' });
+  }, [initialCaseId, selected]);
+  useEffect(() => {
+    if (busy) return;
     const version = ++epoch.current;
     setLoading(true);
-    setSelected(null);
-    setRows([]);
-    setError('');
-    setMessage('');
+    setLoadError('');
+    if (loadedStatus.current !== status) {
+      setSelected(null);
+      setRows([]);
+    }
     const controller = new AbortController();
     backend<Session[]>(
       `/organizations/${organizationId}/instant-help/reviews?status=${status}`,
@@ -57,12 +80,26 @@ export function InstantHelpReviews({
       controller.signal,
     )
       .then((data) => {
-        if (epoch.current === version) setRows(data);
+        if (epoch.current !== version) return;
+        setRows(data);
+        loadedStatus.current = status;
+        if (caseToOpen.current) {
+          const match = data.find((row) => row.id === caseToOpen.current);
+          caseToOpen.current = '';
+          if (match) choose(match);
+          else setMessage('This case is no longer waiting for review.');
+        }
       })
       .catch((e) => {
         if (controller.signal.aborted) return;
         if (e instanceof ApiError && e.status === 401) onExpired();
-        else if (epoch.current === version) setError(e.message ?? 'Could not load sessions');
+        else if (epoch.current === version) {
+          if (e instanceof ApiError && e.status === 403) {
+            setRows([]);
+            setSelected(null);
+          }
+          setLoadError('Could not load the latest sessions. Use Check for new sessions to retry.');
+        }
       })
       .finally(() => {
         if (epoch.current === version) setLoading(false);
@@ -71,7 +108,7 @@ export function InstantHelpReviews({
       controller.abort();
       epoch.current++;
     };
-  }, [organizationId, status, onExpired, refresh]);
+  }, [organizationId, status, onExpired, refresh, dashboardRevision, busy]);
   function choose(row: Session) {
     setSelected(row);
     setNotes('');
@@ -80,7 +117,7 @@ export function InstantHelpReviews({
     setMessage('');
   }
   async function review(decision: 'APPROVE' | 'REJECT' | 'NEEDS_INFO') {
-    if (!selected || busy) return;
+    if (!selected || busy || loading) return;
     if (notes.trim().length < 3) {
       setError('Add a short explanation for the volunteer.');
       return;
@@ -95,7 +132,6 @@ export function InstantHelpReviews({
       setError('Enter whole minutes up to the recorded duration, with a maximum of 720.');
       return;
     }
-    const version = epoch.current;
     setBusy(true);
     setError('');
     setMessage('');
@@ -110,7 +146,7 @@ export function InstantHelpReviews({
           ...(decision === 'APPROVE' ? { minutes: approved } : {}),
         },
       );
-      if (epoch.current !== version) return;
+      if (!mounted.current) return;
       setRows((old) => old.filter((row) => row.id !== saved.id));
       setSelected(saved);
       setMessage(
@@ -121,7 +157,7 @@ export function InstantHelpReviews({
             : 'Session closed without credits.',
       );
     } catch (e) {
-      if (epoch.current !== version) return;
+      if (!mounted.current) return;
       if (e instanceof ApiError && e.status === 401) onExpired();
       else {
         setError(e instanceof Error ? e.message : 'Review failed');
@@ -131,7 +167,7 @@ export function InstantHelpReviews({
         }
       }
     } finally {
-      if (epoch.current === version) setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   }
   return (
@@ -164,11 +200,13 @@ export function InstantHelpReviews({
           {error}
         </p>
       )}
+      {loadError && <p role="alert">{loadError}</p>}
       {message && <p role="status">{message}</p>}
-      {loading ? (
+      {loading && rows.length > 0 && <p role="status">Refreshing instant help.</p>}
+      {loading && rows.length === 0 ? (
         <p role="status">Loading instant help…</p>
       ) : rows.length === 0 ? (
-        <p>No sessions in this status.</p>
+        !loadError && <p>No sessions in this status.</p>
       ) : (
         <div className="table-wrap">
           <table>
@@ -208,6 +246,8 @@ export function InstantHelpReviews({
       )}
       {selected && (
         <section
+          id="instant-help-review-detail"
+          tabIndex={-1}
           className="glass-panel"
           style={{ marginTop: 20, padding: 20 }}
           aria-label="Session evidence"

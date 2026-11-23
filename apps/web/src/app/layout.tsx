@@ -1,5 +1,7 @@
 import type { Metadata } from 'next';
+import { ADMIN_THEME_KEY } from '@/lib/admin-theme';
 import './globals.css';
+import './admin-overview.css';
 
 export const metadata: Metadata = {
   title: {
@@ -14,10 +16,17 @@ export const metadata: Metadata = {
   },
 };
 
+// Apply the stored theme before the session loader is painted.
+const prepareLoaderTheme = `try {
+  const theme = localStorage.getItem(${JSON.stringify(ADMIN_THEME_KEY)});
+  if (theme === 'light' || theme === 'dark') document.documentElement.dataset.adminStartupTheme = theme;
+} catch {}`;
+
 export default function RootLayout({ children }: { children: React.ReactNode }): React.JSX.Element {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
       <head>
+        <script dangerouslySetInnerHTML={{ __html: prepareLoaderTheme }} />
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
       </head>

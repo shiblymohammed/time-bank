@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { BadRequestException, ConflictException, NotFoundException } from '@nestjs/common';
-import { ServiceProposalStatus } from '@ktb/shared-types';
+import { OrganizationStatus, ServiceProposalStatus } from '@ktb/shared-types';
 
 import { CatalogueService } from './catalogue.service';
 import { ServiceCategory } from './entities/service-category.entity';
@@ -27,6 +27,7 @@ describe('CatalogueService', () => {
     save: jest.fn((entity) => Promise.resolve(entity)),
     find: jest.fn(),
     createQueryBuilder: jest.fn(),
+    manager: { transaction: jest.fn() },
   };
 
   const mockOrgCatalogRepo = {
@@ -165,7 +166,48 @@ describe('CatalogueService', () => {
       expect(result.allowPartialHours).toBe(true);
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'GLOBAL_SERVICE_CREATED' }),
+        undefined,
       );
+    });
+
+    it('publishes the service and enables each selected municipality in one transaction', async () => {
+      const transaction = { withRepository: jest.fn((repo) => repo) };
+      mockGlobalServiceRepo.manager.transaction.mockImplementation((work) => work(transaction));
+      mockCategoryRepo.findOne.mockResolvedValue({ id: 'cat-1' });
+      mockGlobalServiceRepo.findOne.mockResolvedValueOnce(null).mockResolvedValue({
+        id: 'gs-1',
+        isActive: true,
+        defaultMinVolunteers: 2,
+        defaultPreferredVolunteers: 3,
+      });
+      mockOrgRepo.findOne.mockResolvedValue({ status: OrganizationStatus.ACTIVE });
+      mockOrgCatalogRepo.findOne.mockResolvedValue(null);
+
+      await service.createGlobalService({
+        categoryId: 'cat-1',
+        code: 'HOMEWORK_HELP',
+        nameEn: 'Homework help',
+        nameMl: 'Homework help',
+        defaultMinVolunteers: 2,
+        defaultPreferredVolunteers: 3,
+        publishOrganizationIds: ['org-1', 'org-2', 'org-1'],
+      });
+
+      expect(mockGlobalServiceRepo.manager.transaction).toHaveBeenCalledTimes(1);
+      expect(mockOrgCatalogRepo.save).toHaveBeenCalledTimes(2);
+      for (const organizationId of ['org-1', 'org-2']) {
+        expect(mockOrgCatalogRepo.save).toHaveBeenCalledWith(expect.objectContaining({
+          organizationId,
+          globalServiceId: 'gs-1',
+          isEnabled: true,
+          minVolunteers: 2,
+          preferredVolunteers: 3,
+        }));
+        expect(mockAuditService.logEvent).toHaveBeenCalledWith(
+          expect.objectContaining({ eventType: 'ORG_CATALOGUE_CONFIGURED', organizationId }),
+          transaction,
+        );
+      }
     });
 
     it('throws NotFoundException if category does not exist', async () => {
@@ -359,6 +401,7 @@ describe('CatalogueService', () => {
           eventType: 'ORG_CATALOGUE_CONFIGURED',
           organizationId: 'org-1',
         }),
+        undefined,
       );
     });
 

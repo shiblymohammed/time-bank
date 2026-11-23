@@ -48,6 +48,7 @@ export function Loyalty({
   canProposeAwards,
   isMerchant,
   onExpired,
+  dashboardRevision,
 }: {
   organizationId: string | null;
   isGlobal: boolean;
@@ -55,6 +56,7 @@ export function Loyalty({
   canProposeAwards: boolean;
   isMerchant: boolean;
   onExpired: () => void;
+  dashboardRevision: number;
 }) {
   const [revision, revise] = useState(0),
     [busy, setBusy] = useState(false),
@@ -173,30 +175,37 @@ export function Loyalty({
   }
   const load = useCallback(
     async (signal: AbortSignal) => {
-      if (isGlobal)
-        setPolicies(await backend<Row[]>('/admin/loyalty/policies', 'GET', undefined, signal));
-      if (!org) return;
-      const settings = await backend<{
-        program: { enabled: boolean; leaderboard_enabled: boolean };
-      }>(`${base}/settings`, 'GET', undefined, signal);
+      const [policies, settings, review, campaigns, engagement, own] = await Promise.all([
+        isGlobal ? backend<Row[]>('/admin/loyalty/policies', 'GET', undefined, signal) : null,
+        org ? backend<{ program: { enabled: boolean; leaderboard_enabled: boolean } }>(
+          base + '/settings', 'GET', undefined, signal,
+        ) : null,
+        org && canManage ? backend<{ merchants: Row[]; offers: Row[] }>(
+          base + '/review', 'GET', undefined, signal,
+        ) : null,
+        org && canManage ? backend<Row[]>(base + '/campaigns', 'GET', undefined, signal) : null,
+        org && canProposeAwards ? backend<Row[]>(base + '/engagement', 'GET', undefined, signal) : null,
+        org && isMerchant ? backend<{
+          merchant: Row | null; offers: Row[]; receipts: Row[]; volume: Row;
+        }>(base + '/merchant', 'GET', undefined, signal) : null,
+      ]);
       if (signal.aborted) return;
-      setProgram({
+      if (policies) setPolicies(policies);
+      if (settings) setProgram({
         enabled: settings.program.enabled,
         leaderboardEnabled: settings.program.leaderboard_enabled,
       });
-      if (canManage) {
-        setReview(await backend(`${base}/review`, 'GET', undefined, signal));
-        setCampaigns(await backend(`${base}/campaigns`, 'GET', undefined, signal));
-      }
-      if (canProposeAwards)
-        setEngagement(await backend(`${base}/engagement`, 'GET', undefined, signal));
-      if (isMerchant) setOwn(await backend(`${base}/merchant`, 'GET', undefined, signal));
+      if (review) setReview(review);
+      if (campaigns) setCampaigns(campaigns);
+      if (engagement) setEngagement(engagement);
+      if (own) setOwn(own);
     },
     [org, base, isGlobal, canManage, canProposeAwards, isMerchant],
   );
   useEffect(() => {
     const abort = new AbortController();
     setLoading(true);
+    setError('');
     void load(abort.signal)
       .catch((cause: unknown) => {
         if (abort.signal.aborted) return;
@@ -207,7 +216,7 @@ export function Loyalty({
         if (!abort.signal.aborted) setLoading(false);
       });
     return () => abort.abort();
-  }, [load, revision, onExpired]);
+  }, [load, revision, dashboardRevision, onExpired]);
   async function run(action: () => Promise<unknown>, writes = true) {
     if (pending) return;
     setBusy(true);

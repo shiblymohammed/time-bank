@@ -29,6 +29,18 @@ export class RequestQueryDto {
   @IsOptional()
   needsReview?: string;
 
+  @ApiPropertyOptional({
+    description: 'Staff only: requests waiting for manual volunteer dispatch',
+  })
+  @IsIn(['true'])
+  @IsOptional()
+  needsDispatch?: string;
+
+  @ApiPropertyOptional({ description: 'List the most recently created requests first' })
+  @IsIn(['true'])
+  @IsOptional()
+  newestFirst?: string;
+
   @ApiPropertyOptional({ default: 1 })
   @Type(() => Number)
   @IsInt()

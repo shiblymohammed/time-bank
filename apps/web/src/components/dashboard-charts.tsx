@@ -41,9 +41,9 @@ export type ActivityPoint = {
 };
 
 const series = [
-  { key: 'users', label: 'New Users', color: palette.blue },
-  { key: 'memberships', label: 'New Memberships', color: palette.purple },
-  { key: 'organizations', label: 'New Organizations', color: palette.teal },
+  { key: 'users', label: 'New Users', color: 'var(--admin-series-users)' },
+  { key: 'memberships', label: 'New Memberships', color: 'var(--admin-series-memberships)' },
+  { key: 'organizations', label: 'New Organizations', color: 'var(--admin-series-organizations)' },
 ] as const;
 
 export function ActivityTrend({ points }: { points?: ActivityPoint[] | undefined }) {
@@ -54,18 +54,8 @@ export function ActivityTrend({ points }: { points?: ActivityPoint[] | undefined
   );
   const visible = series.filter(({ key }) => active.includes(key));
   
-  const defaultPoints: ActivityPoint[] = [
-    { month: 'Jun', users: 0, memberships: 0, organizations: 0 },
-    { month: 'Jul', users: 0, memberships: 0, organizations: 0 },
-    { month: 'Aug', users: 0, memberships: 0, organizations: 0 },
-    { month: 'Sep', users: 0, memberships: 0, organizations: 0 },
-    { month: 'Oct', users: 0, memberships: 0, organizations: 0 },
-    { month: 'Nov', users: 4, memberships: 1, organizations: 1 },
-  ];
-
-  const sourceData = (points && points.length > 0) ? points : defaultPoints;
-  const data = sourceData.slice(-months);
-  const chartTitle = 'Activity and Readiness';
+  const data = points?.slice(-months) ?? [];
+  const chartTitle = 'Activity trends';
 
   return (
     <section className="analytics-panel activity-trend-card" aria-label={chartTitle}>
@@ -80,10 +70,10 @@ export function ActivityTrend({ points }: { points?: ActivityPoint[] | undefined
           </span>
           <div>
             <h3>{chartTitle}</h3>
-            <p>Organization status and recent community growth</p>
+            <p>New accounts, memberships and organizations</p>
           </div>
         </div>
-        <div className="analytics-switch" role="group" aria-label="Activity period">
+        {data.length > 0 && <div className="analytics-switch" role="group" aria-label="Activity period">
           {([3, 6] as const).map((period) => (
             <button
               key={period}
@@ -95,9 +85,11 @@ export function ActivityTrend({ points }: { points?: ActivityPoint[] | undefined
               {period} Months
             </button>
           ))}
-        </div>
+        </div>}
       </div>
-      <>
+      {data.length === 0 ? (
+        <p className="analytics-empty">Activity data is unavailable.</p>
+      ) : <>
         <div className="analytics-series" role="group" aria-label="Activity series">
           {series.map(({ key, label, color }) => (
             <button
@@ -121,7 +113,7 @@ export function ActivityTrend({ points }: { points?: ActivityPoint[] | undefined
           ))}
         </div>
         <div className="analytics-plot analytics-trend-plot">
-          <ResponsiveContainer width="100%" height={260} minWidth={0}>
+          <ResponsiveContainer width="100%" height={228} minWidth={0}>
             <AreaChart
               accessibilityLayer
               data={data}
@@ -135,10 +127,10 @@ export function ActivityTrend({ points }: { points?: ActivityPoint[] | undefined
                   </linearGradient>
                 ))}
               </defs>
-              <CartesianGrid stroke="#F1F5F9" strokeDasharray="3 3" vertical={false} />
+              <CartesianGrid stroke="var(--admin-line)" strokeDasharray="3 3" vertical={false} />
               <XAxis
                 dataKey="month"
-                tick={{ fill: '#64748B', fontSize: 12, fontWeight: 500 }}
+                tick={{ fill: 'var(--admin-copy)', fontSize: 12, fontWeight: 500 }}
                 axisLine={false}
                 tickLine={false}
                 tickMargin={10}
@@ -146,13 +138,15 @@ export function ActivityTrend({ points }: { points?: ActivityPoint[] | undefined
               <YAxis
                 allowDecimals={false}
                 width={35}
-                tick={{ fill: '#64748B', fontSize: 12, fontWeight: 500 }}
+                tick={{ fill: 'var(--admin-copy)', fontSize: 12, fontWeight: 500 }}
                 axisLine={false}
                 tickLine={false}
               />
               <Tooltip
-                contentStyle={tooltipStyle}
-                cursor={{ stroke: '#0052FF', strokeDasharray: '4 4' }}
+                contentStyle={{ ...tooltipStyle, background: 'var(--admin-raised)', borderColor: 'var(--admin-line)' }}
+                labelStyle={{ color: 'var(--admin-ink)' }}
+                itemStyle={{ color: 'var(--admin-ink)' }}
+                cursor={{ stroke: 'var(--admin-accent)', strokeDasharray: '4 4' }}
               />
               {visible.map(({ key, label, color }) => (
                 <Area
@@ -164,25 +158,40 @@ export function ActivityTrend({ points }: { points?: ActivityPoint[] | undefined
                   strokeWidth={3}
                   fill={'url(#' + gradientPrefix + key + ')'}
                   fillOpacity={1}
-                  dot={{ r: 4, fill: '#fff', stroke: color, strokeWidth: 2.5 }}
-                  activeDot={{ r: 6, fill: color, stroke: '#fff', strokeWidth: 2 }}
-                  isAnimationActive={true}
-                  animationDuration={600}
+                  dot={{ r: 4, fill: 'var(--admin-panel)', stroke: color, strokeWidth: 2.5 }}
+                  activeDot={{ r: 6, fill: color, stroke: 'var(--admin-panel)', strokeWidth: 2 }}
+                  isAnimationActive="auto"
                 />
               ))}
             </AreaChart>
           </ResponsiveContainer>
         </div>
-      </>
+        <details className="analytics-data">
+          <summary>View monthly counts</summary>
+          <table className="super-trend-table">
+            <thead>
+              <tr><th scope="col">Month</th>{visible.map(({ key, label }) => <th key={key} scope="col">{label}</th>)}</tr>
+            </thead>
+            <tbody>
+              {data.map((point) => (
+                <tr key={point.month}>
+                  <th scope="row">{point.month}</th>
+                  {visible.map(({ key }) => <td key={key}>{point[key].toLocaleString('en-IN')}</td>)}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </details>
+      </>}
     </section>
   );
 }
 
 export function OrganizationReadiness({ active, total }: { active: number; total: number }) {
-  const effectiveTotal = Math.max(total, 1);
-  const effectiveActive = Math.max(active, 0);
-  const other = Math.max(0, effectiveTotal - effectiveActive);
-  const pct = Math.round((effectiveActive / effectiveTotal) * 100);
+  const count = Math.max(total, 0);
+  const effectiveActive = Math.min(Math.max(active, 0), count);
+  const other = count - effectiveActive;
+  const pct = count === 0 ? 0 : Math.round((effectiveActive / count) * 100);
 
   // SVG circular progress calculation
   // Radius 58, Circumference = 2 * PI * 58 ≈ 364.425
@@ -207,13 +216,16 @@ export function OrganizationReadiness({ active, total }: { active: number; total
         </div>
       </div>
 
-      <div className="modern-donut-card-body">
+      {count === 0 ? (
+        <p className="analytics-empty">No organizations registered yet.</p>
+      ) : <div className="modern-donut-card-body">
         <div className="modern-donut-wrapper">
           <svg
             className="modern-donut-svg"
             viewBox="0 0 160 160"
             width="170"
             height="170"
+            role="img"
             aria-label={`Organization readiness: ${pct}% active`}
           >
             {/* Background Track */}
@@ -222,7 +234,7 @@ export function OrganizationReadiness({ active, total }: { active: number; total
               cy="80"
               r={radius}
               fill="none"
-              stroke="#E2E8F0"
+              stroke="var(--admin-line)"
               strokeWidth="14"
             />
             {/* Active Arc */}
@@ -231,9 +243,10 @@ export function OrganizationReadiness({ active, total }: { active: number; total
               cy="80"
               r={radius}
               fill="none"
-              stroke="#0052FF"
+              stroke="var(--admin-active)"
               strokeWidth="14"
               strokeLinecap="round"
+              visibility={effectiveActive === 0 ? 'hidden' : undefined}
               strokeDasharray={circumference}
               strokeDashoffset={strokeDashoffset}
               transform="rotate(-90 80 80)"
@@ -278,7 +291,7 @@ export function OrganizationReadiness({ active, total }: { active: number; total
             <span className="breakdown-val">{other}</span>
           </div>
         </div>
-      </div>
+      </div>}
     </section>
   );
 }

@@ -5,8 +5,8 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { ServiceProposalStatus } from '@ktb/shared-types';
+import { EntityManager, Repository } from 'typeorm';
+import { OrganizationStatus, ServiceProposalStatus } from '@ktb/shared-types';
 
 import { ServiceCategory } from './entities/service-category.entity';
 import { GlobalServiceDefinition } from './entities/global-service-definition.entity';
@@ -140,13 +140,22 @@ export class CatalogueService {
     dto: CreateGlobalServiceDefinitionDto,
     actorId?: string,
     ipAddress?: string,
+    manager?: EntityManager,
   ): Promise<GlobalServiceDefinition> {
-    const category = await this.categoryRepo.findOne({ where: { id: dto.categoryId } });
+    const organizationIds = [...new Set(dto.publishOrganizationIds ?? [])];
+    if (organizationIds.length && !manager) {
+      return this.globalServiceRepo.manager.transaction((transaction) =>
+        this.createGlobalService(dto, actorId, ipAddress, transaction),
+      );
+    }
+    const categories = manager?.withRepository(this.categoryRepo) ?? this.categoryRepo;
+    const services = manager?.withRepository(this.globalServiceRepo) ?? this.globalServiceRepo;
+    const category = await categories.findOne({ where: { id: dto.categoryId } });
     if (!category) {
       throw new NotFoundException(`Category not found with id '${dto.categoryId}'`);
     }
 
-    const existingCode = await this.globalServiceRepo.findOne({ where: { code: dto.code } });
+    const existingCode = await services.findOne({ where: { code: dto.code } });
     if (existingCode) {
       throw new ConflictException(`Global service with code '${dto.code}' already exists`);
     }
@@ -157,7 +166,7 @@ export class CatalogueService {
       );
     }
 
-    const service = this.globalServiceRepo.create({
+    const service = services.create({
       categoryId: dto.categoryId,
       code: dto.code,
       nameEn: dto.nameEn,
@@ -180,7 +189,7 @@ export class CatalogueService {
       createdBy: actorId ?? null,
     });
 
-    const saved = await this.globalServiceRepo.save(service);
+    const saved = await services.save(service);
 
     await this.auditService.logEvent({
       eventType: 'GLOBAL_SERVICE_CREATED',
@@ -194,7 +203,17 @@ export class CatalogueService {
         defaultPreferredVolunteers: saved.defaultPreferredVolunteers,
       },
       ipAddress: ipAddress ?? null,
-    });
+    }, manager);
+
+    for (const organizationId of organizationIds) {
+      await this.configureOrgCatalogue(
+        organizationId,
+        { globalServiceId: saved.id, isEnabled: true },
+        actorId,
+        ipAddress,
+        manager,
+      );
+    }
 
     return saved;
   }
@@ -312,20 +331,28 @@ export class CatalogueService {
     dto: ConfigureOrgCatalogueDto,
     actorId?: string,
     ipAddress?: string,
+    manager?: EntityManager,
   ): Promise<OrganizationServiceCatalog> {
-    const org = await this.orgRepo.findOne({ where: { id: orgId } });
+    const organizations = manager?.withRepository(this.orgRepo) ?? this.orgRepo;
+    const services = manager?.withRepository(this.globalServiceRepo) ?? this.globalServiceRepo;
+    const catalogue = manager?.withRepository(this.orgCatalogRepo) ?? this.orgCatalogRepo;
+    const org = await organizations.findOne({ where: { id: orgId } });
     if (!org) {
       throw new NotFoundException(`Organization '${orgId}' not found`);
     }
 
-    const globalService = await this.globalServiceRepo.findOne({
+    if (manager && org.status !== OrganizationStatus.ACTIVE) {
+      throw new BadRequestException(`Cannot publish a service for inactive organization '${org.name}'`);
+    }
+
+    const globalService = await services.findOne({
       where: { id: dto.globalServiceId },
     });
     if (!globalService) {
       throw new NotFoundException(`Global service definition '${dto.globalServiceId}' not found`);
     }
 
-    let entry = await this.orgCatalogRepo.findOne({
+    let entry = await catalogue.findOne({
       where: { organizationId: orgId, globalServiceId: dto.globalServiceId },
     });
     const enabled = dto.isEnabled ?? entry?.isEnabled ?? true;
@@ -350,7 +377,7 @@ export class CatalogueService {
     }
 
     if (!entry) {
-      entry = this.orgCatalogRepo.create({
+      entry = catalogue.create({
         organizationId: orgId,
         globalServiceId: dto.globalServiceId,
         isEnabled: dto.isEnabled ?? true,
@@ -379,7 +406,7 @@ export class CatalogueService {
       }
     }
 
-    const saved = await this.orgCatalogRepo.save(entry);
+    const saved = await catalogue.save(entry);
 
     await this.auditService.logEvent({
       eventType: 'ORG_CATALOGUE_CONFIGURED',
@@ -395,7 +422,7 @@ export class CatalogueService {
         requiresCoordinatorDispatch: saved.requiresCoordinatorDispatch,
       },
       ipAddress: ipAddress ?? null,
-    });
+    }, manager);
 
     return saved;
   }

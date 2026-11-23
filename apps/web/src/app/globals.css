@@ -4437,6 +4437,26 @@ textarea.form-input {
   gap: 6px;
   width: min(100%, 240px);
 }
+.attention-queue {
+  margin-bottom: 16px;
+  padding: 16px;
+}
+.attention-queue-urgent {
+  border-inline-start: 4px solid #e11d48;
+}
+.attention-case-list {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+}
+.attention-case-list button {
+  width: 100%;
+  justify-content: flex-start;
+  text-align: start;
+  white-space: normal;
+}
 .request-workspace > .action-row {
   align-items: flex-end;
   gap: 12px;
@@ -7728,5 +7748,48 @@ label.inline-check input[type="checkbox"] {
 
   .notification-item-heading time {
     text-align: left;
+  }
+}
+
+/* Shared dashboard toolbar */
+.admin-topbar .top-actions {
+  justify-content: flex-end;
+  flex-shrink: 0;
+}
+.admin-topbar .modern-bell-btn {
+  flex-shrink: 0;
+}
+.modern-activity-triplet > * {
+  min-width: 0;
+}
+.activity-item-details {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.activity-item-details time {
+  color: #64748b;
+  font-size: 0.75rem;
+  line-height: 1.4;
+}
+@media (max-width: 900px) {
+  .admin-topbar {
+    padding: 0;
+  }
+  .admin-topbar .top-bar-inner {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 14px 16px;
+    gap: 12px;
+  }
+  .admin-topbar .top-actions {
+    justify-content: flex-start;
+  }
+}
+@media (max-width: 540px) {
+  .admin-topbar .top-actions .scope-label {
+    flex: 1 0 100%;
+  }
+  .admin-topbar .top-actions .scope-select {
+    width: 100%;
   }
 }

@@ -519,6 +519,22 @@ export class RequestsService {
               OR (review.status = 'IN_PROGRESS' AND review.long_visit_alerted_at IS NOT NULL))))`,
       );
     }
+    if (query.needsDispatch) {
+      if (!isCoordOrAdmin) {
+        throw new ForbiddenException('Staff access is required to filter dispatch work');
+      }
+      qb.andWhere(`(
+        cat.is_enabled = true AND gs.is_active = true
+        AND (req.status = 'ESCALATED_TO_COORDINATOR'
+          OR (req.status IN ('MATCHING_ACTIVE', 'PARTIALLY_ACCEPTED')
+            AND cat.requires_coordinator_dispatch = true))
+        AND NOT EXISTS (
+          SELECT 1 FROM volunteer_assignments offer
+          WHERE offer.service_request_id = req.id AND offer.status = 'OFFERED'
+            AND offer.offer_expires_at > NOW()
+        )
+      )`);
+    }
     if (query.urgency) {
       qb.andWhere('req.urgency = :urgency', { urgency: query.urgency });
     }
@@ -529,7 +545,10 @@ export class RequestsService {
     const page = query.page ?? 1;
     const limit = query.limit ?? 20;
 
-    qb.orderBy('req.scheduledStartTime', 'ASC')
+    qb.orderBy(
+      query.newestFirst ? 'req.createdAt' : 'req.scheduledStartTime',
+      query.newestFirst ? 'DESC' : 'ASC',
+    )
       .skip((page - 1) * limit)
       .take(limit);
 

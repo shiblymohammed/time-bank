@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { backend, ApiError } from '@/lib/api';
 import type { Action } from '@/lib/admin-types';
 import { Icon } from '@/components/icons';
@@ -113,6 +113,8 @@ type Snapshot = {
     /** Set when the visit ran long and coordinators were told. */
     longVisitAlertedAt?: string | null;
     reportedMinutes: number | null;
+    confirmedMinutes: number | null;
+    awardedCredits: number | null;
     completionNotes: string | null;
     confirmedAt: string | null;
     reviewReason: string | null;
@@ -246,36 +248,69 @@ function People({
 
 export function CoordinatorRequests({
   organizationId,
+  viewerId,
+  initialCaseId = '',
   revision,
   pending,
   openAction,
   onExpired,
 }: {
   organizationId: string;
+  viewerId: string;
+  initialCaseId?: string;
   revision: number;
   pending: boolean;
   openAction: (action: Action) => void;
   onExpired: () => void;
 }) {
   const base = `/organizations/${organizationId}`;
-  const [status, setStatus] = useState(''),
-    [urgency, setUrgency] = useState(''),
-    [ward, setWard] = useState(''),
-    [needsReview, setNeedsReview] = useState(false),
-    [page, setPage] = useState(1);
+  const filtersKey = 'timebank-bookings:' + viewerId + ':' + organizationId;
+  const [saved] = useState(() => {
+    try {
+      return JSON.parse(sessionStorage.getItem(filtersKey) ?? '{}') as {
+        status?: string; urgency?: string; ward?: string; needsReview?: boolean; page?: number;
+      } | null;
+    } catch {
+      return null;
+    }
+  });
+  const [status, setStatus] = useState<string>(REQUEST_STATUSES.find((value) => value === saved?.status) ?? ''),
+    [urgency, setUrgency] = useState(['SCHEDULED', 'IMMEDIATE'].find((value) => value === saved?.urgency) ?? ''),
+    [ward, setWard] = useState(typeof saved?.ward === 'string' ? saved.ward.slice(0, 20) : ''),
+    [needsReview, setNeedsReview] = useState(saved?.needsReview === true),
+    [page, setPage] = useState(typeof saved?.page === 'number' && Number.isSafeInteger(saved.page) && saved.page > 0 ? saved.page : 1);
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(filtersKey, JSON.stringify({ status, urgency, ward, needsReview, page }));
+    } catch {
+      // Filtering still works when storage is unavailable.
+    }
+  }, [filtersKey, status, urgency, ward, needsReview, page]);
   const [list, setList] = useState<{ data: RequestRow[]; total: number } | null>(null);
-  const [selected, setSelected] = useState(''),
+  const [selected, setSelected] = useState(initialCaseId),
     [detail, setDetail] = useState<Snapshot | null>(null);
   const [catalogue, setCatalogue] = useState<Catalogue[]>([]),
     [creating, setCreating] = useState(false),
     [dispatching, setDispatching] = useState(false);
   const [error, setError] = useState('');
+  const focusedBooking = useRef(false);
+  const [detailError, setDetailError] = useState('');
+  const [detailRetry, setDetailRetry] = useState(0);
+  const [listRetry, setListRetry] = useState(0);
+  const [detailLoading, setDetailLoading] = useState(false);
+  useEffect(() => {
+    if (!detail || focusedBooking.current) return;
+    const panel = document.getElementById('coordinator-request-detail');
+    if (!panel) return;
+    focusedBooking.current = true;
+    panel.focus();
+    panel.scrollIntoView({ block: 'start' });
+  }, [detail]);
   const fail = (e: unknown) => {
     if (e instanceof ApiError && e.status === 401) onExpired();
   };
   useEffect(() => {
     const controller = new AbortController();
-    setList(null);
     setError('');
     const query = new URLSearchParams({
       page: String(page),
@@ -291,20 +326,21 @@ export function CoordinatorRequests({
       undefined,
       controller.signal,
     )
-      .then(setList)
+      .then((value) => { if (!controller.signal.aborted) setList(value); })
       .catch((e) => {
         if (!controller.signal.aborted) {
-          setError(e.message);
+          if (e instanceof ApiError && e.status === 403) setList(null);
+          setError('Could not load the latest requests.');
           fail(e);
         }
       });
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, revision, status, urgency, ward, needsReview, page]);
+  }, [base, revision, listRetry, status, urgency, ward, needsReview, page]);
   useEffect(() => {
     const controller = new AbortController();
-    setDetail(null);
-    setDispatching(false);
+    setDetailError('');
+    setDetailLoading(Boolean(selected));
     if (selected)
       backend<Snapshot>(
         `${base}/requests/${selected}/matching`,
@@ -312,16 +348,20 @@ export function CoordinatorRequests({
         undefined,
         controller.signal,
       )
-        .then(setDetail)
+        .then((snapshot) => {
+          if (!controller.signal.aborted) setDetail(snapshot);
+        })
         .catch((e) => {
           if (!controller.signal.aborted) {
-            setError(e.message);
+            if (e instanceof ApiError && [403, 404].includes(e.status)) setDetail(null);
+            setDetailError('Could not load the latest booking details.');
             fail(e);
           }
-        });
+        })
+        .finally(() => { if (!controller.signal.aborted) setDetailLoading(false); });
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [base, selected, revision]);
+  }, [base, selected, revision, detailRetry]);
   useEffect(() => {
     const controller = new AbortController();
     backend<Catalogue[]>(`${base}/catalogue`, 'GET', undefined, controller.signal)
@@ -448,7 +488,7 @@ export function CoordinatorRequests({
   const completedCount = list?.data.filter((r) => r.status === 'COMPLETED').length ?? 0;
   const hasRequestFilters = Boolean(status || urgency || ward || needsReview);
 
-  return (
+  if (!selected) return (
     <div className="request-workspace request-page">
       <div className="section-heading request-page-heading">
         <div>
@@ -614,7 +654,8 @@ export function CoordinatorRequests({
 
       {error && (
         <p role="alert" className="error-message">
-          {error}
+          {error}{' '}
+          <button type="button" onClick={() => setListRetry((count) => count + 1)}>Try again</button>
         </p>
       )}
       {!list && !error && <p role="status">Loading requests…</p>}
@@ -665,7 +706,7 @@ export function CoordinatorRequests({
                         setError('');
                       }}
                     >
-                      Review matching →
+                      Open booking
                     </button>
                   </td>
                 </tr>
@@ -725,12 +766,38 @@ export function CoordinatorRequests({
           Next requests
         </button>
       </div>
+    </div>
+  );
 
-      {selected && !detail && !error && <p role="status">Loading matching details…</p>}
-
+  return (
+    <div className="request-workspace request-page">
+      <div className="action-row">
+        <button
+          type="button"
+          className="btn btn-secondary"
+          onClick={() => {
+            focusedBooking.current = false;
+            setSelected('');
+            setDetail(null);
+            setDispatching(false);
+          }}
+        >
+          Back to bookings
+        </button>
+      </div>
+      {!detail && !detailError && <p role="status">Loading booking details.</p>}
+      {detailError && (
+        <div className="glass-panel detail-panel">
+          <p className="error-message" role="alert">{detailError}</p>
+          <button type="button" className="btn btn-secondary" onClick={() => setDetailRetry((count) => count + 1)}>
+            Try again
+          </button>
+        </div>
+      )}
       {/* Detailed Request Inspection View */}
+      {detailLoading && detail && <p role="status">Refreshing booking details.</p>}
       {detail && request && (
-        <section className="glass-panel detail-panel" aria-label="Request details" style={{ marginTop: '24px', padding: '24px' }}>
+        <section id="coordinator-request-detail" tabIndex={-1} className="glass-panel detail-panel" aria-label="Booking details" style={{ marginTop: '24px', padding: '24px' }}>
           <div className="request-detail-header">
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
@@ -744,16 +811,6 @@ export function CoordinatorRequests({
                 {request.serviceName}
               </h2>
             </div>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={() => {
-                setSelected('');
-                setDetail(null);
-              }}
-            >
-              ✕ Close request
-            </button>
           </div>
 
           {/* Structured Detail Cards Grid */}
@@ -1017,6 +1074,12 @@ export function CoordinatorRequests({
                     submit: async (v) => {
                       if (!request.requiresReconfirmation && v.confirmed !== 'on')
                         throw new Error('Confirm availability first.');
+                      const latest = await backend<Snapshot>(base + '/requests/' + selected + '/matching');
+                      if (latest.request.scheduledStartTime !== request.scheduledStartTime ||
+                          latest.request.requiresReconfirmation !== request.requiresReconfirmation) {
+                        setDetailRetry((count) => count + 1);
+                        throw new Error('The visit time changed. Close this dialog and choose a volunteer for the updated time.');
+                      }
                       const result = await backend(`${base}/requests/${selected}/dispatch`, 'POST', {
                         volunteerMembershipId: person.id,
                         dispatchNotes: v.notes,
@@ -1088,6 +1151,16 @@ export function CoordinatorRequests({
                   {a.invitedByName && (
                     <span className="volunteer-timeline-chip">
                       · Invited by {a.invitedByName}
+                    </span>
+                  )}
+                  {a.confirmedAt && (
+                    <span className="volunteer-timeline-chip">
+                      Confirmed: {a.confirmedMinutes ?? '—'} min · {indiaTime(a.confirmedAt)}
+                    </span>
+                  )}
+                  {a.awardedCredits != null && (
+                    <span className="volunteer-timeline-chip">
+                      Time credits awarded: {a.awardedCredits}
                     </span>
                   )}
                 </div>

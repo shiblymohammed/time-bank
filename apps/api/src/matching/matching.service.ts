@@ -2460,6 +2460,18 @@ export class MatchingService {
         where: { serviceRequestId: requestId, organizationId: orgId },
         order: { createdAt: 'DESC', id: 'DESC' },
       });
+      const confirmedIds = assignments.filter((visit) => visit.confirmedAt).map((visit) => visit.id);
+      const awards: { assignment_id: string; credits: string }[] = confirmedIds.length
+        ? await manager.query(
+            `SELECT volunteer_assignment_id AS assignment_id, SUM(amount)::text AS credits
+             FROM time_credit_ledger
+             WHERE volunteer_assignment_id = ANY($1::uuid[]) AND originating_org_id = $2
+               AND service_request_id = $3 AND tx_type = 'SERVICE_EARNED'
+             GROUP BY volunteer_assignment_id`,
+            [confirmedIds, orgId, requestId],
+          )
+        : [];
+      const awardsByAssignment = new Map(awards.map((award) => [award.assignment_id, Number(award.credits)]));
       return {
         request: {
           id: request.id,
@@ -2523,6 +2535,8 @@ export class MatchingService {
           leavingReason: assignment.withdrawalReason ?? null,
           invitedByName: assignment.invitedByMembership?.user?.fullName ?? null,
           confirmedAt: assignment.confirmedAt ?? null,
+          confirmedMinutes: assignment.confirmedMinutes ?? null,
+          awardedCredits: assignment.confirmedAt ? (awardsByAssignment.get(assignment.id) ?? 0) : null,
           reviewReason: assignment.reviewReason ?? null,
           reviewNotes: assignment.reviewNotes ?? null,
           reviewMinutes: assignment.reviewMinutes ?? null,

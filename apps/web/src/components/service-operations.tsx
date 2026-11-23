@@ -45,9 +45,11 @@ interface Caregiver {
 }
 interface Props {
   organizationId: string | null;
+  bookings: ReactNode;
   /** Central catalogue writes are Super Admin only; hide them from local staff. */
   isGlobal: boolean;
   onError: (cause: unknown) => void;
+  dashboardRevision: number;
 }
 
 function Field({
@@ -160,8 +162,8 @@ const list = (data: FormData, key: string) =>
     .filter(Boolean);
 const iso = (data: FormData, key: string) => new Date(str(data, key)).toISOString();
 
-export function ServiceOperations({ organizationId, isGlobal, onError }: Props) {
-  const [section, setSection] = useState('catalogue');
+export function ServiceOperations({ organizationId, bookings, isGlobal, onError, dashboardRevision }: Props) {
+  const [section, setSection] = useState(organizationId ? 'bookings' : 'catalogue');
   const [beneficiaryTask, setBeneficiaryTask] = useState<
     'lookup' | 'eligibility' | 'caregivers'
   >('lookup');
@@ -202,12 +204,14 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
   };
 
   useEffect(() => {
+    if (section === 'bookings') {
+      setLoading(false);
+      return;
+    }
     const controller = new AbortController();
     const options = { signal: controller.signal };
     setLoading(true);
     setError('');
-    setRecordDetails(null);
-    setVolunteer(null);
     const load = async () => {
       if (section === 'profile') {
         const profile = await request<Record<string, unknown>>(
@@ -255,7 +259,7 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [organizationId, base, section, revision, onError]);
+  }, [organizationId, base, section, revision, dashboardRevision, onError]);
 
   const run = async (action: () => Promise<void>) => {
     if (lock.current) return;
@@ -316,15 +320,14 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
     });
 
   const TABS = [
+    ...(organizationId ? [{ id: 'bookings', label: 'Bookings', icon: 'requests' as const }] : []),
     { id: 'catalogue', label: 'Catalogue', icon: 'catalogue' as const },
     { id: 'beneficiaries', label: 'Beneficiaries', icon: 'memberships' as const },
     { id: 'zones', label: 'Zones & Volunteers', icon: 'overview' as const },
     { id: 'profile', label: 'Session Profile', icon: 'users' as const },
   ];
 
-  return (
-    <section className="ops" aria-busy={loading || busy}>
-      {/* SEGMENTED PILL TAB BAR */}
+  const navigation = (
       <div className="ops-segmented-tabs" role="group" aria-label="Operations Section">
         {TABS.map((tab) => (
           <button
@@ -335,6 +338,8 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
             aria-pressed={section === tab.id}
             onClick={() => {
               setSection(tab.id);
+              setRecordDetails(null);
+              setVolunteer(null);
               setError('');
               setNotice('');
             }}
@@ -343,18 +348,28 @@ export function ServiceOperations({ organizationId, isGlobal, onError }: Props) 
             <span>{tab.label}</span>
           </button>
         ))}
-        <button
-          type="button"
-          className="ops-refresh-btn"
-          disabled={busy || loading}
-          onClick={() => setRevision((v) => v + 1)}
-          title="Refresh operational data"
-        >
-          <Icon name="refresh" />
-          <span>Refresh</span>
-        </button>
+        {section !== 'bookings' && (
+          <button
+            type="button"
+            className="ops-refresh-btn"
+            disabled={busy || loading}
+            onClick={() => setRevision((v) => v + 1)}
+            title="Refresh operational data"
+          >
+            <Icon name="refresh" />
+            <span>Refresh</span>
+          </button>
+        )}
       </div>
+  );
 
+  if (section === 'bookings') {
+    return <section className="ops">{navigation}{bookings}</section>;
+  }
+
+  return (
+    <section className="ops" aria-busy={loading || busy}>
+      {navigation}
       {/* SECTION HEADING */}
       <div className="ops-section-heading">
         <div>

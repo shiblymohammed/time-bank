@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ApiError, backend } from '@/lib/api';
 import type { Action } from '@/lib/admin-types';
 import { Icon } from '@/components/icons';
@@ -82,12 +82,14 @@ export function useOpenSafetyAlerts(organizationId: string | null, revision: num
 
 export function SafetyAlerts({
   organizationId,
+  initialCaseId = '',
   revision,
   pending,
   openAction,
   onExpired,
 }: {
   organizationId: string;
+  initialCaseId?: string;
   revision: number;
   pending: boolean;
   openAction: (action: Action) => void;
@@ -97,6 +99,16 @@ export function SafetyAlerts({
   const [showClosed, setShowClosed] = useState(false);
   const [error, setError] = useState('');
   const base = `/organizations/${organizationId}/safety-alerts`;
+  const focusedCase = useRef('');
+  useEffect(() => {
+    if (!alerts || !initialCaseId || focusedCase.current === initialCaseId) return;
+    const card = document.getElementById(`safety-case-${initialCaseId}`);
+    if (card) {
+      focusedCase.current = initialCaseId;
+      card.focus();
+      card.scrollIntoView({ block: 'start' });
+    }
+  }, [alerts, initialCaseId]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -273,6 +285,8 @@ export function SafetyAlerts({
           <section
             className="detail-panel glass-panel"
             key={alert.id}
+            id={`safety-case-${alert.id}`}
+            tabIndex={-1}
             data-testid="safety-alert"
             style={{
               background: '#ffffff',

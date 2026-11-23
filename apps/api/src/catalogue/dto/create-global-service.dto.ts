@@ -14,6 +14,13 @@ import {
 } from 'class-validator';
 
 export class CreateGlobalServiceDefinitionDto {
+  @ApiPropertyOptional({ description: 'Municipalities to enable this service for on creation' })
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(100)
+  @IsUUID('all', { each: true })
+  publishOrganizationIds?: string[];
+
   @ApiProperty({ description: 'UUID of parent ServiceCategory' })
   @IsUUID()
   @IsNotEmpty()

@@ -897,10 +897,14 @@ describe('RequestsService', () => {
         roles: [UserRole.BENEFICIARY],
       };
 
-      await service.listRequests('org-1', 'user-ben', benCtx, {});
+      await service.listRequests('org-1', 'user-ben', benCtx, { newestFirst: 'true' });
       expect(mockQueryBuilder.andWhere).toHaveBeenCalledWith('req.beneficiaryMembershipId = :bId', {
         bId: 'ben-mem-1',
       });
+      expect(mockQueryBuilder.orderBy).toHaveBeenCalledWith('req.createdAt', 'DESC');
+      await expect(
+        service.listRequests('org-1', 'user-ben', benCtx, { needsDispatch: 'true' }),
+      ).rejects.toThrow(ForbiddenException);
     });
 
     it('throws ForbiddenException if beneficiary attempts to query another beneficiary', async () => {
