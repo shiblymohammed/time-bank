@@ -259,10 +259,19 @@ export class MembershipsService {
     return ward.id;
   }
 
-  /** Turns a volunteer's application answers into matching preferences and unverified skills. */
+  /**
+   * Turns a volunteer's application answers into matching preferences and unverified skills.
+   * The app no longer asks for availability when joining, so missing answers get the same
+   * defaults matching uses (5 km, available at short notice); the ward is still recorded.
+   */
   private async seedVolunteerProfile(membership: OrganizationMembership): Promise<void> {
-    const answers = membership.applicationDetails?.volunteer;
-    if (!answers) return;
+    const answers = membership.applicationDetails?.volunteer ?? {
+      maxTravelRadiusKm: 5,
+      availableAtShortNotice: true,
+      usualDays: [],
+      usualTimes: [],
+      skillCodes: [],
+    };
     const manager = this.membershipRepo.manager;
     const availabilityRepo = manager.getRepository(VolunteerAvailability);
     const existing = await availabilityRepo.findOne({
@@ -348,10 +357,19 @@ export class MembershipsService {
     this.authorizationService.assertNoSelfEscalation(approverId, membership.userId, initialRole);
     await this.assertCanManageRole(organizationId, approverId, initialRole);
 
-    // Every new member needs a signed ward NOC that a coordinator has accepted (owner, 10 Nov 2026).
+    // Every new member uploads a ward NOC. Approving the membership accepts it in the same step,
+    // so staff only click Approve (simplified flow, 22 Nov 2026).
     const documents = await this.documentRepo.find({ where: { membershipId } });
-    if (currentNoc(documents)?.reviewStatus !== DocumentReviewStatus.APPROVED) {
-      throw new ConflictException('Accept this member’s ward NOC before approving them');
+    const noc = currentNoc(documents);
+    if (!noc || noc.reviewStatus === DocumentReviewStatus.SUPERSEDED) {
+      throw new ConflictException('This member has not uploaded their ward NOC yet');
+    }
+    if (noc.reviewStatus !== DocumentReviewStatus.APPROVED) {
+      noc.reviewStatus = DocumentReviewStatus.APPROVED;
+      noc.reviewNotes = null;
+      noc.reviewedByUserId = approverId;
+      noc.reviewedAt = new Date();
+      await this.documentRepo.save(noc);
     }
 
     const org = await this.orgRepo.findOne({ where: { id: organizationId } });

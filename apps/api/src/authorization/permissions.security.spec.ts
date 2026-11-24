@@ -158,6 +158,8 @@ function fixture() {
   );
   const hierarchy = new RoleHierarchyService();
   const documents = repository();
+  // Approving a volunteer sets up their matching profile through the manager.
+  Object.assign(memberships, { manager: { getRepository: () => repository() } });
   const membershipService = new MembershipsService(
     organizations as any,
     users as any,
@@ -367,20 +369,24 @@ describe('Permission boundaries with real guards and services', () => {
       createdAt: new Date(),
     });
 
-  it('refuses approval until the ward NOC is accepted', async () => {
-    await expect(
-      f.membershipService.approveMembership(f.orgId, f.target.id, 'global-admin', {}),
-    ).rejects.toThrow('ward NOC');
-    f.documents.rows.push({
-      membershipId: f.target.id,
-      documentType: 'WARD_NOC',
-      reviewStatus: 'PENDING',
-      createdAt: new Date(),
-    });
+  it('refuses approval until the ward NOC is uploaded', async () => {
     await expect(
       f.membershipService.approveMembership(f.orgId, f.target.id, 'global-admin', {}),
     ).rejects.toThrow('ward NOC');
     expect(f.target.status).not.toBe(MembershipStatus.APPROVED);
+  });
+
+  it('accepts a waiting NOC when the membership is approved', async () => {
+    const noc = {
+      membershipId: f.target.id,
+      documentType: 'WARD_NOC',
+      reviewStatus: 'PENDING',
+      createdAt: new Date(),
+    };
+    f.documents.rows.push(noc);
+    await f.membershipService.approveMembership(f.orgId, f.target.id, 'global-admin', {});
+    expect(f.target.status).toBe(MembershipStatus.APPROVED);
+    expect(noc.reviewStatus).toBe('APPROVED');
   });
 
   it('allows coordinator approval of an operational role', async () => {

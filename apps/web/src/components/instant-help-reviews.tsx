@@ -116,18 +116,20 @@ export function InstantHelpReviews({
     setError('');
     setMessage('');
   }
-  async function review(decision: 'APPROVE' | 'REJECT' | 'NEEDS_INFO') {
-    if (!selected || busy || loading) return;
-    if (notes.trim().length < 3) {
-      setError('Add a short explanation for the volunteer.');
-      return;
-    }
-    const approved = Number(minutes);
+  /** Approve or reject. A note is optional; quick approve pays the recorded minutes. */
+  async function review(
+    decision: 'APPROVE' | 'REJECT',
+    target: Session | null = selected,
+    quick = false,
+  ) {
+    if (!target || busy || loading) return;
+    const approved = quick ? Math.min(target.reportedMinutes ?? 1, 720) : Number(minutes);
+    const note = quick ? '' : notes.trim();
     if (
       decision === 'APPROVE' &&
       (!Number.isInteger(approved) ||
         approved < 1 ||
-        approved > Math.min(selected.reportedMinutes ?? 0, 720))
+        approved > Math.min(target.reportedMinutes ?? 0, 720))
     ) {
       setError('Enter whole minutes up to the recorded duration, with a maximum of 720.');
       return;
@@ -137,24 +139,23 @@ export function InstantHelpReviews({
     setMessage('');
     try {
       const saved = await backend<Session>(
-        `/organizations/${organizationId}/instant-help/${selected.id}/review`,
+        `/organizations/${organizationId}/instant-help/${target.id}/review`,
         'POST',
         {
           decision,
-          version: selected.version,
-          notes: notes.trim(),
+          version: target.version,
+          ...(note ? { notes: note } : {}),
           ...(decision === 'APPROVE' ? { minutes: approved } : {}),
         },
       );
       if (!mounted.current) return;
       setRows((old) => old.filter((row) => row.id !== saved.id));
-      setSelected(saved);
+      if (!quick) setSelected(saved);
+      const who = saved.volunteerName ?? saved.membershipNumber;
       setMessage(
         decision === 'APPROVE'
-          ? `Approved ${saved.approvedMinutes} minutes. ${saved.creditsEarned} time credits recorded.`
-          : decision === 'NEEDS_INFO'
-            ? 'The volunteer has been asked for more information.'
-            : 'Session closed without credits.',
+          ? `Approved ${saved.approvedMinutes} minutes for ${who}. ${saved.creditsEarned} time credits recorded.`
+          : `Rejected ${who}'s session. No credits were given.`,
       );
     } catch (e) {
       if (!mounted.current) return;
@@ -175,7 +176,7 @@ export function InstantHelpReviews({
       <div className="section-heading">
         <div>
           <h2>Instant help reviews</h2>
-          <p>Verify unplanned help before awarding time credits. Evidence stays private.</p>
+          <p>Approve to pay the recorded time as credits. Open a session to see its note, photos and location.</p>
         </div>
         <label>
           Status{' '}
@@ -213,7 +214,7 @@ export function InstantHelpReviews({
             <thead>
               <tr>
                 <th>Volunteer</th>
-                <th>Situation</th>
+                <th>Note</th>
                 <th>Started</th>
                 <th>Duration</th>
                 <th>Review</th>
@@ -226,16 +227,25 @@ export function InstantHelpReviews({
                     {row.volunteerName ?? row.membershipNumber}
                     <small style={{ display: 'block' }}>{row.membershipNumber}</small>
                   </td>
-                  <td>{row.description}</td>
+                  <td>{row.notes ?? row.description}</td>
                   <td>{indiaTime(row.startedAt)}</td>
                   <td>{row.reportedMinutes == null ? 'Running' : `${row.reportedMinutes} min`}</td>
-                  <td>
+                  <td style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                    {row.status === 'PENDING' && (
+                      <button
+                        className="btn btn-primary"
+                        disabled={busy}
+                        onClick={() => review('APPROVE', row, true)}
+                      >
+                        Approve {Math.min(row.reportedMinutes ?? 1, 720)} min
+                      </button>
+                    )}
                     <button
                       className="btn btn-secondary"
                       disabled={busy}
                       onClick={() => choose(row)}
                     >
-                      View session
+                      View
                     </button>
                   </td>
                 </tr>
@@ -304,7 +314,7 @@ export function InstantHelpReviews({
               View location pin ↗
             </a>
           )}
-          <p style={{ whiteSpace: 'pre-wrap' }}>{selected.notes ?? 'No completion note yet.'}</p>
+          <p style={{ whiteSpace: 'pre-wrap' }}>{selected.notes ?? 'The volunteer added no note.'}</p>
           {selected.reviewNotes && (
             <p>
               <strong>Last review note:</strong> {selected.reviewNotes}
@@ -354,7 +364,7 @@ export function InstantHelpReviews({
             >
               {selected.status === 'PENDING' && (
                 <label>
-                  Minutes to approve{' '}
+                  Minutes to approve (change only if needed){' '}
                   <input
                     type="number"
                     min={1}
@@ -367,10 +377,9 @@ export function InstantHelpReviews({
                 </label>
               )}
               <label>
-                Explanation for the volunteer
+                Note for the volunteer (optional)
                 <textarea
                   value={notes}
-                  minLength={3}
                   maxLength={2000}
                   disabled={busy}
                   onChange={(e) => setNotes(e.target.value)}
@@ -378,24 +387,14 @@ export function InstantHelpReviews({
               </label>
               <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
                 {selected.status === 'PENDING' && (
-                  <>
-                    <button
-                      type="button"
-                      className="btn btn-primary"
-                      disabled={busy}
-                      onClick={() => review('APPROVE')}
-                    >
-                      {busy ? 'Saving…' : 'Approve time & credits'}
-                    </button>
-                    <button
-                      type="button"
-                      className="btn btn-secondary"
-                      disabled={busy}
-                      onClick={() => review('NEEDS_INFO')}
-                    >
-                      Request information
-                    </button>
-                  </>
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    disabled={busy}
+                    onClick={() => review('APPROVE')}
+                  >
+                    {busy ? 'Saving…' : 'Approve'}
+                  </button>
                 )}
                 <button
                   type="button"
@@ -405,7 +404,7 @@ export function InstantHelpReviews({
                 >
                   {selected.status === 'RUNNING'
                     ? 'Close abandoned timer without credits'
-                    : 'Reject with reason'}
+                    : 'Reject'}
                 </button>
               </div>
             </form>
@@ -422,8 +421,8 @@ export function InstantHelpReviews({
         </section>
       )}
       <small>
-        Shows up to 100 most recent sessions for the selected status. Long sessions require an
-        explained adjustment; at most 720 minutes can be approved.
+        Shows up to 100 most recent sessions for the selected status. At most 720 minutes can be
+        approved for one session.
       </small>
     </section>
   );

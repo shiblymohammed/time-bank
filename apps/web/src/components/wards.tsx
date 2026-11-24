@@ -33,7 +33,7 @@ export const TITLE: Record<Ward['representativeTitle'], string> = {
 };
 
 export const NOC_STATUS: Record<Noc['status'], string> = {
-  PENDING: 'Waiting for review',
+  PENDING: 'Waiting for approval',
   APPROVED: 'Accepted',
   REJECTED: 'Not accepted',
   SUPERSEDED: 'Replaced',
@@ -314,7 +314,7 @@ export function WardNocSection({
       )}
       {!noc ? (
         <p className="help-text">
-          No NOC sent yet. The membership cannot be approved until a signed NOC is accepted.
+          No NOC sent yet. The membership can be approved once the member uploads one.
         </p>
       ) : (
         <div className="document-row">
@@ -346,11 +346,8 @@ export function WardNocSection({
             </button>
             {canReview && noc.status === 'PENDING' && (
               <>
-                <button className="btn btn-sm btn-success" onClick={() => review('APPROVED')}>
-                  Accept
-                </button>
                 <button className="btn btn-sm btn-secondary" onClick={() => review('REJECTED')}>
-                  Not accepted
+                  Ask for a new NOC
                 </button>
               </>
             )}

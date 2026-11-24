@@ -14,6 +14,7 @@ import { Ward } from '../wards/entities/ward.entity';
 import { WardsService } from '../wards/wards.service';
 import { WardNocController, WardsController } from '../wards/wards.controller';
 import { DocumentStorage } from '../wards/noc-storage';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 @Module({
   imports: [
@@ -26,6 +27,7 @@ import { DocumentStorage } from '../wards/noc-storage';
       MembershipDocument,
       Ward,
     ]),
+    NotificationsModule,
   ],
   controllers: [MembershipsController, WardsController, WardNocController],
   providers: [MembershipsService, WardsService, DocumentStorage],

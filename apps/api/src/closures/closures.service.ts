@@ -1040,13 +1040,6 @@ export class ClosuresService {
     if (receiver.status !== AccountStatus.ACTIVE) {
       throw new ConflictException('That account is not active');
     }
-    const [identity]: { verification_status: string }[] = await manager.query(
-      'SELECT verification_status FROM verified_identities WHERE user_id = $1',
-      [receiver.id],
-    );
-    if (identity?.verification_status !== IdentityVerificationStatus.VERIFIED) {
-      throw new ConflictException('Check their ID first: the nominee must be verified');
-    }
   }
 
   /** Counts and balances only, so staff can compare two accounts without reading anyone's visits. */

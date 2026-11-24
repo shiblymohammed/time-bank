@@ -44,6 +44,11 @@ export class VolunteerAvailability {
     precision: 4,
     scale: 1,
     default: 5.0,
+    // Postgres returns numeric as text ("5.0"); send a number so clients can echo it back.
+    transformer: {
+      to: (value: number) => value,
+      from: (value: string | null) => (value == null ? value : parseFloat(value)),
+    },
   })
   maxTravelRadiusKm!: number;
 

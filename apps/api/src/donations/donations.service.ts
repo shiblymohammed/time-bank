@@ -9,7 +9,6 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager, Repository } from 'typeorm';
 import {
   AccountStatus,
-  IdentityVerificationStatus,
   MembershipStatus,
   OrganizationStatus,
 } from '@ktb/shared-types';
@@ -249,14 +248,13 @@ export class DonationsService {
   ) {
     const member = await manager.getRepository(OrganizationMembership).findOne({
       where: { organizationId, status: MembershipStatus.APPROVED, ...target },
-      relations: ['organization', 'user', 'user.verifiedIdentity'],
+      relations: ['organization', 'user'],
     });
     if (
       !member || member.organization.status !== OrganizationStatus.ACTIVE ||
-      member.user.status !== AccountStatus.ACTIVE ||
-      member.user.verifiedIdentity?.verificationStatus !== IdentityVerificationStatus.VERIFIED
+      member.user.status !== AccountStatus.ACTIVE
     ) {
-      throw new NotFoundException('No verified member has that membership number');
+      throw new NotFoundException('No approved member has that membership number');
     }
     if (member.userId === donorUserId) {
       throw new BadRequestException('You cannot give credits to yourself');

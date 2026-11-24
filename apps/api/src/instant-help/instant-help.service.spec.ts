@@ -31,6 +31,8 @@ describe('Instant help review boundaries', () => {
         notifications as any,
       ),
       ledger,
+      manager,
+      notifications,
     };
   }
   const dto = {
@@ -82,16 +84,55 @@ describe('Instant help review boundaries', () => {
     await expect(service.review('org', 'staff', 'session', dto)).rejects.toThrow(ConflictException);
     expect(ledger.postServiceEarning).not.toHaveBeenCalled();
   });
-  it('requires both location coordinates, including when both are missing', async () => {
+  it('refuses half a location pair', async () => {
     const { service } = setup();
     await expect(
       service.start('org', 'volunteer', {
         key: '12345678',
-        description: 'Helping a neighbour',
-        locationLabel: 'Town centre',
         latitude: 10,
-        longitude: undefined as unknown as number,
       }),
     ).rejects.toThrow(BadRequestException);
+  });
+  it('starts with one tap: no description and no location needed', async () => {
+    const { service, manager } = setup(pending, [UserRole.VOLUNTEER]);
+    const access = { roles: [UserRole.VOLUNTEER], membershipStatus: 'APPROVED', membershipId: 'member' };
+    (service as any).auth.evaluateOrganizationAccess.mockResolvedValue(access);
+    manager.query.mockImplementation(async (sql: string) => {
+      if (sql.includes('start_key=$2') || sql.includes("status='RUNNING'")) return [];
+      if (sql.startsWith('INSERT INTO instant_help_sessions')) return [{ id: 'new' }];
+      return [{ id: 'new' }];
+    });
+    await service.start('org', 'volunteer', { key: '12345678' });
+    const insert = manager.query.mock.calls.find(([sql]) =>
+      String(sql).startsWith('INSERT INTO instant_help_sessions'),
+    )!;
+    expect(insert[1].slice(5)).toEqual(['Instant Help', 'Location not shared', null, null]);
+  });
+  it('Done stops the clock and sends to review in one step, note optional', async () => {
+    const running = { ...pending, status: 'RUNNING', started_at: new Date(0), finished_at: null };
+    const { service, manager, notifications } = setup(running as any, [UserRole.VOLUNTEER]);
+    await service.finish('org', 'volunteer', 'session', {});
+    const update = manager.query.mock.calls.find(([sql]) =>
+      String(sql).startsWith('UPDATE instant_help_sessions'),
+    )!;
+    expect(update[0]).toContain("status='PENDING'");
+    expect(update[1][3]).toBeNull();
+    expect(notifications.notifyCoordinators).toHaveBeenCalled();
+  });
+  it('stop is the same as Done, so older app builds go straight to review', async () => {
+    const running = { ...pending, status: 'RUNNING', started_at: new Date(0), finished_at: null };
+    const { service, manager } = setup(running as any, [UserRole.VOLUNTEER]);
+    await service.stop('org', 'volunteer', 'session');
+    expect(
+      manager.query.mock.calls.some(([sql]) => String(sql).includes("SET status='PENDING'")),
+    ).toBe(true);
+  });
+  it('approves without a written note', async () => {
+    const { service, ledger } = setup();
+    await service.review('org', 'staff', 'session', { decision: 'APPROVE', version: 2 });
+    expect(ledger.postServiceEarning).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ minutes: 30 }),
+    );
   });
 });

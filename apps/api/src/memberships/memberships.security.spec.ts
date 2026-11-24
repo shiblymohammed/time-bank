@@ -109,6 +109,14 @@ describe('MembershipsService - Role Escalation Security (Finding #1)', () => {
             create: jest.fn(),
             find: jest.fn(),
             count: jest.fn(),
+            // Approving a volunteer sets up their matching profile through the manager.
+            manager: {
+              getRepository: jest.fn(() => ({
+                findOne: jest.fn().mockResolvedValue(null),
+                save: jest.fn(),
+                create: jest.fn((row: unknown) => row),
+              })),
+            },
           },
         },
         {

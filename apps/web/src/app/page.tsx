@@ -111,15 +111,6 @@ type Membership = {
 /** "+919876543210" reads as "+91 98765 43210"; other numbers are left as stored. */
 const phone = (value?: string) =>
   value && /^\+91\d{10}$/.test(value) ? `+91 ${value.slice(3, 8)} ${value.slice(8)}` : value;
-const IDENTITY_DOCUMENTS = [
-  'AADHAAR_CARD',
-  'VOTER_ID',
-  'PASSPORT',
-  'DRIVING_LICENSE',
-  'PAN_CARD',
-  'RATION_CARD',
-  'OTHER',
-];
 const listed = (values: string[] = []) =>
   values.length ? values.map((value) => label(value)).join(', ') : 'Not given';
 type Profile = {
@@ -2655,7 +2646,7 @@ export default function AdminDashboard(): React.JSX.Element {
                         )}
                         <section className="drawer-section">
                           <div className="section-heading">
-                            <h3>Name and identity</h3>
+                            <h3>Name</h3>
                             <button
                               className="btn btn-sm btn-secondary"
                               onClick={() =>
@@ -2680,118 +2671,6 @@ export default function AdminDashboard(): React.JSX.Element {
                               Edit name
                             </button>
                           </div>
-                          {(() => {
-                            const identity = detail.membership.user?.verifiedIdentity;
-                            const status = identity?.verificationStatus ?? 'UNVERIFIED';
-                            return (
-                              <>
-                                <dl className="facts">
-                                  <dt>Identity</dt>
-                                  <dd>
-                                    <Badge value={status} />
-                                  </dd>
-                                  {status === 'VERIFIED' && identity?.documentType && (
-                                    <>
-                                      <dt>Checked</dt>
-                                      <dd>
-                                        {label(identity.documentType)} ending{' '}
-                                        {identity.documentLast4}
-                                        {identity.verifiedAt &&
-                                          `, ${new Date(identity.verifiedAt).toLocaleDateString('en-IN')}`}
-                                      </dd>
-                                    </>
-                                  )}
-                                  {identity?.verificationNotes && (
-                                    <>
-                                      <dt>Notes</dt>
-                                      <dd>{identity.verificationNotes}</dd>
-                                    </>
-                                  )}
-                                  {status === 'REJECTED' && identity?.rejectionReason && (
-                                    <>
-                                      <dt>Not verified because</dt>
-                                      <dd>{identity.rejectionReason}</dd>
-                                    </>
-                                  )}
-                                </dl>
-                                <p className="help-text">
-                                  Verify only after seeing the original document with the person.
-                                  Only the last 4 digits are kept. Verified members can receive
-                                  gifted credits.
-                                </p>
-                                <div className="section-heading membership-identity-actions">
-                                  <button
-                                    className="btn btn-sm btn-primary"
-                                    onClick={() =>
-                                      openAction({
-                                        title:
-                                          status === 'VERIFIED'
-                                            ? 'Verify identity again'
-                                            : 'Verify identity',
-                                        description:
-                                          'Check the original document with the person present. The full number is used only to catch one document on two accounts and is not stored.',
-                                        fields: [
-                                          {
-                                            key: 'documentType',
-                                            label: 'Document checked',
-                                            options: IDENTITY_DOCUMENTS,
-                                          },
-                                          {
-                                            key: 'documentNumber',
-                                            label: 'Document number',
-                                            minLength: 4,
-                                            maxLength: 40,
-                                          },
-                                          {
-                                            key: 'notes',
-                                            label: 'Notes',
-                                            type: 'textarea',
-                                            optional: true,
-                                            maxLength: 500,
-                                          },
-                                        ],
-                                        submit: (values) =>
-                                          backend(`${membershipBase}/identity`, 'POST', {
-                                            decision: 'VERIFY',
-                                            documentType: values['documentType'],
-                                            documentNumber: values['documentNumber'],
-                                            ...(values['notes'] ? { notes: values['notes'] } : {}),
-                                          }),
-                                        successMessage: (result) =>
-                                          `Identity verified (document ending ${(result as { documentLast4?: string } | undefined)?.documentLast4 ?? ''}).`,
-                                      })
-                                    }
-                                  >
-                                    {status === 'VERIFIED' ? 'Verify again' : 'Verify identity'}
-                                  </button>
-                                  <button
-                                    className="btn btn-sm btn-secondary"
-                                    onClick={() =>
-                                      openAction({
-                                        title: 'Not verified',
-                                        fields: [
-                                          {
-                                            key: 'reason',
-                                            label: 'Reason',
-                                            type: 'textarea',
-                                            maxLength: 500,
-                                          },
-                                        ],
-                                        submit: (values) =>
-                                          backend(`${membershipBase}/identity`, 'POST', {
-                                            decision: 'REJECT',
-                                            reason: values['reason'],
-                                          }),
-                                        successMessage: () => 'Marked as not verified.',
-                                      })
-                                    }
-                                  >
-                                    Not verified
-                                  </button>
-                                </div>
-                              </>
-                            );
-                          })()}
                         </section>
                         <WardNocSection
                           organizationId={detail.membership.organizationId}
@@ -2966,37 +2845,30 @@ export default function AdminDashboard(): React.JSX.Element {
                           >
                             Reject
                           </button>
-                          {detail.membership.noc?.status !== 'APPROVED' && (
+                          {!detail.membership.noc && (
                             <p className="help-text">
-                              Accept the member’s ward NOC before approving.
+                              Waiting for the member to upload their ward NOC.
                             </p>
                           )}
                           <button
                             className="btn btn-success"
-                            disabled={detail.membership.noc?.status !== 'APPROVED'}
-                            onClick={() =>
+                            disabled={!detail.membership.noc}
+                            onClick={() => {
+                              const requested = detail.membership.requestedRole;
+                              const initialRole =
+                                requested && initialRoles.includes(requested)
+                                  ? requested
+                                  : 'VOLUNTEER';
                               openAction({
                                 title: 'Approve membership',
                                 submitLabel: 'Approve',
-                                description: detail.membership.ward
-                                  ? `${wardLabel(detail.membership.ward)}. Its NOC has been accepted. Choose the initial role.`
-                                  : 'The ward NOC has been accepted. Choose the initial role.',
-                                fields: [
-                                  {
-                                    key: 'initialRole',
-                                    label: 'Initial role',
-                                    options: initialRoles,
-                                    ...(detail.membership.requestedRole &&
-                                    initialRoles.includes(detail.membership.requestedRole)
-                                      ? { value: detail.membership.requestedRole }
-                                      : {}),
-                                  },
-                                  { key: 'notes', label: 'Approval notes', optional: true },
-                                ],
-                                submit: (values) =>
-                                  backend(`${membershipBase}/approve`, 'POST', values),
-                              })
-                            }
+                                description: `Approve as ${label(initialRole)}. This also accepts their ward NOC.`,
+                                fields: [],
+                                submit: () =>
+                                  backend(`${membershipBase}/approve`, 'POST', { initialRole }),
+                                successMessage: () => 'Membership approved.',
+                              });
+                            }}
                           >
                             <Icon name="check" />
                             Approve membership

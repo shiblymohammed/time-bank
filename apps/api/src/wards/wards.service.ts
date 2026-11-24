@@ -15,6 +15,7 @@ import {
   UserRole,
 } from '@ktb/shared-types';
 import { AuditService } from '../audit/audit.service';
+import { NotificationsService } from '../notifications/notifications.service';
 import { AuthorizationService } from '../authorization/authorization.service';
 import { Organization } from '../organizations/entities/organization.entity';
 import { OrganizationMembership } from '../memberships/entities/organization-membership.entity';
@@ -95,6 +96,7 @@ export class WardsService {
     private readonly storage: DocumentStorage,
     private readonly audit: AuditService,
     private readonly authorization: AuthorizationService,
+    private readonly notifications: NotificationsService,
   ) {}
 
   /** Active wards, for someone choosing theirs while joining. */
@@ -321,6 +323,17 @@ export class WardsService {
             },
           },
           m,
+        );
+        // Coordinators and admins are told a membership is ready to approve.
+        await this.notifications.notifyCoordinators(
+          m,
+          {
+            organizationId,
+            type: 'MEMBERSHIP_NOC_UPLOADED',
+            title: 'New member waiting for approval',
+            body: 'A member has uploaded their ward NOC. Open Memberships to approve them.',
+          },
+          [userId],
         );
         return document;
       });

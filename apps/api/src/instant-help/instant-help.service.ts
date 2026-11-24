@@ -117,19 +117,28 @@ export class InstantHelpService {
     dto: StartInstantHelpDto,
     evidence: { photo?: Buffer; voice?: Buffer } = {},
   ) {
+    // Location is best effort: a volunteer can start without it, and the
+    // coordinator sees that none was shared. A half-filled pair is a bug.
+    const lat = dto.latitude ?? null;
+    const lng = dto.longitude ?? null;
+    const located = lat != null && lng != null;
     if (
-      !Number.isFinite(dto.latitude) ||
-      dto.latitude < -90 ||
-      dto.latitude > 90 ||
-      !Number.isFinite(dto.longitude) ||
-      dto.longitude < -180 ||
-      dto.longitude > 180
+      (lat == null) !== (lng == null) ||
+      (located &&
+        (!Number.isFinite(lat) ||
+          lat < -90 ||
+          lat > 90 ||
+          !Number.isFinite(lng) ||
+          lng < -180 ||
+          lng > 180))
     ) {
-      throw new BadRequestException('Share your location to start the timer');
+      throw new BadRequestException('Send both location coordinates, or neither');
     }
+    const description = dto.description || 'Instant Help';
+    const locationLabel = dto.locationLabel || (located ? 'Device location' : 'Location not shared');
     const { photo, voice } = evidence;
     const voiceDuration = voice ? readInstantHelpVoice(voice) : null;
-    const payload: unknown[] = [dto.description, dto.locationLabel, dto.latitude, dto.longitude];
+    const payload: unknown[] = [description, locationLabel, lat, lng];
     if (photo || voice) {
       payload.push(
         ...[photo, voice].map((file) =>
@@ -175,10 +184,10 @@ export class InstantHelpService {
           a.membershipId,
           dto.key,
           fingerprint,
-          dto.description,
-          dto.locationLabel,
-          dto.latitude,
-          dto.longitude,
+          description,
+          locationLabel,
+          lat,
+          lng,
         ],
       );
       if (photo) {
@@ -200,34 +209,33 @@ export class InstantHelpService {
       return this.get(m, s.id);
     });
   }
+  /** Older app builds stop first and add notes later; stopping now sends it straight to review. */
   async stop(org: string, user: string, id: string) {
-    return this.db.transaction(async (m) => {
-      const s = await this.own(org, user, id, m, true);
-      if (s.status === 'NEEDS_INFO' && !s.reviewed_by && s.finished_at) return this.get(m, id);
-      if (s.status !== 'RUNNING') throw new ConflictException('This timer is no longer running');
-      const [clock] = await m.query('SELECT clock_timestamp() AS now');
-      const end = new Date(clock.now);
-      const minutes = instantMinutes(new Date(s.started_at), end);
-      await m.query(
-        `UPDATE instant_help_sessions SET status='NEEDS_INFO',finished_at=$2,reported_minutes=$3,version=version+1 WHERE id=$1`,
-        [id, end, minutes],
-      );
-      await this.event(m, org, user, id, 'INSTANT_HELP_STOPPED', { minutes });
-      return this.get(m, id);
-    });
+    return this.finish(org, user, id, {});
   }
 
+  /** "Done": stops the clock and sends the session to a coordinator in one step. */
   async finish(org: string, user: string, id: string, dto: FinishInstantHelpDto) {
+    const notes = dto.notes || null;
     return this.db.transaction(async (m) => {
       const s = await this.own(org, user, id, m, true);
-      if (s.status === 'PENDING' && s.completion_notes === dto.notes) return this.get(m, id);
-      if (s.status !== 'RUNNING') throw new ConflictException('This timer is no longer running');
-      const [clock] = await m.query('SELECT clock_timestamp() AS now');
-      const end = new Date(clock.now);
-      const minutes = instantMinutes(new Date(s.started_at), end);
+      // A retried Done (same note, or no note) returns the saved session.
+      if (s.status === 'PENDING' && (notes == null || s.completion_notes === notes))
+        return this.get(m, id);
+      // Sessions stopped by an older build wait as an unreviewed NEEDS_INFO draft.
+      const stoppedDraft = s.status === 'NEEDS_INFO' && !s.reviewed_by && s.finished_at;
+      if (s.status !== 'RUNNING' && !stoppedDraft)
+        throw new ConflictException('This timer is no longer running');
+      let end = s.finished_at ? new Date(s.finished_at) : null;
+      let minutes = s.reported_minutes;
+      if (s.status === 'RUNNING') {
+        const [clock] = await m.query('SELECT clock_timestamp() AS now');
+        end = new Date(clock.now);
+        minutes = instantMinutes(new Date(s.started_at), end);
+      }
       await m.query(
-        `UPDATE instant_help_sessions SET status='PENDING',finished_at=$2,reported_minutes=$3,completion_notes=$4,version=version+1 WHERE id=$1`,
-        [id, end, minutes, dto.notes],
+        `UPDATE instant_help_sessions SET status='PENDING',finished_at=$2,reported_minutes=$3,completion_notes=COALESCE($4,completion_notes),version=version+1 WHERE id=$1`,
+        [id, end, minutes, notes],
       );
       await this.event(m, org, user, id, 'INSTANT_HELP_SUBMITTED', { minutes });
       await this.notifications.notifyCoordinators(
@@ -244,14 +252,16 @@ export class InstantHelpService {
     });
   }
   async resubmit(org: string, user: string, id: string, dto: FinishInstantHelpDto) {
+    const notes = dto.notes || null;
     return this.db.transaction(async (m) => {
       const s = await this.own(org, user, id, m, true);
-      if (s.status === 'PENDING' && s.completion_notes === dto.notes) return this.get(m, id);
+      if (s.status === 'PENDING' && (notes == null || s.completion_notes === notes))
+        return this.get(m, id);
       if (s.status !== 'NEEDS_INFO')
         throw new ConflictException('This session is not waiting for information');
       await m.query(
-        `UPDATE instant_help_sessions SET status='PENDING',completion_notes=$2,version=version+1 WHERE id=$1`,
-        [id, dto.notes],
+        `UPDATE instant_help_sessions SET status='PENDING',completion_notes=COALESCE($2,completion_notes),version=version+1 WHERE id=$1`,
+        [id, notes],
       );
       await this.event(m, org, user, id, 'INSTANT_HELP_RESUBMITTED', {});
       await this.notifications.notifyCoordinators(
@@ -321,7 +331,7 @@ export class InstantHelpService {
           id,
           status,
           status === 'APPROVED' ? minutes : null,
-          dto.notes,
+          dto.notes || null,
           user,
           s.finished_at,
           s.reported_minutes,
@@ -331,7 +341,7 @@ export class InstantHelpService {
         status,
         minutes: status === 'APPROVED' ? minutes : null,
         credits: earned,
-        notes: dto.notes,
+        notes: dto.notes || null,
       });
       await this.notifications.enqueue(m, {
         userId: s.user_id,
