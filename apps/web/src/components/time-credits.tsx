@@ -264,6 +264,7 @@ function Ledger({
 
 export function TimeCredits({
   organizationId,
+  theme,
   userId,
   roles,
   isGlobal,
@@ -271,7 +272,7 @@ export function TimeCredits({
   pending,
   openAction,
   onExpired,
-}: Props) {
+}: Props & { theme: 'light' | 'dark' }) {
   const [section, setSection] = useState<'pools' | 'wallets' | 'reviews'>('pools');
   const [refresh, setRefresh] = useState(0);
   const version = `${revision}:${refresh}`;
@@ -767,6 +768,7 @@ export function TimeCredits({
           {member && createPortal(
             <div
               className="modal-backdrop wallet-modal-backdrop"
+              data-admin-theme={theme}
               onMouseDown={(event) => {
                 if (event.target === event.currentTarget) setMember(null);
               }}

@@ -2,6 +2,8 @@ import type { Metadata } from 'next';
 import { ADMIN_THEME_KEY } from '@/lib/admin-theme';
 import './globals.css';
 import './admin-overview.css';
+import './admin-workspace.css';
+import './admin-sign-in.css';
 
 export const metadata: Metadata = {
   title: {

@@ -496,7 +496,7 @@ export function RestrictionCases({
             name: 'Total Cases',
             val: totalCases,
             icon: 'restrictions',
-            color: '#2563EB',
+            color: 'var(--admin-link, #2563EB)',
             glow: 'rgba(37, 99, 235, 0.08)',
             tone: 'blue',
             pill: 'Restrictions record',
@@ -523,7 +523,7 @@ export function RestrictionCases({
             name: 'Appeals Queue',
             val: openAppeals,
             icon: 'crown',
-            color: '#7C3AED',
+            color: 'var(--admin-link, #7C3AED)',
             glow: 'rgba(124, 58, 237, 0.08)',
             tone: 'purple',
             pill: 'Member appeals',
@@ -560,11 +560,11 @@ export function RestrictionCases({
 
       {/* Governance Protocol Banner */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '14px 16px', background: 'rgba(37, 99, 235, 0.05)', border: '1px solid rgba(37, 99, 235, 0.15)', borderRadius: '12px', marginBottom: '18px' }}>
-        <div style={{ color: '#2563eb', flexShrink: 0, marginTop: '2px' }}>
+        <div style={{ color: 'var(--admin-link, #2563eb)', flexShrink: 0, marginTop: '2px' }}>
           <Icon name="restrictions" size={20} />
         </div>
-        <div style={{ fontSize: '0.80rem', lineHeight: '1.45', color: '#334155' }}>
-          <strong style={{ color: '#1e3a8a', display: 'block', marginBottom: '2px' }}>
+        <div style={{ fontSize: '0.80rem', lineHeight: '1.45', color: 'var(--admin-copy, #334155)' }}>
+          <strong style={{ color: 'var(--admin-link, #1e3a8a)', display: 'block', marginBottom: '2px' }}>
             Two-Tier Disciplinary Governance
           </strong>
           A coordinator recommends a restriction and a Municipality Administrator decides. Nobody acts on their own case, and whoever recommended cannot also decide. You see only cases at your jurisdictional level.

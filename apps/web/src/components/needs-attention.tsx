@@ -1,19 +1,21 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Icon, type IconName } from '@/components/icons';
 import { ApiError, backend } from '@/lib/api';
 
 export type AttentionDestination = 'safety' | 'requests' | 'instant-help' | 'memberships';
-const destinationLabels: Record<AttentionDestination, string> = {
-  safety: 'Safety Alerts',
-  requests: 'Requests & Matching',
-  'instant-help': 'Instant Help',
-  memberships: 'Memberships',
-};
+const queueDetails = {
+  safety: { icon: 'safety', action: 'Open safety alerts' },
+  dispatch: { icon: 'requests', action: 'Open requests' },
+  visits: { icon: 'calendar', action: 'Open requests' },
+  instant: { icon: 'lightning', action: 'Open Instant Help' },
+  members: { icon: 'memberships', action: 'Open memberships' },
+} satisfies Record<string, { icon: IconName; action: string }>;
 type Row = { id: string; label: string; detail?: string };
 type Queue = { total: number; rows: Row[]; capped?: boolean };
 type Group = {
-  id: string;
+  id: keyof typeof queueDetails;
   title: string;
   destination: AttentionDestination;
   load: () => Promise<Queue>;
@@ -197,70 +199,72 @@ export function NeedsAttention({
   }, [organizationId, revision, refresh, onExpired]);
 
   return (
-    <div className="request-workspace request-page">
-      <div className="section-heading request-page-heading">
-        <h2>Needs attention</h2>
+    <section className="staff-workspace" aria-labelledby="staff-queue-title">
+      <div className="workspace-section-heading">
+        <h2 id="staff-queue-title">Work queues</h2>
         <button
           type="button"
-          className="btn btn-secondary"
+          className="admin-control"
           disabled={loading}
           onClick={() => setRefresh((value) => value + 1)}
         >
-          Refresh
+          <Icon name="refresh" size={15} /> Refresh queues
         </button>
       </div>
-      {!groups && <p role="status">Checking for cases…</p>}
-      {groups?.map(({ id, title, destination, queue, error }) => (
-        <section
-          className={`glass-panel detail-panel attention-queue${id === 'safety' && queue?.total ? ' attention-queue-urgent' : ''}`}
-          key={id}
-          aria-labelledby={`attention-${id}`}
-        >
-          <div className="section-heading">
-            <h3 id={`attention-${id}`}>{title}</h3>
-            {queue && (
-              <span className="record-count">
-                {queue.total}
-                {queue.capped ? '+' : ''}
-              </span>
+      {!groups && <p className="staff-queue-loading" role="status">Checking for cases…</p>}
+      <div className="staff-queue-grid">
+        {groups?.map(({ id, title, destination, queue, error }) => (
+          <section
+            className="staff-queue-card"
+            data-priority={id === 'safety' || id === 'dispatch' ? true : undefined}
+            data-urgent={id === 'safety' && Boolean(queue?.total) ? true : undefined}
+            key={id}
+            aria-labelledby={`attention-${id}`}
+          >
+            <header className="staff-queue-header">
+              <span className="workspace-icon"><Icon name={queueDetails[id].icon} size={18} /></span>
+              <h3 id={`attention-${id}`}>{title}</h3>
+              {queue && (
+                <span className="staff-queue-count">
+                  {queue.total.toLocaleString('en-IN')}{queue.capped ? '+' : ''}
+                  <span className="sr-only"> cases</span>
+                </span>
+              )}
+            </header>
+            {error && (
+              <p className="staff-queue-error" role="status">
+                {error} {queue && 'Showing the last loaded cases.'}
+              </p>
             )}
-          </div>
-          {error && (
-            <p className="error-message" role="status">
-              {error}
-            </p>
-          )}
-          {queue?.total === 0 && <p className="help-text">No cases waiting.</p>}
-          {queue?.rows.length ? (
-            <ul className="attention-case-list">
-              {queue.rows.map((row) => (
-                <li key={row.id}>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    onClick={() => onOpen(destination, row.id)}
-                  >
-                    {row.label}
-                    {row.detail ? ` · ${row.detail}` : ''}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {queue && queue.total > queue.rows.length && (
-            <div className="action-row">
-              <span className="help-text">Showing the first {queue.rows.length} cases.</span>
-              <button
-                type="button"
-                className="btn btn-secondary"
-                onClick={() => onOpen(destination, '')}
-              >
-                Open {destinationLabels[destination]}
+            {queue?.total === 0 && (
+              <p className="staff-queue-empty"><Icon name="check" size={16} /> No cases waiting</p>
+            )}
+            {queue && queue.rows.length > 0 && (
+              <ul className="staff-case-list">
+                {queue.rows.map((row) => (
+                  <li key={row.id}>
+                    <button type="button" onClick={() => onOpen(destination, row.id)}>
+                      <span>
+                        <strong>{row.label}</strong>
+                        {row.detail && <small>{row.detail}</small>}
+                      </span>
+                      <Icon name="chevronRight" size={15} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <footer className="staff-queue-footer">
+              <button type="button" className="workspace-link" onClick={() => onOpen(destination, '')}>
+                {queueDetails[id].action} <Icon name="arrowRight" size={15} />
               </button>
-            </div>
-          )}
-        </section>
-      ))}
-    </div>
+              {queue && queue.total > queue.rows.length && (
+                <span>First {queue.rows.length} shown</span>
+              )}
+            </footer>
+          </section>
+        ))}
+      </div>
+    </section>
   );
 }

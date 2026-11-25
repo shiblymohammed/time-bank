@@ -417,7 +417,7 @@ export function Closures({
             name: 'Total Cases',
             val: totalClosures,
             icon: 'closures',
-            color: '#2563EB',
+            color: 'var(--admin-link, #2563EB)',
             glow: 'rgba(37, 99, 235, 0.08)',
             tone: 'blue',
             pill: 'Closure records',
@@ -435,7 +435,7 @@ export function Closures({
             name: 'Closed Accounts',
             val: closedAccounts,
             icon: 'check',
-            color: '#059669',
+            color: 'var(--admin-success, #059669)',
             glow: 'rgba(5, 150, 105, 0.08)',
             tone: 'emerald',
             pill: 'Settled accounts',
@@ -444,7 +444,7 @@ export function Closures({
             name: 'Transfers Waiting',
             val: transfersWaiting,
             icon: 'wallet',
-            color: '#7C3AED',
+            color: 'var(--admin-link, #7C3AED)',
             glow: 'rgba(124, 58, 237, 0.08)',
             tone: 'purple',
             pill: 'Nominee disbursements',
@@ -481,11 +481,11 @@ export function Closures({
 
       {/* Governance Banner */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '14px 16px', background: 'rgba(37, 99, 235, 0.05)', border: '1px solid rgba(37, 99, 235, 0.15)', borderRadius: '12px', marginBottom: '18px' }}>
-        <div style={{ color: '#2563eb', flexShrink: 0, marginTop: '2px' }}>
+        <div style={{ color: 'var(--admin-link, #2563eb)', flexShrink: 0, marginTop: '2px' }}>
           <Icon name="closures" size={20} />
         </div>
-        <div style={{ fontSize: '0.80rem', lineHeight: '1.45', color: '#334155' }}>
-          <strong style={{ color: '#1e3a8a', display: 'block', marginBottom: '2px' }}>
+        <div style={{ fontSize: '0.80rem', lineHeight: '1.45', color: 'var(--admin-copy, #334155)' }}>
+          <strong style={{ color: 'var(--admin-link, #1e3a8a)', display: 'block', marginBottom: '2px' }}>
             Account Succession & Closure Protocol
           </strong>
           A coordinator reports and a Municipality Administrator decides. Someone in several communities escalates to a Super Admin. Nobody acts on their own case, and whoever reported it cannot also decide. Nothing is permanently purged from the audit log.

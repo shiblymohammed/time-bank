@@ -137,8 +137,9 @@ export function AdminPageSearch<T extends string>({
 }
 
 export function AdminProfileDropdown({
-  phone, pending, onSignOut,
+  role, phone, pending, onSignOut,
 }: {
+  role: string;
   phone: string | undefined;
   pending: boolean;
   onSignOut: () => Promise<void>;
@@ -183,7 +184,7 @@ export function AdminProfileDropdown({
       </button>
       <div className="admin-profile-dropdown" id={dropdownId} hidden={!open}>
         <div className="admin-profile-identity">
-          <strong>Super Admin</strong>
+          <strong>{role}</strong>
           {phone && <span>{phone}</span>}
         </div>
         <button type="button" className="admin-profile-sign-out" disabled={pending} onClick={onSignOut}>

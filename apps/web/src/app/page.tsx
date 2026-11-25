@@ -23,8 +23,9 @@ import {
   type Ward,
 } from '@/components/wards';
 import { AdminLoading, AdminSessionLoading } from '@/components/admin-loading';
+import { AdminLoginAlert, AdminLoginButton, AdminSignInLayout } from '@/components/admin-sign-in-layout';
 import { AdminPageSearch, AdminProfileDropdown, AdminThemeButton, useAdminTheme } from '@/components/admin-toolbar';
-import { AshokaChakra, BrandMark, Icon, type IconName } from '@/components/icons';
+import { BrandMark, Icon, type IconName } from '@/components/icons';
 import { api, ApiError, backend } from '@/lib/api';
 import { firebaseMessage, sendPhoneCode, type FirebaseWebConfig } from '@/lib/firebase-phone';
 
@@ -32,7 +33,7 @@ const Reports = dynamic(() => import('@/components/reports').then((module) => mo
   loading: () => <AdminLoading>Loading section…</AdminLoading>,
 });
 const ActivityTrend = dynamic(() => import('@/components/dashboard-charts').then((module) => module.ActivityTrend), {
-  loading: () => <AdminLoading>Loading section…</AdminLoading>,
+  loading: () => <AdminLoading>Loading section.</AdminLoading>,
 });
 const OrganizationReadiness = dynamic(() => import('@/components/dashboard-charts').then((module) => module.OrganizationReadiness), {
   loading: () => <AdminLoading>Loading section…</AdminLoading>,
@@ -219,14 +220,14 @@ const PAGES: {
     id: 'attention',
     text: 'Needs attention',
     icon: 'requests',
-    group: 'Staff Console',
+    group: '',
     description: 'Open cases that need staff action in your municipality',
   },
   {
     id: 'organizations',
     text: 'Organizations',
     icon: 'organizations',
-    group: 'Staff Console',
+    group: 'People & organizations',
     description: 'Organizations, their status and branding',
     coordinatorText: 'My Municipality',
     coordinatorDescription: 'View your municipality and its wards',
@@ -235,58 +236,58 @@ const PAGES: {
     id: 'memberships',
     text: 'Memberships',
     icon: 'memberships',
-    group: 'Staff Console',
+    group: 'People & organizations',
     description: 'Review membership applications and manage member access',
     coordinatorDescription: 'Review applications and member eligibility for your municipality',
   },
-  { id: 'instant-help', text: 'Instant help', icon: 'requests', group: 'Staff Console', description: 'Verify unplanned help and approve time credits' },
+  { id: 'instant-help', text: 'Instant help', icon: 'lightning', group: 'Service delivery', description: 'Verify unplanned help and approve time credits' },
   {
     id: 'requests',
     text: 'Requests & Matching',
     icon: 'requests',
-    group: 'Staff Console',
+    group: 'Service delivery',
     description: 'Review help requests and match members with volunteers',
   },
   {
     id: 'community',
     text: 'Community Updates',
     icon: 'organizations',
-    group: 'Staff Console',
+    group: 'People & organizations',
     description: 'Publish local announcements and moderate community posts',
   },
   {
     id: 'safety',
     text: 'Safety Alerts',
     icon: 'safety',
-    group: 'Staff Console',
+    group: 'Safety & governance',
     description: 'Respond to safety alerts and visits paused or ended for safety',
   },
   {
     id: 'complaints',
     text: 'Complaints',
     icon: 'complaints',
-    group: 'Staff Console',
+    group: 'Safety & governance',
     description: 'Handle confidential complaints assigned to your municipality',
   },
   {
     id: 'catalogue',
     text: 'Service Catalogue',
     icon: 'catalogue',
-    group: 'Services',
+    group: 'Service delivery',
     description: 'Manage services members can offer and request locally',
   },
   {
     id: 'operations',
     text: 'Service Operations',
     icon: 'operations',
-    group: 'Services',
+    group: 'Service delivery',
     description: 'Track service bookings, completions and the resulting time credits',
   },
   {
     id: 'credits',
     text: 'Time Credits',
     icon: 'wallet',
-    group: 'Governance',
+    group: 'Credits & reporting',
     description: 'Review member wallets, local credit activity and community pools',
   },
 
@@ -294,14 +295,14 @@ const PAGES: {
     id: 'loyalty',
     text: 'Loyalty & Merchants',
     icon: 'wallet',
-    group: 'Governance',
+    group: 'Credits & reporting',
     description: 'Manage local merchants, offers and community recognition',
   },
   {
     id: 'restrictions',
     text: 'Restrictions',
     icon: 'restrictions',
-    group: 'Governance',
+    group: 'Safety & governance',
     description: 'Review restriction cases, reinstatement requests and appeals',
     coordinatorText: 'Restriction Recommendations',
     coordinatorDescription: 'Recommend a restriction for Municipality Admin review; recommendations do not take effect until approved',
@@ -310,7 +311,7 @@ const PAGES: {
     id: 'closures',
     text: 'Account Closures',
     icon: 'closures',
-    group: 'Governance',
+    group: 'Safety & governance',
     description: 'Report deaths or duplicate accounts and recommend what happens to remaining credits',
     coordinatorText: 'Closure Reports',
     coordinatorDescription: 'Report a death or duplicate account and recommend a credit transfer for admin review',
@@ -319,7 +320,7 @@ const PAGES: {
     id: 'reports',
     text: 'Reports',
     icon: 'reports',
-    group: 'Governance',
+    group: 'Credits & reporting',
     description: 'Figures and downloads for staff, and saved reports for sponsors',
     managersOnly: true,
   },
@@ -327,7 +328,7 @@ const PAGES: {
     id: 'phone-recoveries',
     text: 'Phone Number Changes',
     icon: 'phoneRecovery',
-    group: 'Governance',
+    group: 'Safety & governance',
     description: 'Help members recover an account after losing a phone or SIM',
     coordinatorText: 'Phone Recovery',
     coordinatorDescription: 'Review lost-phone or SIM recovery cases; higher-risk changes need Super Admin approval',
@@ -336,12 +337,13 @@ const PAGES: {
     id: 'audit',
     text: 'Audit Trail',
     icon: 'audit',
-    group: 'Governance',
+    group: 'Safety & governance',
     description: 'Server-recorded events',
     centralOnly: true,
   },
 ];
 const OPERATIONS = ['VOLUNTEER', 'BENEFICIARY', 'CAREGIVER', 'MERCHANT'];
+const NAV_GROUPS = ['', 'Service delivery', 'People & organizations', 'Safety & governance', 'Credits & reporting'];
 const STAFF = ['COORDINATOR', 'MUNICIPALITY_ADMIN', 'SUPER_ADMIN'];
 const approved = (profile: Profile) =>
   profile.memberships.filter((member) => member.status === 'APPROVED');
@@ -550,248 +552,264 @@ function OrganizationScopeSelect({
     </div>
   );
 }
+function VerificationCode({
+  value, onChange, busy, invalid, label,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  busy: boolean;
+  invalid: boolean;
+  label: string;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  useEffect(() => { input.current?.focus(); }, []);
+
+  return (
+    <label className="admin-otp-field">
+      {label}
+      <input
+        ref={input}
+        className="form-input admin-otp-input"
+        type="text"
+        inputMode="numeric"
+        autoComplete="one-time-code"
+        placeholder="000000"
+        required
+        pattern="[0-9]{6}"
+        maxLength={6}
+        readOnly={busy}
+        aria-invalid={invalid || undefined}
+        value={value}
+        onChange={(event) => onChange(event.target.value.replace(/[^0-9]/g, '').slice(0, 6))}
+        onPaste={(event) => {
+          if (busy) return;
+          const digits = event.clipboardData.getData('text').replace(/[^0-9]/g, '');
+          if (digits.length === 6) {
+            event.preventDefault();
+            onChange(digits);
+          }
+        }}
+      />
+    </label>
+  );
+}
+
 function SignIn({ onSignedIn }: { onSignedIn: (profile: Profile) => void }) {
-  const [phone, setPhone] = useState(''),
-    [code, setCode] = useState(''),
-    [error, setError] = useState('');
-  const [sent, setSent] = useState(false),
-    [busy, setBusy] = useState(false),
-    [development, setDevelopment] = useState(false);
-  // undefined while loading; null means this deployment uses the private QA code instead.
+  const [phone, setPhone] = useState('');
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+  const [sent, setSent] = useState(false);
+  const [action, setAction] = useState<'send' | 'verify' | null>(null);
+  const [development, setDevelopment] = useState(false);
+  const [configFailed, setConfigFailed] = useState(false);
+  const [configRevision, setConfigRevision] = useState(0);
+  // undefined while loading; null uses the server's configured OTP flow.
   const [firebase, setFirebase] = useState<FirebaseWebConfig | null>();
   const confirmCode = useRef<((code: string) => Promise<string>) | null>(null);
   const recaptcha = useRef<HTMLDivElement>(null);
+  const phoneInput = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
-    api<Partial<FirebaseWebConfig>>('/api/firebase-config')
-      .then((config) => setFirebase(config.apiKey ? (config as FirebaseWebConfig) : null))
+    const controller = new AbortController();
+    api<Partial<FirebaseWebConfig>>('/api/firebase-config', 'GET', undefined, controller.signal)
+      .then((config) => {
+        if (!controller.signal.aborted) setFirebase(config.apiKey ? config as FirebaseWebConfig : null);
+      })
       .catch(() => {
-        setFirebase(null);
-        setError('Sign-in is unavailable. Reload the page to try again.');
+        if (!controller.signal.aborted) setConfigFailed(true);
       });
-  }, []);
+    return () => controller.abort();
+  }, [configRevision]);
+
+  const busy = action !== null;
+  const normalized = phone.startsWith('+') ? phone : `+91${phone}`;
+  function resetNumber() {
+    setSent(false);
+    setCode('');
+    setDevelopment(false);
+    setError('');
+    confirmCode.current = null;
+    requestAnimationFrame(() => phoneInput.current?.focus());
+  }
+
+  async function send() {
+    if (busy || firebase === undefined) return;
+    setAction('send');
+    setError('');
+    try {
+      if (firebase) {
+        confirmCode.current = await sendPhoneCode(firebase, normalized, recaptcha.current!);
+        setCode('');
+      } else {
+        const result = await api<{ devOtp?: string }>('/api/session', 'POST', {
+          action: 'request-code', phone: normalized,
+        });
+        setCode(result.devOtp ?? '');
+        setDevelopment(Boolean(result.devOtp));
+      }
+      setSent(true);
+    } catch (cause) {
+      setError(firebaseMessage(cause) ?? (cause instanceof Error ? cause.message : 'Could not send a code. Try again.'));
+    } finally {
+      setAction(null);
+    }
+  }
+
+  async function verify() {
+    if (busy || !/^[0-9]{6}$/.test(code)) return;
+    setAction('verify');
+    setError('');
+    try {
+      const payload = firebase
+        ? { action: 'firebase', idToken: await confirmCode.current!(code) }
+        : { action: 'verify', phone: normalized, code };
+      onSignedIn(await api<Profile>('/api/session', 'POST', payload));
+    } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 403 && cause.message === 'This dashboard requires staff or merchant access') {
+        resetNumber();
+        setError('This number has no approved staff or merchant access. Use the number linked to your admin account or ask your administrator to check your role.');
+      } else {
+        setError(firebaseMessage(cause) ?? (cause instanceof Error ? cause.message : 'Could not verify the code. Try again.'));
+      }
+    } finally {
+      setAction(null);
+    }
+  }
+
   return (
-    <main className="login-shell">
-      <section className="glass-panel login-panel">
-        <div className="brand-icon">
-          <BrandMark />
-        </div>
-        <h1>Sign in to Indian Time Bank</h1>
-        <p>For coordinators, administrators and local merchants.</p>
-        <form
-          className="stack"
-          onSubmit={async (event) => {
-            event.preventDefault();
-            setBusy(true);
-            setError('');
-            const normalized = phone.startsWith('+') ? phone : `+91${phone}`;
-            try {
-              if (!sent && firebase) {
-                confirmCode.current = await sendPhoneCode(firebase, normalized, recaptcha.current!);
-                setSent(true);
-              } else if (!sent) {
-                const result = await api<{ devOtp?: string }>('/api/session', 'POST', {
-                  action: 'request-code',
-                  phone: normalized,
-                });
-                setCode(result.devOtp ?? '');
-                setDevelopment(Boolean(result.devOtp));
-                setSent(true);
-              } else if (firebase) {
-                const idToken = await confirmCode.current!(code);
-                onSignedIn(
-                  await api<Profile>('/api/session', 'POST', { action: 'firebase', idToken }),
-                );
-              } else
-                onSignedIn(
-                  await api<Profile>('/api/session', 'POST', {
-                    action: 'verify',
-                    phone: normalized,
-                    code,
-                  }),
-                );
-            } catch (cause) {
-              setError(
-                firebaseMessage(cause) ??
-                  (cause instanceof Error ? cause.message : 'Unable to sign in'),
-              );
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
+    <div key={sent ? 'phone-code' : 'phone-number'} className="admin-login-step">
+      {sent && <p className="admin-login-step-label">Phone verification</p>}
+      <h1 id="admin-login-title">{sent ? 'Enter your code' : 'Welcome back'}</h1>
+      <p>{sent
+        ? (development ? 'Enter the 6-digit test code.' : `Enter the 6-digit code sent to ${normalized}.`)
+        : 'Sign in to your admin workspace with your mobile number.'}</p>
+      <form className="stack" onSubmit={(event) => {
+        event.preventDefault();
+        void (sent ? verify() : send());
+      }}>
+        {!sent && (
           <label>
             Mobile number
-            <input
-              className="form-input"
-              autoComplete="tel"
-              type="tel"
-              placeholder="10-digit mobile number"
-              required
-              pattern="(\+[1-9][0-9]{7,14}|[6-9][0-9]{9})"
-              value={phone}
-              disabled={busy || sent}
-              onChange={(event) => setPhone(event.target.value.trim())}
-            />
+            <span className="admin-login-field">
+              <Icon name="phoneRecovery" size={17} />
+              <input ref={phoneInput} className="form-input" autoComplete="tel" type="tel"
+                placeholder="10-digit mobile number" required pattern="(\+[1-9][0-9]{7,14}|[6-9][0-9]{9})"
+                value={phone} readOnly={busy} onChange={(event) => {
+                  setPhone(event.target.value.replace(/[^+0-9]/g, '').slice(0, 16));
+                  setError('');
+                }} />
+            </span>
           </label>
-          {sent && (
-            <label>
-              Verification code
-              <input
-                className="form-input"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                required
-                pattern="[0-9]{6}"
-                value={code}
-                disabled={busy}
-                onChange={(event) => setCode(event.target.value)}
-              />
-            </label>
-          )}
-          {development && (
-            <p className="help-text">
-              Development code supplied by the local server. SMS delivery is not enabled here.
-            </p>
-          )}
-          {error && (
-            <p className="error-message" role="alert">
-              {error}
-            </p>
-          )}
-          <div ref={recaptcha} />
-          <button className="btn btn-primary" disabled={busy || firebase === undefined}>
-            {busy ? 'Please wait…' : sent ? 'Verify and sign in' : 'Send code'}
-          </button>
-          {sent && (
-            <button
-              type="button"
-              className="btn btn-secondary"
-              disabled={busy}
-              onClick={() => {
-                setSent(false);
-                setCode('');
-                setDevelopment(false);
-                confirmCode.current = null;
-                setError('');
-              }}
-            >
-              Change number or request another code
-            </button>
-          )}
-        </form>
-      </section>
-    </main>
+        )}
+        {sent && (
+          <VerificationCode label="Verification code" value={code} busy={busy} invalid={Boolean(error)}
+            onChange={(value) => { setCode(value); setError(''); }} />
+        )}
+        {development && <p className="admin-login-notice">Test code supplied by the local server.</p>}
+        {error && <AdminLoginAlert>{error}</AdminLoginAlert>}
+        {configFailed && <AdminLoginAlert>Sign-in is temporarily unavailable. Try again to reconnect.</AdminLoginAlert>}
+        <div className="admin-login-recaptcha" ref={recaptcha} />
+        {configFailed ? (
+          <AdminLoginButton onClick={() => { setConfigFailed(false); setConfigRevision((value) => value + 1); }}>
+            Try again
+          </AdminLoginButton>
+        ) : (
+          <AdminLoginButton working={firebase === undefined || action === 'verify' || (action === 'send' && !sent)}
+            disabled={busy || (sent && code.length !== 6)}>
+            {firebase === undefined ? 'Connecting…' : !sent && action === 'send' ? 'Sending code…' :
+              action === 'verify' ? 'Verifying…' : sent ? 'Verify and sign in' : 'Send code'}
+          </AdminLoginButton>
+        )}
+        {sent && (
+          <div className="admin-login-actions">
+            <AdminLoginButton secondary disabled={busy} onClick={resetNumber}>Use another number</AdminLoginButton>
+            <AdminLoginButton secondary working={action === 'send'} disabled={busy} onClick={() => void send()}>
+              {action === 'send' ? 'Sending…' : 'Resend code'}
+            </AdminLoginButton>
+          </div>
+        )}
+      </form>
+    </div>
   );
 }
 function StaffCodeStep({
-  profile,
-  onVerified,
-  onSignOut,
+  profile, onVerified, onSignOut,
 }: {
   profile: Profile;
   onVerified: (profile: Profile) => void;
-  onSignOut: () => void;
+  onSignOut: () => Promise<void>;
 }) {
   const check = profile.staffCheck!;
-  const [code, setCode] = useState(''),
-    [error, setError] = useState(''),
-    [notice, setNotice] = useState('');
-  const [sent, setSent] = useState(false),
-    [busy, setBusy] = useState(false);
+  const [code, setCode] = useState('');
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [action, setAction] = useState<'send' | 'verify' | 'sign-out' | null>(null);
+  const busy = action !== null;
+  const sent = Boolean(notice);
+
   async function send() {
-    setBusy(true);
+    if (busy || !check.hasEmail) return;
+    setAction('send');
     setError('');
-    setNotice('');
     try {
       const result = await api<{ sent: boolean; verified?: boolean; maskedEmail?: string }>(
-        '/api/session',
-        'POST',
-        { action: 'staff-code-request' },
+        '/api/session', 'POST', { action: 'staff-code-request' },
       );
       if (result.verified) onVerified(await api<Profile>('/api/session'));
       else {
-        setSent(true);
-        setNotice(`We sent a 6-digit code to ${result.maskedEmail ?? check.maskedEmail}.`);
+        setCode('');
+        setNotice(`A new code was sent to ${result.maskedEmail ?? check.maskedEmail}.`);
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Unable to send the code');
+      setError(cause instanceof Error ? cause.message : 'Could not send the email code. Try again.');
     } finally {
-      setBusy(false);
+      setAction(null);
     }
   }
+
   return (
-    <main className="login-shell">
-      <section className="glass-panel login-panel">
-        <div className="brand-icon">
-          <BrandMark />
-        </div>
-        <h1>Check your email</h1>
-        {check.hasEmail ? (
-          <p>
-            Staff sign-in needs a second step. We email a code to {check.maskedEmail} each time you
-            sign in to this panel.
-          </p>
-        ) : (
-          <p>
-            Staff sign-in needs a code sent to your email, and no email address is on file for your
-            account. Ask a Super Admin to add one, then sign in again.
-          </p>
+    <div key={sent ? 'email-code' : 'email-start'} className="admin-login-step">
+      <p className="admin-login-step-label">Staff verification</p>
+      <h1 id="admin-login-title">{sent ? 'Enter your email code' : 'Check your email'}</h1>
+      <p>{check.hasEmail ? (sent ? 'Enter the 6-digit code to finish signing in.' :
+        `Send a verification code to ${check.maskedEmail} to continue.`) :
+        'There is no email address on this account. Ask a Super Admin to add one, then sign in again.'}</p>
+      <form className="stack" onSubmit={async (event) => {
+        event.preventDefault();
+        if (busy) return;
+        if (!sent) return send();
+        if (!/^[0-9]{6}$/.test(code)) return;
+        setAction('verify');
+        setError('');
+        try {
+          onVerified(await api<Profile>('/api/session', 'POST', { action: 'staff-code-verify', code }));
+        } catch (cause) {
+          setError(cause instanceof Error ? cause.message : 'Could not verify the email code. Try again.');
+        } finally {
+          setAction(null);
+        }
+      }}>
+        {notice && <p className="admin-login-notice" role="status">{notice}</p>}
+        {sent && <VerificationCode label="Email code" value={code} busy={busy} invalid={Boolean(error)}
+          onChange={(value) => { setCode(value); setError(''); }} />}
+        {error && <AdminLoginAlert>{error}</AdminLoginAlert>}
+        {check.hasEmail && (
+          <AdminLoginButton working={action === 'verify' || (action === 'send' && !sent)}
+            disabled={busy || (sent && code.length !== 6)}>
+            {action === 'verify' ? 'Verifying…' : !sent && action === 'send' ? 'Sending email…' :
+              sent ? 'Verify and continue' : 'Email me a code'}
+          </AdminLoginButton>
         )}
-        <form
-          className="stack"
-          onSubmit={async (event) => {
-            event.preventDefault();
-            if (!sent) return send();
-            setBusy(true);
-            setError('');
-            try {
-              onVerified(
-                await api<Profile>('/api/session', 'POST', { action: 'staff-code-verify', code }),
-              );
-            } catch (cause) {
-              setError(cause instanceof Error ? cause.message : 'Unable to check the code');
-            } finally {
-              setBusy(false);
-            }
-          }}
-        >
-          {sent && (
-            <label>
-              Email code
-              <input
-                className="form-input"
-                inputMode="numeric"
-                autoComplete="one-time-code"
-                required
-                pattern="[0-9]{6}"
-                value={code}
-                disabled={busy}
-                onChange={(event) => setCode(event.target.value.trim())}
-              />
-            </label>
-          )}
-          {notice && <p className="help-text">{notice}</p>}
-          {error && (
-            <p className="error-message" role="alert">
-              {error}
-            </p>
-          )}
-          {check.hasEmail && (
-            <button className="btn btn-primary" disabled={busy}>
-              {busy ? 'Please wait…' : sent ? 'Verify and continue' : 'Email me a code'}
-            </button>
-          )}
-          {sent && (
-            <button type="button" className="btn btn-secondary" disabled={busy} onClick={send}>
-              Send another code
-            </button>
-          )}
-          <button type="button" className="btn btn-secondary" disabled={busy} onClick={onSignOut}>
-            Sign out
-          </button>
-        </form>
-      </section>
-    </main>
+        <div className="admin-login-actions">
+          {sent && <AdminLoginButton secondary working={action === 'send'} disabled={busy}
+            onClick={() => void send()}>{action === 'send' ? 'Sending…' : 'Resend code'}</AdminLoginButton>}
+          <AdminLoginButton secondary working={action === 'sign-out'} disabled={busy} onClick={async () => {
+            setAction('sign-out');
+            try { await onSignOut(); } finally { setAction(null); }
+          }}>{action === 'sign-out' ? 'Signing out…' : 'Sign out'}</AdminLoginButton>
+        </div>
+      </form>
+    </div>
   );
 }
 function ActionDialog({
@@ -1404,34 +1422,34 @@ export default function AdminDashboard(): React.JSX.Element {
   }
 
   const showDashboardErrors = isGlobal && tab === 'overview';
+  const profileRole = isGlobal
+    ? 'Super Admin'
+    : localRoles.includes('MUNICIPALITY_ADMIN')
+      ? 'Municipality Admin'
+      : isStaffScope ? 'Coordinator' : 'Merchant';
   const membershipBase = detail
     ? `/organizations/${detail.membership.organizationId}/memberships/${detail.membership.id}`
     : '';
   if (booting) return <AdminSessionLoading theme={theme ?? 'system'} />;
   if (!profile)
     return (
-      <>
+      <AdminSignInLayout theme={theme ?? 'light'} onThemeChange={setTheme}>
         <SignIn onSignedIn={signedIn} />
-        {error && (
-          <p className="session-error" role="alert">
-            {error}
-          </p>
-        )}
-      </>
+        {error && <AdminLoginAlert>{error}</AdminLoginAlert>}
+      </AdminSignInLayout>
     );
   if (needsStaffCode(profile))
     return (
-      <StaffCodeStep
-        profile={profile}
-        onVerified={signedIn}
-        onSignOut={() => {
-          api('/api/session', 'DELETE').catch(() => undefined);
-          expired();
-        }}
-      />
+      <AdminSignInLayout theme={theme ?? 'light'} onThemeChange={setTheme}>
+        <StaffCodeStep
+          profile={profile}
+          onVerified={signedIn}
+          onSignOut={signOut}
+        />
+      </AdminSignInLayout>
     );
   return (
-    <div className="app-container" data-admin-theme={isGlobal ? (theme ?? 'light') : undefined} data-admin-overview={isGlobal && tab === 'overview' ? true : undefined}>
+    <div className="app-container" data-admin-theme={theme ?? 'light'} data-admin-overview={isGlobal && tab === 'overview' ? true : undefined}>
       <aside
         className="sidebar"
         data-menu-open={menuOpen}
@@ -1443,7 +1461,7 @@ export default function AdminDashboard(): React.JSX.Element {
           </div>
           <div className="brand-info">
             <div className="brand-title">Indian Time Bank</div>
-            <div className="brand-subtitle">Administration Workspace</div>
+            <div className="brand-subtitle">{profileRole}</div>
           </div>
         </div>
         <button
@@ -1460,110 +1478,81 @@ export default function AdminDashboard(): React.JSX.Element {
           <Icon name="chevronRight" />
         </button>
         <nav className="nav-group" id="dashboard-navigation" aria-label="Dashboard">
-          {tabs.map((item, index) => (
-            <React.Fragment key={item.id}>
-              {item.group && tabs[index - 1]?.group !== item.group && (
-                <div className="nav-section">{item.group}</div>
-              )}
-              <button
-                id={`nav-${item.id}`}
-                className={`nav-item ${tab === item.id ? 'active' : ''}`}
-                aria-current={tab === item.id ? 'page' : undefined}
-                title={`${item.text}: ${item.description}`}
-                disabled={pending}
-                onClick={() => changeTab(item.id)}
-              >
-                <Icon name={item.icon} />
-                {item.text}
-                {item.id === 'safety' && openSafetyAlerts > 0 && (
-                  <span className="nav-alert-count" role="status">
-                    {openSafetyAlerts}
-                    <span className="sr-only"> open</span>
-                  </span>
-                )}
-                {item.id === 'complaints' && openComplaints > 0 && (
-                  <span className="nav-alert-count" role="status">
-                    {openComplaints}
-                    <span className="sr-only"> open</span>
-                  </span>
-                )}
-                {item.id === 'restrictions' && waitingRestrictions > 0 && (
-                  <span className="nav-alert-count" role="status">
-                    {waitingRestrictions}
-                    <span className="sr-only"> waiting</span>
-                  </span>
-                )}
-                {item.id === 'closures' && waitingClosures > 0 && (
-                  <span className="nav-alert-count" role="status">
-                    {waitingClosures}
-                    <span className="sr-only"> waiting</span>
-                  </span>
-                )}
-                {item.id === 'phone-recoveries' && waitingRecoveries > 0 && (
-                  <span className="nav-alert-count" role="status">
-                    {waitingRecoveries}
-                    <span className="sr-only"> waiting</span>
-                  </span>
-                )}
-              </button>
-            </React.Fragment>
-          ))}
+          {NAV_GROUPS.map((group, index) => {
+            const items = tabs.filter((item) => item.group === group);
+            if (items.length === 0) return null;
+            const headingId = `dashboard-nav-group-${index}`;
+            return (
+              <div className="workspace-nav-section" key={group} role={group ? 'group' : undefined} aria-labelledby={group ? headingId : undefined}>
+                {group && <div className="nav-section" id={headingId}>{group}</div>}
+                {items.map((item) => (
+                  <button
+                    key={item.id}
+                    type="button"
+                    id={`nav-${item.id}`}
+                    className={`nav-item ${tab === item.id ? 'active' : ''}`}
+                    aria-current={tab === item.id ? 'page' : undefined}
+                    title={`${item.text}: ${item.description}`}
+                    disabled={pending}
+                    onClick={() => changeTab(item.id)}
+                  >
+                    <Icon name={item.icon} />
+                    <span className="workspace-nav-label">{item.text}</span>
+                    {item.id === 'safety' && openSafetyAlerts > 0 && (
+                      <span className="nav-alert-count" role="status">
+                        {openSafetyAlerts}
+                        <span className="sr-only"> open</span>
+                      </span>
+                    )}
+                    {item.id === 'complaints' && openComplaints > 0 && (
+                      <span className="nav-alert-count" role="status">
+                        {openComplaints}
+                        <span className="sr-only"> open</span>
+                      </span>
+                    )}
+                    {item.id === 'restrictions' && waitingRestrictions > 0 && (
+                      <span className="nav-alert-count" role="status">
+                        {waitingRestrictions}
+                        <span className="sr-only"> waiting</span>
+                      </span>
+                    )}
+                    {item.id === 'closures' && waitingClosures > 0 && (
+                      <span className="nav-alert-count" role="status">
+                        {waitingClosures}
+                        <span className="sr-only"> waiting</span>
+                      </span>
+                    )}
+                    {item.id === 'phone-recoveries' && waitingRecoveries > 0 && (
+                      <span className="nav-alert-count" role="status">
+                        {waitingRecoveries}
+                        <span className="sr-only"> waiting</span>
+                      </span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            );
+          })}
         </nav>
-        {!isGlobal && (
-          <div className="sidebar-footer modern-sidebar-footer">
-            <div className="footer-account-icon" aria-hidden="true">
-              <Icon name="users" size={17} />
-            </div>
-            <div className="user-meta footer-meta-info">
-              <p className="footer-phone-number">{phone(profile.phoneE164)}</p>
-              <p className="footer-role-label">
-                {isStaffScope ? 'Organization staff' : 'Merchant'}
-              </p>
-            </div>
-            <button
-              type="button"
-              className="footer-logout-button"
-              title={pending ? 'Signing out' : 'Sign out'}
-              aria-label="Sign out"
-              disabled={pending}
-              onClick={signOut}
-            >
-              <Icon name="logout" size={15} />
-              <span className="sr-only">{pending ? 'Signing out' : 'Sign out'}</span>
-            </button>
-          </div>
-        )}
-
-        {!isGlobal && <div className="sidebar-bottom-tiranga" aria-hidden="true">
-          <div className="tiranga-light-blend" />
-          <div className="bottom-ashoka-chakra">
-            <AshokaChakra size={44} color="rgba(255, 255, 255, 0.18)" />
-          </div>
-        </div>}
       </aside>
       <div className="main-wrapper" inert={action !== null || detail !== null || notificationsOpen}>
         <header
           className={`top-bar admin-topbar ${['restrictions', 'closures', 'phone-recoveries'].includes(tab) ? 'governance-topbar' : ''}`}
         >
-          <div className={isGlobal ? 'top-bar-inner admin-unified-toolbar' : 'top-bar-inner'}>
-            {isGlobal ? (
-              <AdminPageSearch pages={tabs} disabled={pending || action !== null || detail !== null || notificationsOpen} onSelect={(id) => changeTab(id)} />
-            ) : <div className="page-title">
-              <h1>{tab === 'overview' ? 'Dashboard' : page?.text}</h1>
-              <p>{tab === 'overview' ? 'Platform-wide participation and organization activity.' : page?.description}</p>
-            </div>}
+          <div className="top-bar-inner admin-unified-toolbar">
+            <AdminPageSearch pages={tabs} disabled={pending || action !== null || detail !== null || notificationsOpen} onSelect={changeTab} />
             <div className="top-actions">
               <div className="scope-label">
-                <span id="organization-scope-label" className={isGlobal ? 'sr-only' : 'scope-label-heading'}>
-                  <Icon name="organizations" /> Organization scope
-                </span>
+                <span id="organization-scope-label" className="sr-only">Organization scope</span>
                 {isCoordinatorOnly ? (
-                  <div className="scope-select-trigger" aria-label="Assigned organization">
-                    <span className="scope-current-icon"><Icon name="organizations" /></span>
-                    <span className="scope-current-text">
-                      <strong>{selectedOrg?.name ?? 'Assigned organization'}</strong>
-                      <small>Coordinator access · organization locked</small>
-                    </span>
+                  <div className="scope-select">
+                    <div className="scope-select-trigger">
+                      <span className="scope-current-icon"><Icon name="organizations" /></span>
+                      <span className="scope-current-text">
+                        <small className="scope-current-caption">Assigned organization</small>
+                        <strong>{selectedOrg?.name ?? 'Organization'}</strong>
+                      </span>
+                    </div>
                   </div>
                 ) : (
                   <OrganizationScopeSelect
@@ -1584,9 +1573,8 @@ export default function AdminDashboard(): React.JSX.Element {
                 title="Refresh data"
               >
                 <Icon name="refresh" />
-                {!isGlobal && <span>Refresh data</span>}
               </button>
-              {isGlobal && <AdminThemeButton theme={theme ?? 'light'} onChange={setTheme} />}
+              <AdminThemeButton theme={theme ?? 'light'} onChange={setTheme} />
               <button
                 className="modern-bell-btn"
                 ref={notificationsTrigger}
@@ -1599,17 +1587,20 @@ export default function AdminDashboard(): React.JSX.Element {
                 <Icon name="bell" />
                 {!isGlobal && notifications.length > 0 && <span className="bell-red-badge" />}
               </button>
-              {isGlobal && <AdminProfileDropdown phone={phone(profile.phoneE164)} pending={pending} onSignOut={signOut} />}
+              <AdminProfileDropdown role={profileRole} phone={phone(profile.phoneE164)} pending={pending} onSignOut={signOut} />
             </div>
           </div>
         </header>
         <main className="content-body" aria-busy={loading || pending || directoryLoading}>
-          {isGlobal && (
-            <div className="page-title admin-content-heading">
-              <h1>{tab === 'overview' ? 'Dashboard' : page?.text}</h1>
-              <p>{tab === 'overview' ? 'Platform participation, review queues, and organization activity.' : page?.description}</p>
+          <div className={`page-title admin-content-heading${tab === 'overview' || tab === 'attention' ? ' workspace-heading' : ''}`}>
+            <div>
+              <h1>{tab === 'overview' ? 'Platform overview' : page?.text}</h1>
+              <p>{tab === 'overview' ? 'Review pending work and track participation across municipalities.' : page?.description}</p>
             </div>
-          )}
+            {tab === 'overview' && (
+              <span className="workspace-scope"><Icon name="globe" size={15} /> Platform-wide totals</span>
+            )}
+          </div>
           {showDashboardErrors && (directoryError || error) && (
             <div className="super-dashboard-error">
               <span className="super-icon-tile" data-accent="warning"><Icon name="complaints" size={18} /></span>
@@ -1641,10 +1632,43 @@ export default function AdminDashboard(): React.JSX.Element {
           {tab === 'overview' && isGlobal && (
             <div className="super-overview">
               {view.metrics && <>
+              <section aria-labelledby="reviews-title">
+                <div className="super-section-heading">
+                  <h2 id="reviews-title">Awaiting review</h2>
+                </div>
+                <div className="super-review-grid">
+                  <button type="button" className="super-review" data-accent="warning" onClick={() => {
+                    changeTab(tenant === 'GLOBAL' ? 'organizations' : 'memberships');
+                    if (tenant !== 'GLOBAL') setStatus('APPLIED');
+                  }}>
+                    <span className="super-icon-tile"><Icon name="memberships" /></span>
+                    <span>
+                      <strong>Pending memberships</strong>
+                      <span className="super-card-meta">{tenant === 'GLOBAL' ? 'Choose an organization to review' : 'Open the selected organization’s queue'}</span>
+                    </span>
+                    <strong className="super-review-count">{view.metrics.pendingMemberships.toLocaleString('en-IN')}</strong>
+                    <Icon name="chevronRight" size={16} />
+                  </button>
+                  <button type="button" className="super-review" disabled={!nextApproval || pending} onClick={() => {
+                    if (!nextApproval) return;
+                    setTenant(nextApproval.organizationId);
+                    changeTab('memberships');
+                    void review({ id: nextApproval.membershipId, organizationId: nextApproval.organizationId });
+                  }}>
+                    <span className="super-icon-tile"><Icon name="safety" /></span>
+                    <span>
+                      <strong>Super Admin approvals</strong>
+                      <span className="super-card-meta">{nextApproval ? 'Open next application' : 'No applications available to review'}</span>
+                    </span>
+                    <strong className="super-review-count">{view.metrics.pendingSuperAdminCount.toLocaleString('en-IN')}</strong>
+                    {nextApproval && <Icon name="chevronRight" size={16} />}
+                  </button>
+                </div>
+              </section>
+
               <section aria-labelledby="participation-title">
                 <div className="super-section-heading">
                   <h2 id="participation-title">Platform participation</h2>
-                  <span>All organizations</span>
                 </div>
                 <div className="super-kpi-grid">
                   {([
@@ -1696,45 +1720,9 @@ export default function AdminDashboard(): React.JSX.Element {
                 </div>
               </section>
 
-              <section aria-labelledby="reviews-title">
-                <div className="super-section-heading">
-                  <h2 id="reviews-title">Awaiting review</h2>
-                  <span>All organizations</span>
-                </div>
-                <div className="super-review-grid">
-                  <button type="button" className="super-review" data-accent="warning" onClick={() => {
-                    changeTab(tenant === 'GLOBAL' ? 'organizations' : 'memberships');
-                    if (tenant !== 'GLOBAL') setStatus('APPLIED');
-                  }}>
-                    <span className="super-icon-tile"><Icon name="memberships" /></span>
-                    <span>
-                      <strong>Pending memberships</strong>
-                      <span className="super-card-meta">{tenant === 'GLOBAL' ? 'Choose an organization to review' : 'Open the selected organization’s queue'}</span>
-                    </span>
-                    <strong className="super-review-count">{view.metrics.pendingMemberships.toLocaleString('en-IN')}</strong>
-                    <Icon name="chevronRight" size={16} />
-                  </button>
-                  <button type="button" className="super-review" disabled={!nextApproval || pending} onClick={() => {
-                    if (!nextApproval) return;
-                    setTenant(nextApproval.organizationId);
-                    changeTab('memberships');
-                    void review({ id: nextApproval.membershipId, organizationId: nextApproval.organizationId });
-                  }}>
-                    <span className="super-icon-tile"><Icon name="safety" /></span>
-                    <span>
-                      <strong>Super Admin approvals</strong>
-                      <span className="super-card-meta">{nextApproval ? 'Open next application' : 'No applications available to review'}</span>
-                    </span>
-                    <strong className="super-review-count">{view.metrics.pendingSuperAdminCount.toLocaleString('en-IN')}</strong>
-                    {nextApproval && <Icon name="chevronRight" size={16} />}
-                  </button>
-                </div>
-              </section>
-
               <section aria-labelledby="trends-title">
                 <div className="super-section-heading">
                   <h2 id="trends-title">Platform trends</h2>
-                  <span>All organizations</span>
                 </div>
                 <div className="super-chart-grid">
                   <ActivityTrend points={view.metrics.activityTrend} />
@@ -1891,6 +1879,7 @@ export default function AdminDashboard(): React.JSX.Element {
               <TimeCredits
                 key={tenant}
                 organizationId={tenant}
+                theme={theme ?? 'light'}
                 userId={profile.id}
                 roles={localRoles}
                 isGlobal={isGlobal}
@@ -1954,7 +1943,7 @@ export default function AdminDashboard(): React.JSX.Element {
                     name: 'Total Chapters',
                     val: shownOrgs.length,
                     icon: 'organizations',
-                    color: '#2563EB',
+                    color: 'var(--admin-link, #2563EB)',
                     glow: 'rgba(37, 99, 235, 0.08)',
                     tone: 'blue',
                     pill: 'Local administrative units',
@@ -1963,7 +1952,7 @@ export default function AdminDashboard(): React.JSX.Element {
                     name: 'Active Organizations',
                     val: shownOrgs.filter((o) => o.status === 'ACTIVE').length,
                     icon: 'check',
-                    color: '#059669',
+                    color: 'var(--admin-success, #059669)',
                     glow: 'rgba(5, 150, 105, 0.08)',
                     tone: 'emerald',
                     pill: 'Fully operational',
@@ -1985,7 +1974,7 @@ export default function AdminDashboard(): React.JSX.Element {
                         ? shownOrgs.reduce((total, organization) => total + (wardCounts[organization.id] ?? 0), 0)
                         : '—',
                     icon: 'organizations',
-                    color: '#7C3AED',
+                    color: 'var(--admin-link, #7C3AED)',
                     glow: 'rgba(124, 58, 237, 0.08)',
                     tone: 'purple',
                     pill: tenant === 'GLOBAL' ? 'Across listed organizations' : 'In this organization',
@@ -2022,10 +2011,10 @@ export default function AdminDashboard(): React.JSX.Element {
 
               <div className="section-heading" style={{ marginBottom: '16px' }}>
                 <div>
-                  <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0, color: '#0f172a' }}>
+                  <h3 style={{ fontSize: '1.15rem', fontWeight: 800, margin: 0, color: 'var(--admin-ink, #0f172a)' }}>
                     Network Chapters & Communities
                   </h3>
-                  <span className="record-count" style={{ fontSize: '0.80rem', color: '#64748b' }}>
+                  <span className="record-count" style={{ fontSize: '0.80rem', color: 'var(--admin-copy, #64748b)' }}>
                     {shownOrgs.length} organization{shownOrgs.length === 1 ? '' : 's'} registered
                   </span>
                 </div>
@@ -2273,7 +2262,7 @@ export default function AdminDashboard(): React.JSX.Element {
                         name: 'Total Members',
                         val: view.total,
                         icon: 'users',
-                        color: '#2563EB',
+                        color: 'var(--admin-link, #2563EB)',
                         glow: 'rgba(37, 99, 235, 0.08)',
                         tone: 'blue',
                         pill: 'Registered in chapter',
@@ -2291,7 +2280,7 @@ export default function AdminDashboard(): React.JSX.Element {
                         name: 'Active Members',
                         val: view.memberships.filter((m) => m.status === 'APPROVED').length,
                         icon: 'check',
-                        color: '#059669',
+                        color: 'var(--admin-success, #059669)',
                         glow: 'rgba(5, 150, 105, 0.08)',
                         tone: 'emerald',
                         pill: 'In good standing',
@@ -2300,7 +2289,7 @@ export default function AdminDashboard(): React.JSX.Element {
                         name: 'ID Verified',
                         val: view.memberships.filter((m) => m.user?.verifiedIdentity?.verificationStatus === 'VERIFIED').length,
                         icon: 'crown',
-                        color: '#7C3AED',
+                        color: 'var(--admin-link, #7C3AED)',
                         glow: 'rgba(124, 58, 237, 0.08)',
                         tone: 'purple',
                         pill: 'Government ID verified',
@@ -2370,7 +2359,7 @@ export default function AdminDashboard(): React.JSX.Element {
                       </div>
                     </div>
                     <div className="filter-right">
-                      <span className="record-count" style={{ fontSize: '0.80rem', fontWeight: 650, color: '#64748b' }}>
+                      <span className="record-count" style={{ fontSize: '0.80rem', fontWeight: 650, color: 'var(--admin-copy, #64748b)' }}>
                         {view.total.toLocaleString()} member{view.total === 1 ? '' : 's'}
                       </span>
                     </div>
@@ -2398,7 +2387,7 @@ export default function AdminDashboard(): React.JSX.Element {
                                 </div>
                                 <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                                    <strong style={{ fontSize: '0.88rem', color: '#0f172a' }}>
+                                    <strong style={{ fontSize: '0.88rem', color: 'var(--admin-ink, #0f172a)' }}>
                                       {member.user?.fullName ?? (
                                         <span className="help-text">No name yet</span>
                                       )}
@@ -2407,7 +2396,7 @@ export default function AdminDashboard(): React.JSX.Element {
                                       <Badge value="ID_VERIFIED" />
                                     )}
                                   </div>
-                                  <span className="mono" style={{ fontSize: '0.78rem', color: '#64748b' }}>
+                                  <span className="mono" style={{ fontSize: '0.78rem', color: 'var(--admin-copy, #64748b)' }}>
                                     {phone(member.user?.phoneE164) ?? 'Unknown number'}
                                   </span>
                                 </div>
@@ -2418,7 +2407,7 @@ export default function AdminDashboard(): React.JSX.Element {
                             </td>
                             <td>
                               {member.membershipNumber ? (
-                                <span className="mono" style={{ fontWeight: 650, fontSize: '0.82rem', color: '#0f172a' }}>
+                                <span className="mono" style={{ fontWeight: 650, fontSize: '0.82rem', color: 'var(--admin-ink, #0f172a)' }}>
                                   {member.membershipNumber}
                                 </span>
                               ) : (
@@ -2426,7 +2415,7 @@ export default function AdminDashboard(): React.JSX.Element {
                               )}
                             </td>
                             <td>
-                              <div style={{ fontSize: '0.82rem', color: '#334155' }}>
+                              <div style={{ fontSize: '0.82rem', color: 'var(--admin-copy, #334155)' }}>
                                 {member.ward ? (
                                   `Ward ${member.ward.wardNumber}`
                                 ) : (
@@ -2443,7 +2432,7 @@ export default function AdminDashboard(): React.JSX.Element {
                               </div>
                             </td>
                             <td>
-                              <span style={{ fontSize: '0.80rem', color: '#334155' }}>
+                              <span style={{ fontSize: '0.80rem', color: 'var(--admin-copy, #334155)' }}>
                                 {member.roleGrants
                                   .filter((grant) => grant.status === 'ACTIVE')
                                   .map((grant) => label(grant.role))
@@ -2479,6 +2468,7 @@ export default function AdminDashboard(): React.JSX.Element {
                     <div className="drawer-backdrop" onClick={() => !pending && setDetail(null)} />
                     <aside
                       className="drawer"
+                      data-admin-theme={theme ?? 'light'}
                       role="dialog"
                       aria-modal="true"
                       aria-labelledby="membership-title"
@@ -3040,7 +3030,7 @@ export default function AdminDashboard(): React.JSX.Element {
             />
             <aside
               className="drawer notification-drawer"
-              data-admin-theme={isGlobal ? (theme ?? 'light') : undefined}
+              data-admin-theme={theme ?? 'light'}
               role="dialog"
               aria-modal="true"
               aria-labelledby="notification-drawer-title"

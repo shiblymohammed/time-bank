@@ -200,7 +200,7 @@ export function Complaints({
             name: 'Total Complaints',
             val: totalComplaints,
             icon: 'complaints',
-            color: '#2563EB',
+            color: 'var(--admin-link, #2563EB)',
             glow: 'rgba(37, 99, 235, 0.08)',
             tone: 'blue',
             pill: showClosed ? 'All recorded' : 'Active queue',
@@ -218,7 +218,7 @@ export function Complaints({
             name: 'Under Review',
             val: inReviewComplaints,
             icon: 'lightning',
-            color: '#7C3AED',
+            color: 'var(--admin-link, #7C3AED)',
             glow: 'rgba(124, 58, 237, 0.08)',
             tone: 'purple',
             pill: 'Being investigated',
@@ -227,7 +227,7 @@ export function Complaints({
             name: 'Resolved & Decided',
             val: closedComplaints,
             icon: 'check',
-            color: '#059669',
+            color: 'var(--admin-success, #059669)',
             glow: 'rgba(5, 150, 105, 0.08)',
             tone: 'emerald',
             pill: 'Decisions rendered',
@@ -264,11 +264,11 @@ export function Complaints({
 
       {/* Confidentiality Callout Banner */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '14px 16px', background: 'rgba(37, 99, 235, 0.05)', border: '1px solid rgba(37, 99, 235, 0.15)', borderRadius: '12px', marginBottom: '18px' }}>
-        <div style={{ color: '#2563eb', flexShrink: 0, marginTop: '2px' }}>
+        <div style={{ color: 'var(--admin-link, #2563eb)', flexShrink: 0, marginTop: '2px' }}>
           <Icon name="complaints" size={20} />
         </div>
-        <div style={{ fontSize: '0.80rem', lineHeight: '1.45', color: '#334155' }}>
-          <strong style={{ color: '#1e3a8a', display: 'block', marginBottom: '2px' }}>
+        <div style={{ fontSize: '0.80rem', lineHeight: '1.45', color: 'var(--admin-copy, #334155)' }}>
+          <strong style={{ color: 'var(--admin-link, #1e3a8a)', display: 'block', marginBottom: '2px' }}>
             Confidential Grievance Protocol
           </strong>
           These are confidential. You see only complaints at your level, and never one you made or one about a visit you were part of. Nothing here moves credits. To restrict someone, use Restrictions and provide this complaint’s reference. A member can appeal a decision, and that appeal also appears under Restrictions.
@@ -284,14 +284,14 @@ export function Complaints({
 
       {/* Empty State */}
       {rows?.length === 0 && (
-        <div className="glass-panel empty-state" style={{ padding: '36px 20px', textAlign: 'center', background: '#ffffff', borderRadius: '14px', border: '1px solid #e2e8f0', margin: '16px 0' }}>
-          <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#ecfdf5', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
+        <div className="glass-panel empty-state" style={{ padding: '36px 20px', textAlign: 'center', background: 'var(--admin-panel, #ffffff)', borderRadius: '14px', border: '1px solid var(--admin-line, #e2e8f0)', margin: '16px 0' }}>
+          <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'var(--admin-success-tint, #ecfdf5)', color: 'var(--admin-success, #059669)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
             <Icon name="check" size={24} />
           </div>
-          <h4 style={{ fontSize: '1rem', fontWeight: 700, color: '#0f172a', margin: '0 0 6px' }}>
+          <h4 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--admin-ink, #0f172a)', margin: '0 0 6px' }}>
             {showClosed ? 'No complaints recorded' : 'All clear — No complaints need your attention'}
           </h4>
-          <p style={{ fontSize: '0.82rem', color: '#64748b', margin: 0 }}>
+          <p style={{ fontSize: '0.82rem', color: 'var(--admin-copy, #64748b)', margin: 0 }}>
             {showClosed
               ? 'There are currently no closed complaints on record.'
               : 'Any confidential member grievances or incident escalations will appear here.'}
@@ -318,13 +318,13 @@ export function Complaints({
               {rows.map((row) => (
                 <tr key={row.id} data-testid="complaint-row">
                   <td>
-                    <span className="mono" style={{ fontWeight: 700, fontSize: '0.86rem', color: '#0f172a' }}>
+                    <span className="mono" style={{ fontWeight: 700, fontSize: '0.86rem', color: 'var(--admin-ink, #0f172a)' }}>
                       {row.reference}
                     </span>
                   </td>
                   {!organizationId && <td>{row.organizationName}</td>}
                   <td>
-                    <span style={{ fontSize: '0.82rem', color: '#334155', fontWeight: 550 }}>
+                    <span style={{ fontSize: '0.82rem', color: 'var(--admin-copy, #334155)', fontWeight: 550 }}>
                       {SUBJECT[row.subject]}
                     </span>
                   </td>
@@ -350,7 +350,7 @@ export function Complaints({
                     </span>
                   </td>
                   <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.80rem', color: '#475569' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.80rem', color: 'var(--admin-copy, #475569)' }}>
                       <Icon name="calendar" size={13} />
                       <span>{indiaTime(row.createdAt)}</span>
                     </div>
@@ -381,7 +381,7 @@ export function Complaints({
           <div className="request-detail-header">
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-                <span className="mono" style={{ fontSize: '0.88rem', fontWeight: 700, color: '#2563eb', background: '#eff6ff', padding: '3px 8px', borderRadius: '6px' }}>
+                <span className="mono" style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--admin-link, #2563eb)', background: 'var(--admin-selected, #eff6ff)', padding: '3px 8px', borderRadius: '6px' }}>
                   {detail.reference}
                 </span>
                 <span
@@ -402,7 +402,7 @@ export function Complaints({
                   {LEVEL[detail.level]}
                 </span>
               </div>
-              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>
+              <h2 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--admin-ink, #0f172a)', margin: 0 }}>
                 {SUBJECT[detail.subject]}
               </h2>
             </div>
@@ -424,7 +424,7 @@ export function Complaints({
               <h4 className="request-detail-card-title">
                 <Icon name="complaints" size={16} /> Case Description
               </h4>
-              <p style={{ margin: '6px 0 10px', fontSize: '0.85rem', color: '#1e293b', lineHeight: '1.5', fontStyle: 'italic' }}>
+              <p style={{ margin: '6px 0 10px', fontSize: '0.85rem', color: 'var(--admin-ink, #1e293b)', lineHeight: '1.5', fontStyle: 'italic' }}>
                 “{detail.description}”
               </p>
               <div className="request-detail-row">
@@ -479,7 +479,7 @@ export function Complaints({
                   )}
                 </>
               ) : (
-                <div style={{ marginTop: '8px', fontSize: '0.80rem', color: '#64748b' }}>
+                <div style={{ marginTop: '8px', fontSize: '0.80rem', color: 'var(--admin-copy, #64748b)' }}>
                   No visit associated with this complaint.
                 </div>
               )}
@@ -487,28 +487,28 @@ export function Complaints({
           </div>
 
           {isGlobal && detail.level !== 'SUPER_ADMIN' && (
-            <p className="help-text" style={{ padding: '8px 12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', marginBottom: '16px' }}>
+            <p className="help-text" style={{ padding: '8px 12px', background: 'var(--admin-subtle, #f8fafc)', borderRadius: '8px', border: '1px solid var(--admin-line, #e2e8f0)', marginBottom: '16px' }}>
               ℹ️ This is with {LEVEL[detail.level].toLowerCase()}. Your reading it is recorded on the audit trail.
             </p>
           )}
 
           {/* Event History */}
           <div style={{ marginTop: '20px' }}>
-            <h4 style={{ fontSize: '0.92rem', fontWeight: 700, color: '#0f172a', marginBottom: '10px' }}>
+            <h4 style={{ fontSize: '0.92rem', fontWeight: 700, color: 'var(--admin-ink, #0f172a)', marginBottom: '10px' }}>
               Investigation History ({detail.events.length})
             </h4>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {detail.events.map((event) => (
-                <div key={event.id} style={{ padding: '10px 14px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.82rem' }}>
+                <div key={event.id} style={{ padding: '10px 14px', background: 'var(--admin-subtle, #f8fafc)', borderRadius: '8px', border: '1px solid var(--admin-line, #e2e8f0)', fontSize: '0.82rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <strong style={{ color: '#0f172a' }}>
+                    <strong style={{ color: 'var(--admin-ink, #0f172a)' }}>
                       {EVENT[event.type]}
                       {event.type !== 'RAISED' && event.type !== 'APPEALED' && ` by ${event.actorName || 'staff'}`}
                     </strong>
-                    <span style={{ fontSize: '0.74rem', color: '#64748b' }}>{indiaTime(event.createdAt)}</span>
+                    <span style={{ fontSize: '0.74rem', color: 'var(--admin-copy, #64748b)' }}>{indiaTime(event.createdAt)}</span>
                   </div>
                   {event.notes && (
-                    <div style={{ marginTop: '6px', color: '#334155', fontStyle: 'italic' }}>
+                    <div style={{ marginTop: '6px', color: 'var(--admin-copy, #334155)', fontStyle: 'italic' }}>
                       “{event.notes}”
                     </div>
                   )}
@@ -518,9 +518,9 @@ export function Complaints({
           </div>
 
           {closed && (
-            <div style={{ marginTop: '16px', padding: '14px 16px', background: '#ecfdf5', borderRadius: '10px', border: '1px solid #a7f3d0' }}>
-              <strong style={{ color: '#065f46' }}>Decision: {outcomeText(detail.outcome)}.</strong>
-              <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#047857' }}>
+            <div style={{ marginTop: '16px', padding: '14px 16px', background: 'var(--admin-success-tint, #ecfdf5)', borderRadius: '10px', border: '1px solid var(--admin-success-line, #a7f3d0)' }}>
+              <strong style={{ color: 'var(--admin-success, #065f46)' }}>Decision: {outcomeText(detail.outcome)}.</strong>
+              <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: 'var(--admin-success, #047857)' }}>
                 The member was notified: “{detail.memberMessage}”
               </p>
             </div>

@@ -868,7 +868,7 @@ export function ServiceOperations({ organizationId, bookings, isGlobal, onError,
                   </h3>
                   <span className="status-badge status-active">{eligibility.status}</span>
                 </div>
-                <p style={{ margin: 0, color: '#334155', fontSize: '0.85rem' }}>
+                <p style={{ margin: 0, color: 'var(--admin-copy, #334155)', fontSize: '0.85rem' }}>
                   Review Due Date: <strong>{new Date(eligibility.reviewDueAt).toLocaleDateString()}</strong>
                 </p>
               </div>
@@ -1161,7 +1161,7 @@ export function ServiceOperations({ organizationId, bookings, isGlobal, onError,
                       {zones.map((zone) => (
                         <tr key={zone.id}>
                           <td>
-                            <strong style={{ color: '#0f172a' }}>{zone.name}</strong>
+                            <strong style={{ color: 'var(--admin-ink, #0f172a)' }}>{zone.name}</strong>
                           </td>
                           <td>
                             <span className="code-chip font-mono">{zone.code}</span>

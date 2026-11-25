@@ -516,7 +516,7 @@ export function CoordinatorRequests({
             name: 'Total Requests',
             val: totalRequests,
             icon: 'requests',
-            color: '#2563EB',
+            color: 'var(--admin-link, #2563EB)',
             glow: 'rgba(37, 99, 235, 0.08)',
             tone: 'blue',
             pill: 'Local community',
@@ -525,7 +525,7 @@ export function CoordinatorRequests({
             name: 'Active Matching',
             val: activeMatching,
             icon: 'lightning',
-            color: '#7C3AED',
+            color: 'var(--admin-link, #7C3AED)',
             glow: 'rgba(124, 58, 237, 0.08)',
             tone: 'purple',
             pill: 'Volunteer search active',
@@ -543,7 +543,7 @@ export function CoordinatorRequests({
             name: 'Available Services',
             val: catalogue.length,
             icon: 'catalogue',
-            color: '#059669',
+            color: 'var(--admin-success, #059669)',
             glow: 'rgba(5, 150, 105, 0.08)',
             tone: 'emerald',
             pill: 'Active in chapter',
@@ -677,7 +677,7 @@ export function CoordinatorRequests({
               {list.data.map((row) => (
                 <tr key={row.id}>
                   <td>
-                    <span className="mono" style={{ fontWeight: 700, fontSize: '0.86rem', color: '#0f172a' }}>
+                    <span className="mono" style={{ fontWeight: 700, fontSize: '0.86rem', color: 'var(--admin-ink, #0f172a)' }}>
                       {row.requestNumber}
                     </span>
                     <div style={{ marginTop: 5 }}><span className={`kpi-card-pill kpi-tone-${row.creditBacked ? 'purple' : 'slate'}`}>
@@ -688,7 +688,7 @@ export function CoordinatorRequests({
                     <RequestStatusBadge status={row.status} />
                   </td>
                   <td>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', color: '#334155' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.82rem', color: 'var(--admin-copy, #334155)' }}>
                       <Icon name="calendar" size={14} />
                       <span>{indiaTime(row.scheduledStartTime)}</span>
                     </div>
@@ -801,13 +801,13 @@ export function CoordinatorRequests({
           <div className="request-detail-header">
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
-                <span className="mono" style={{ fontSize: '0.88rem', fontWeight: 700, color: '#2563eb', background: '#eff6ff', padding: '3px 8px', borderRadius: '6px' }}>
+                <span className="mono" style={{ fontSize: '0.88rem', fontWeight: 700, color: 'var(--admin-link, #2563eb)', background: 'var(--admin-selected, #eff6ff)', padding: '3px 8px', borderRadius: '6px' }}>
                   {request.requestNumber}
                 </span>
                 <RequestStatusBadge status={request.status} />
                 <UrgencyBadge urgency={request.urgency} />
               </div>
-              <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: '#0f172a', margin: 0 }}>
+              <h2 style={{ fontSize: '1.35rem', fontWeight: 800, color: 'var(--admin-ink, #0f172a)', margin: 0 }}>
                 {request.serviceName}
               </h2>
             </div>
@@ -837,7 +837,7 @@ export function CoordinatorRequests({
                 <span className="row-value">{request.locationAddressText}</span>
               </div>
               {request.beneficiaryNotes && (
-                <div style={{ marginTop: '6px', padding: '8px 10px', background: '#ffffff', borderRadius: '8px', border: '1px solid #e2e8f0', fontSize: '0.78rem', color: '#475569' }}>
+                <div style={{ marginTop: '6px', padding: '8px 10px', background: 'var(--admin-panel, #ffffff)', borderRadius: '8px', border: '1px solid var(--admin-line, #e2e8f0)', fontSize: '0.78rem', color: 'var(--admin-copy, #475569)' }}>
                   <strong>Notes:</strong> {request.beneficiaryNotes}
                 </div>
               )}
@@ -859,7 +859,7 @@ export function CoordinatorRequests({
               <div className="request-detail-row">
                 <span className="row-label">Staffing Headcount</span>
                 <span className="row-value">
-                  <strong style={{ color: '#059669' }}>{detail.acceptedCount} accepted</strong> · {detail.pendingCount} pending (Min {request.minVolunteers}, Pref {request.preferredVolunteers})
+                  <strong style={{ color: 'var(--admin-success, #059669)' }}>{detail.acceptedCount} accepted</strong> · {detail.pendingCount} pending (Min {request.minVolunteers}, Pref {request.preferredVolunteers})
                 </span>
               </div>
               <div className="request-detail-row">
@@ -901,8 +901,8 @@ export function CoordinatorRequests({
 
           {/* Understaffed Alert if short */}
           {short && (
-            <div className="glass-panel" role="status" data-testid="team-short" style={{ background: '#fffbeb', border: '1px solid #fde68a', padding: '16px', borderRadius: '12px', marginBottom: '16px' }}>
-              <p style={{ margin: '0 0 6px', color: '#b45309', fontWeight: 700 }}>
+            <div className="glass-panel" role="status" data-testid="team-short" style={{ background: 'var(--admin-warning-tint, #fffbeb)', border: '1px solid var(--admin-warning-line, #fde68a)', padding: '16px', borderRadius: '12px', marginBottom: '16px' }}>
+              <p style={{ margin: '0 0 6px', color: 'var(--admin-warning, #b45309)', fontWeight: 700 }}>
                 {detail.acceptedCount === 0
                   ? '⚠️ Nobody is on this visit now. A volunteer handed it over.'
                   : `⚠️ This visit is short of volunteers (minimum ${request.minVolunteers}).`}
@@ -954,7 +954,7 @@ export function CoordinatorRequests({
 
           {/* Action Toolbar */}
           {mutable && (
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', padding: '14px 16px', background: '#f8fafc', borderRadius: '12px', border: '1px solid #e2e8f0', marginBottom: '20px' }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', padding: '14px 16px', background: 'var(--admin-subtle, #f8fafc)', borderRadius: '12px', border: '1px solid var(--admin-line, #e2e8f0)', marginBottom: '20px' }}>
               <button
                 className="btn btn-secondary"
                 disabled={pending || detail.acceptedCount >= request.preferredVolunteers}
@@ -1096,11 +1096,11 @@ export function CoordinatorRequests({
 
           {/* Volunteer Assignments & Offers */}
           <div style={{ marginTop: '24px' }}>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#0f172a', marginBottom: '12px' }}>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--admin-ink, #0f172a)', marginBottom: '12px' }}>
               Volunteer Assignments & Offers ({detail.assignments.length})
             </h3>
             {!detail.assignments.length && (
-              <p className="empty-state" style={{ padding: '20px', background: '#f8fafc', borderRadius: '12px' }}>
+              <p className="empty-state" style={{ padding: '20px', background: 'var(--admin-subtle, #f8fafc)', borderRadius: '12px' }}>
                 No volunteer assignments or offers dispatched yet.
               </p>
             )}
@@ -1129,22 +1129,22 @@ export function CoordinatorRequests({
                     </span>
                   )}
                   {a.status === 'OFFERED' && (
-                    <span className="volunteer-timeline-chip" style={{ color: '#b45309' }}>
+                    <span className="volunteer-timeline-chip" style={{ color: 'var(--admin-warning, #b45309)' }}>
                       · Expires: {indiaTime(a.offerExpiresAt)}
                     </span>
                   )}
                   {a.arrivedAt && (
-                    <span className="volunteer-timeline-chip" style={{ color: '#2563eb' }}>
+                    <span className="volunteer-timeline-chip" style={{ color: 'var(--admin-link, #2563eb)' }}>
                       · Arrived: {indiaTime(a.arrivedAt)}
                     </span>
                   )}
                   {a.startedAt && (
-                    <span className="volunteer-timeline-chip" style={{ color: '#059669' }}>
+                    <span className="volunteer-timeline-chip" style={{ color: 'var(--admin-success, #059669)' }}>
                       · Started: {indiaTime(a.startedAt)}
                     </span>
                   )}
                   {a.finishedAt && (
-                    <span className="volunteer-timeline-chip" style={{ color: '#059669', fontWeight: 600 }}>
+                    <span className="volunteer-timeline-chip" style={{ color: 'var(--admin-success, #059669)', fontWeight: 600 }}>
                       · Finished: {indiaTime(a.finishedAt)} ({a.reportedMinutes} mins)
                     </span>
                   )}
@@ -1166,13 +1166,13 @@ export function CoordinatorRequests({
                 </div>
 
                 {a.completionNotes && (
-                  <p style={{ margin: '4px 0 0', fontSize: '0.80rem', color: '#475569', fontStyle: 'italic' }}>
+                  <p style={{ margin: '4px 0 0', fontSize: '0.80rem', color: 'var(--admin-copy, #475569)', fontStyle: 'italic' }}>
                     “{a.completionNotes}”
                   </p>
                 )}
 
                 {a.status === 'REPLACED' && (
-                  <p className="help-text" style={{ color: '#64748b', margin: '4px 0 0' }}>
+                  <p className="help-text" style={{ color: 'var(--admin-copy, #64748b)', margin: '4px 0 0' }}>
                     <strong>Handed over.</strong> No time credits: only the volunteer who finishes this visit earns them.
                   </p>
                 )}
@@ -1190,13 +1190,13 @@ export function CoordinatorRequests({
                 )}
 
                 {(a.startReceivedAt || a.finishReceivedAt) && (
-                  <p className="help-text" data-testid="recorded-offline" style={{ color: '#64748b', margin: '4px 0 0' }}>
+                  <p className="help-text" data-testid="recorded-offline" style={{ color: 'var(--admin-copy, #64748b)', margin: '4px 0 0' }}>
                     <strong>Recorded offline.</strong> Times are when tapped on device.
                   </p>
                 )}
 
                 {a.reviewRequestedAt && !a.reviewResolvedAt && (
-                  <p className="help-text" style={{ color: '#7c3aed', margin: '4px 0 0' }}>
+                  <p className="help-text" style={{ color: 'var(--admin-link, #7c3aed)', margin: '4px 0 0' }}>
                     <strong>Review: {reviewReasonLabel(a.reviewReason)}.</strong>
                     {a.reviewNotes ? ` “${a.reviewNotes}”` : ''}
                     {a.reviewMinutes ? ` Confirmed ${a.reviewMinutes} mins.` : ''}
@@ -1244,11 +1244,11 @@ export function CoordinatorRequests({
               {!detail.rounds.length && <p className="help-text" style={{ margin: 0 }}>No matching rounds recorded.</p>}
               {detail.rounds.map((r) => (
                 <div key={r.id} style={{ padding: '6px 0', borderBottom: '1px dashed #e2e8f0', fontSize: '0.78rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 650, color: '#0f172a' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 650, color: 'var(--admin-ink, #0f172a)' }}>
                     <span>Round {r.roundNumber} (Tier {r.tier})</span>
                     <span>{title(r.status)}</span>
                   </div>
-                  <div style={{ color: '#64748b', marginTop: '2px' }}>
+                  <div style={{ color: 'var(--admin-copy, #64748b)', marginTop: '2px' }}>
                     {r.searchRadiusKm} km radius · {r.offersDispatchedCount} offered / {r.offersAcceptedCount} accepted
                   </div>
                 </div>
@@ -1262,10 +1262,10 @@ export function CoordinatorRequests({
               {!detail.reschedules.length && <p className="help-text" style={{ margin: 0 }}>No reschedules recorded.</p>}
               {detail.reschedules.map((r) => (
                 <div key={r.id} style={{ padding: '6px 0', borderBottom: '1px dashed #e2e8f0', fontSize: '0.78rem' }}>
-                  <div style={{ fontWeight: 600, color: '#0f172a' }}>
+                  <div style={{ fontWeight: 600, color: 'var(--admin-ink, #0f172a)' }}>
                     {indiaTime(r.previousStartTime)} → {indiaTime(r.newStartTime)}
                   </div>
-                  <div style={{ color: '#64748b', marginTop: '2px' }}>
+                  <div style={{ color: 'var(--admin-copy, #64748b)', marginTop: '2px' }}>
                     {r.reason} · Recorded {indiaTime(r.createdAt)}
                   </div>
                 </div>

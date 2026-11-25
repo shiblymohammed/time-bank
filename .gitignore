@@ -81,3 +81,8 @@ desktop.ini
 # Independent mobile Git repository
 /apps/mobile/time_bank/
 /apps/mobile/time_bank_flutter/
+
+.agents/
+.impeccable/
+skills-lock.json
+
