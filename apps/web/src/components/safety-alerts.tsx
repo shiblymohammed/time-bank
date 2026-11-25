@@ -192,7 +192,7 @@ export function SafetyAlerts({
             name: 'Resolved Alerts',
             val: resolvedAlerts,
             icon: 'check',
-            color: '#059669',
+            color: 'var(--admin-success, #059669)',
             glow: 'rgba(5, 150, 105, 0.08)',
             tone: 'emerald',
             pill: 'Resolved & cleared',
@@ -201,7 +201,7 @@ export function SafetyAlerts({
             name: 'Total Incidents',
             val: totalAlerts,
             icon: 'operations',
-            color: '#2563EB',
+            color: 'var(--admin-link, #2563EB)',
             glow: 'rgba(37, 99, 235, 0.08)',
             tone: 'blue',
             pill: showClosed ? 'All recorded' : 'Active queue',
@@ -241,8 +241,8 @@ export function SafetyAlerts({
         <div style={{ color: '#e11d48', flexShrink: 0, marginTop: '2px' }}>
           <Icon name="safety" size={20} />
         </div>
-        <div style={{ fontSize: '0.80rem', lineHeight: '1.45', color: '#334155' }}>
-          <strong style={{ color: '#9f1239', display: 'block', marginBottom: '2px' }}>
+        <div style={{ fontSize: '0.80rem', lineHeight: '1.45', color: 'var(--admin-copy, #334155)' }}>
+          <strong style={{ color: 'var(--admin-danger, #9f1239)', display: 'block', marginBottom: '2px' }}>
             Emergency Protocol & Confidentiality
           </strong>
           These alerts are confidential. The other participant on the visit is informed only that it has been paused or ended, never who raised the alert or the underlying reason. Auto-refreshes every 30 seconds.
@@ -258,14 +258,14 @@ export function SafetyAlerts({
 
       {/* Empty State */}
       {alerts?.length === 0 && (
-        <div className="glass-panel empty-state" style={{ padding: '36px 20px', textAlign: 'center', background: '#ffffff', borderRadius: '14px', border: '1px solid #e2e8f0', margin: '16px 0' }}>
-          <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: '#ecfdf5', color: '#059669', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
+        <div className="glass-panel empty-state" style={{ padding: '36px 20px', textAlign: 'center', background: 'var(--admin-panel, #ffffff)', borderRadius: '14px', border: '1px solid var(--admin-line, #e2e8f0)', margin: '16px 0' }}>
+          <div style={{ width: '48px', height: '48px', borderRadius: '50%', background: 'var(--admin-success-tint, #ecfdf5)', color: 'var(--admin-success, #059669)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 12px' }}>
             <Icon name="check" size={24} />
           </div>
-          <h4 style={{ fontSize: '1rem', fontWeight: 700, color: '#0f172a', margin: '0 0 6px' }}>
+          <h4 style={{ fontSize: '1rem', fontWeight: 700, color: 'var(--admin-ink, #0f172a)', margin: '0 0 6px' }}>
             {showClosed ? 'No safety alerts recorded' : 'All clear — No active safety alerts'}
           </h4>
-          <p style={{ fontSize: '0.82rem', color: '#64748b', margin: 0 }}>
+          <p style={{ fontSize: '0.82rem', color: 'var(--admin-copy, #64748b)', margin: 0 }}>
             {showClosed
               ? 'There are currently no closed safety alerts on record.'
               : 'Any emergency visit pauses or volunteer incidents will appear here immediately.'}
@@ -289,8 +289,8 @@ export function SafetyAlerts({
             tabIndex={-1}
             data-testid="safety-alert"
             style={{
-              background: '#ffffff',
-              border: '1px solid #e2e8f0',
+              background: 'var(--admin-panel, #ffffff)',
+              border: '1px solid var(--admin-line, #e2e8f0)',
               borderLeft: `4px solid ${closed ? '#10b981' : alert.status === 'OPEN' ? '#f43f5e' : '#f59e0b'}`,
               borderRadius: '12px',
               padding: '20px',
@@ -304,20 +304,20 @@ export function SafetyAlerts({
                   <span className="kpi-pill-dot" />
                   {closed ? 'Resolved' : alert.status === 'OPEN' ? 'Urgent: New Alert' : 'Being Handled'}
                 </span>
-                <span className="mono" style={{ fontSize: '0.82rem', fontWeight: 700, color: '#475569' }}>
+                <span className="mono" style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--admin-copy, #475569)' }}>
                   {alert.request.requestNumber}
                 </span>
               </div>
-              <span style={{ fontSize: '0.78rem', color: '#64748b' }}>
+              <span style={{ fontSize: '0.78rem', color: 'var(--admin-copy, #64748b)' }}>
                 Raised: {indiaTime(alert.createdAt)}
               </span>
             </div>
 
-            <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: '#0f172a', margin: '0 0 8px' }}>
+            <h3 style={{ fontSize: '1.15rem', fontWeight: 800, color: 'var(--admin-ink, #0f172a)', margin: '0 0 8px' }}>
               {alert.request.serviceName}
             </h3>
 
-            <p style={{ margin: '0 0 12px', fontSize: '0.85rem', color: '#334155', lineHeight: '1.45' }}>
+            <p style={{ margin: '0 0 12px', fontSize: '0.85rem', color: 'var(--admin-copy, #334155)', lineHeight: '1.45' }}>
               Raised by <strong>{alert.raisedByName || 'a member'}</strong> ({role(alert.raisedByRole)}), who chose to{' '}
               <strong style={{ color: alert.action === 'END' ? '#e11d48' : '#d97706' }}>
                 {alert.action === 'END' ? 'end the visit' : 'pause the visit'}
@@ -325,7 +325,7 @@ export function SafetyAlerts({
             </p>
 
             {alert.notes && (
-              <div style={{ padding: '10px 14px', background: '#fff1f2', borderRadius: '8px', border: '1px solid #ffe4e6', color: '#9f1239', fontSize: '0.82rem', fontStyle: 'italic', marginBottom: '14px' }}>
+              <div style={{ padding: '10px 14px', background: 'var(--admin-danger-tint, #fff1f2)', borderRadius: '8px', border: '1px solid #ffe4e6', color: 'var(--admin-danger, #9f1239)', fontSize: '0.82rem', fontStyle: 'italic', marginBottom: '14px' }}>
                 “{alert.notes}”
               </div>
             )}
@@ -372,19 +372,19 @@ export function SafetyAlerts({
             </div>
 
             {alert.visits.some((visit) => visit.creditsPending) && (
-              <p className="help-text" style={{ padding: '8px 12px', background: '#eff6ff', borderRadius: '8px', border: '1px solid #dbeafe', color: '#1d4ed8', margin: '0 0 12px' }}>
+              <p className="help-text" style={{ padding: '8px 12px', background: 'var(--admin-selected, #eff6ff)', borderRadius: '8px', border: '1px solid var(--admin-accent-line, #dbeafe)', color: '#1d4ed8', margin: '0 0 12px' }}>
                 ℹ️ No credits are paid until you decide. Use Pay for visit or Not delivered on this request in Requests &amp; matching.
               </p>
             )}
 
             {alert.staffNotes && (
-              <p className="help-text" style={{ margin: '0 0 10px', color: '#64748b' }}>
+              <p className="help-text" style={{ margin: '0 0 10px', color: 'var(--admin-copy, #64748b)' }}>
                 <strong>Staff notes:</strong> {alert.staffNotes}
               </p>
             )}
 
             {closed && alert.resolvedAt && (
-              <p className="help-text" style={{ margin: '0 0 10px', color: '#059669', fontWeight: 600 }}>
+              <p className="help-text" style={{ margin: '0 0 10px', color: 'var(--admin-success, #059669)', fontWeight: 600 }}>
                 ✓ {alert.outcome === 'RESTARTED' ? 'Visit restarted' : 'Visit ended'} at {indiaTime(alert.resolvedAt)}
               </p>
             )}

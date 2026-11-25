@@ -3,6 +3,8 @@
 // through the running API so statuses, ledgers and wallets follow the real rules.
 // Usage (after start-interface-qa.ps1, which turns on mock OTP with its fixed code):
 //   node scripts/seed-demo-data.cjs
+// To populate the Desktop checkout's local ktb_dev database and API:
+//   node scripts/seed-demo-data.cjs --desktop
 // For an existing complete QA setup, DEMO_ACTIVITY_ONLY=true adds the optional
 // contribution, donation and post examples without replaying the base fixtures.
 const path = require('node:path');
@@ -11,29 +13,33 @@ const fs = require('node:fs/promises');
 const { createRequire } = require('node:module');
 const req = createRequire(path.resolve(__dirname, '../apps/api/package.json'));
 const { DataSource } = req('typeorm');
+const desktop = process.argv.includes('--desktop');
+const { desktopConfig, desktopFixture, seedDesktopScreens } = require('./desktop-demo-fixture.cjs');
 
 // Override only for another disposable local QA run, never for a deployed database.
 const qaRoot = path.resolve(
   process.env.DEMO_ARTIFACT_DIR ?? path.resolve(__dirname, '../node_modules/.cache/interface-qa'),
 );
-const state = require(path.join(qaRoot, 'state.json'));
-const fixture = require(path.join(qaRoot, 'fixture.json'));
-const API = process.env.SEED_API_URL ?? `http://127.0.0.1:${state.apiPort ?? 3001}/api`;
-const OTP = process.env.SEED_OTP ?? '123456';
-const ORGANIZATION_CODE = process.env.DEMO_ORGANIZATION_CODE ?? 'KOTTAKKAL';
-if (!/^ktb_interface_qa_[a-z0-9_]+$/.test(state.database))
+const state = desktop ? desktopConfig(req) : require(path.join(qaRoot, 'state.json'));
+const API = desktop
+  ? state.api
+  : (process.env.SEED_API_URL ?? `http://127.0.0.1:${state.apiPort ?? 3001}/api`);
+const OTP = desktop ? '123456' : process.env.SEED_OTP ?? '123456';
+const ORGANIZATION_CODE = desktop ? 'LOCAL_QA' : process.env.DEMO_ORGANIZATION_CODE ?? 'KOTTAKKAL';
+if (!desktop && !/^ktb_interface_qa_[a-z0-9_]+$/.test(state.database))
   throw new Error('Seeding is only allowed on the disposable interface-QA database');
-if (API !== `http://127.0.0.1:${state.apiPort ?? 3001}/api`)
+if (!desktop && API !== `http://127.0.0.1:${state.apiPort ?? 3001}/api`)
   throw new Error('The seed API must match the loopback address recorded for the QA run');
 
 const db = new DataSource({
   type: 'postgres',
-  url: `postgresql://ktb_interface_qa@127.0.0.1:${state.port}/${state.database}`,
+  url: desktop ? state.databaseUrl : `postgresql://ktb_interface_qa@127.0.0.1:${state.port}/${state.database}`,
+  connectTimeoutMS: 4000,
 });
-const org = fixture.org;
+let org;
 const tokens = {};
 
-async function call(method, route, token, body) {
+async function call(method, route, token, body, retries = 2) {
   const res = await fetch(API + route, {
     method,
     headers: {
@@ -41,10 +47,16 @@ async function call(method, route, token, body) {
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
     body: body === undefined ? undefined : JSON.stringify(body),
+    signal: AbortSignal.timeout(15000),
   });
   const text = await res.text();
   const data = text ? JSON.parse(text) : {};
   if (!res.ok) {
+    if (res.status === 429 && desktop && retries > 0) {
+      // Keep the API's configured limits in effect during bulk demo sign-ins.
+      await new Promise((resolve) => setTimeout(resolve, 61000));
+      return call(method, route, token, body, retries - 1);
+    }
     const message = Array.isArray(data.message) ? data.message.join('; ') : data.message;
     throw new Error(`${method} ${route} → ${res.status} ${message}`);
   }
@@ -53,7 +65,8 @@ async function call(method, route, token, body) {
 
 async function login(phone) {
   if (tokens[phone]) return tokens[phone];
-  await call('POST', '/auth/otp/request', null, { phone });
+  const challenge = await call('POST', '/auth/otp/request', null, { phone });
+  if (desktop && challenge.devOtp !== OTP) throw new Error('The Desktop API must use local mock OTP.');
   const session = await call('POST', '/auth/otp/verify', null, {
     phone,
     code: OTP,
@@ -62,7 +75,16 @@ async function login(phone) {
   return (tokens[phone] = session.accessToken);
 }
 
-const id = async (sql, args = []) => (await db.query(sql, args))[0].id;
+async function staffLogin(phone) {
+  const token = await login(phone);
+  const staffCode = await call('GET', '/auth/staff-code', token);
+  if (staffCode.required && !staffCode.verified) {
+    await call('POST', '/auth/staff-code/request', token);
+    await call('POST', '/auth/staff-code/verify', token, { code: OTP });
+  }
+  return token;
+}
+
 const at = (days, hour = 10, minute = 0) => {
   const d = new Date();
   d.setDate(d.getDate() + days);
@@ -167,11 +189,14 @@ const WARDS = [
 
 (async () => {
   await db.initialize();
+  const fixture = desktop ? await desktopFixture(db, API) : require(path.join(qaRoot, 'fixture.json'));
+  org = fixture.org;
   const existing = await db.query(
-    "SELECT (SELECT count(*) FROM service_requests)::int AS requests, (SELECT count(*) FROM service_categories WHERE code='SKILL_SUPPORT')::int AS seeded_category, (SELECT count(*) FROM users WHERE phone_e164 LIKE '+9190000002%')::int AS seeded_volunteers, (SELECT count(*) FROM users WHERE phone_e164 LIKE '+9190000003%')::int AS seeded_recipients",
+    "SELECT (SELECT count(*) FROM service_requests WHERE organization_id=$1)::int AS requests, (SELECT count(*) FROM organization_service_catalog s JOIN global_service_definitions g ON g.id=s.global_service_id WHERE s.organization_id=$1 AND g.code='DOCUMENT_HELP')::int AS seeded_category, (SELECT count(*) FROM users WHERE primary_org_id=$1 AND phone_e164 LIKE '+9190000002%')::int AS seeded_volunteers, (SELECT count(*) FROM users WHERE primary_org_id=$1 AND phone_e164 LIKE '+9190000003%')::int AS seeded_recipients",
+    [org],
   );
   const activityOnly = process.env.DEMO_ACTIVITY_ONLY === 'true';
-  const resume = activityOnly || process.env.DEMO_RESUME_PARTIAL === 'true';
+  const resume = activityOnly || (desktop && existing[0].seeded_volunteers > 0) || process.env.DEMO_RESUME_PARTIAL === 'true';
   if (
     !resume &&
     (existing[0].requests ||
@@ -188,8 +213,12 @@ const WARDS = [
     beneficiaries = [],
     zones = [];
   const { coordinator, admin } = fixture.people;
+  if (desktop) {
+    const profile = await call('GET', '/auth/me', await login(coordinator.phone));
+    if (profile.id !== coordinator.user) throw new Error('The running API uses a different database.');
+  }
   if (resume) {
-    await db.query(
+    if (!desktop) await db.query(
       "UPDATE organizations SET code=$2,name='Kottakkal Municipality',district='Malappuram' WHERE id=$1",
       [org, ORGANIZATION_CODE],
     );
@@ -240,9 +269,14 @@ const WARDS = [
       );
     }
     console.log('Resuming the known partial Kottakkal demo seed…');
-  } else {
+  } else await db.transaction(async (db) => {
+    const id = async (sql, args = []) => {
+      const [row] = await db.query(sql, args);
+      if (!row) throw new Error('A demo account number is already in use outside this municipality.');
+      return row.id;
+    };
     console.log('Adding communities, services and members…');
-    await db.query(
+    if (!desktop) await db.query(
       "UPDATE organizations SET code=$2,name='Kottakkal Municipality', district='Malappuram' WHERE id=$1",
       [org, ORGANIZATION_CODE],
     );
@@ -250,12 +284,12 @@ const WARDS = [
     let order = 1;
     for (const [code, en, ml, services] of SERVICES) {
       const category = await id(
-        'INSERT INTO service_categories(code,name_en,name_ml,display_order) VALUES($1,$2,$3,$4) RETURNING id',
+        'INSERT INTO service_categories(code,name_en,name_ml,display_order) VALUES($1,$2,$3,$4) ON CONFLICT (code) DO UPDATE SET code=EXCLUDED.code RETURNING id',
         [code, en, ml, order++],
       );
       for (const [sCode, sEn, sMl, desc] of services) {
         const global = await id(
-          'INSERT INTO global_service_definitions(category_id,code,name_en,name_ml,description_en) VALUES($1,$2,$3,$4,$5) RETURNING id',
+          'INSERT INTO global_service_definitions(category_id,code,name_en,name_ml,description_en) VALUES($1,$2,$3,$4,$5) ON CONFLICT (code) DO UPDATE SET code=EXCLUDED.code RETURNING id',
           [category, sCode, sEn, sMl, desc],
         );
         catalogue[sCode] = await id(
@@ -272,25 +306,25 @@ const WARDS = [
       { verified = false, beneficiary = false, name = null, email = null } = {},
     ) => {
       const user = await id(
-        'INSERT INTO users(phone_e164,primary_org_id,full_name,email) VALUES($1,$2,$3,$4) RETURNING id',
+        'INSERT INTO users(phone_e164,primary_org_id,full_name,email) VALUES($1,$2,$3,$4) ON CONFLICT (phone_e164) DO UPDATE SET primary_org_id=$2 WHERE users.primary_org_id=$2 RETURNING id',
         [phone, org, name, email],
       );
       const membership = await id(
-        "INSERT INTO organization_memberships(organization_id,user_id,status,membership_number) VALUES($1,$2,'APPROVED',$3) RETURNING id",
+        "INSERT INTO organization_memberships(organization_id,user_id,status,membership_number) VALUES($1,$2,'APPROVED',$3) ON CONFLICT (organization_id,user_id) DO UPDATE SET membership_number=COALESCE(organization_memberships.membership_number,$3) RETURNING id",
         [org, user, number],
       );
       await db.query(
-        'INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,$2,$3)',
+        'INSERT INTO membership_role_grants(membership_id,role,granted_by) VALUES($1,$2,$3) ON CONFLICT DO NOTHING',
         [membership, role, coordinator.user],
       );
       if (verified)
         await db.query(
-          "INSERT INTO verified_identities(user_id,verification_status) VALUES($1,'VERIFIED')",
+          "INSERT INTO verified_identities(user_id,verification_status) VALUES($1,'VERIFIED') ON CONFLICT DO NOTHING",
           [user],
         );
       if (beneficiary)
         await db.query(
-          "INSERT INTO beneficiary_eligibilities(organization_id,membership_id,review_due_at,approved_by_user_id,monthly_request_quota) VALUES($1,$2,NOW()+interval '1 year',$3,50)",
+          "INSERT INTO beneficiary_eligibilities(organization_id,membership_id,review_due_at,approved_by_user_id,monthly_request_quota) VALUES($1,$2,NOW()+interval '1 year',$3,50) ON CONFLICT DO NOTHING",
           [org, membership, coordinator.user],
         );
       return { user, membership, phone };
@@ -416,7 +450,7 @@ const WARDS = [
 
     console.log('Setting up local recognition and ward areas…');
     await db.query(
-      'INSERT INTO loyalty_policies(enabled,coins_per_hour,engagement_cap,campaign_cap_per_hour,milestones,created_by) VALUES(true,20,100,10,$1::jsonb,$2)',
+      'INSERT INTO loyalty_policies(enabled,coins_per_hour,engagement_cap,campaign_cap_per_hour,milestones,created_by) SELECT true,20,100,10,$1::jsonb,$2 WHERE NOT EXISTS (SELECT 1 FROM loyalty_policies)',
       [
         JSON.stringify([
           { minutes: 120, name: 'Neighbourhood Helper', coins: 10 },
@@ -442,14 +476,9 @@ const WARDS = [
       );
       zones.push(zone);
     }
-  }
+  });
 
-  const coordToken = await login(coordinator.phone);
-  const staffCode = await call('GET', '/auth/staff-code', coordToken);
-  if (staffCode.required && !staffCode.verified) {
-    await call('POST', '/auth/staff-code/request', coordToken);
-    await call('POST', '/auth/staff-code/verify', coordToken, { code: OTP });
-  }
+  const coordToken = await staffLogin(coordinator.phone);
   await call('GET', `/organizations/${org}/community/nearby`, coordToken);
   let n = 0;
   const results = {
@@ -552,7 +581,7 @@ const WARDS = [
   const vol = (i) => volunteers[i % volunteers.length];
   const ben = (i) => beneficiaries[i % beneficiaries.length];
 
-  if (activityOnly) {
+  if (activityOnly || desktop) {
     for (const [volunteerIndex, recipientIndex, service, minutes, note, finishNote] of [
       [
         10,
@@ -786,18 +815,19 @@ const WARDS = [
       });
 
     console.log('Adding optional private profile photos and expiring Nearby availability…');
-    const avatarFiles = [
-      path.resolve(__dirname, '../apps/mobile/time_bank_flutter/assets/avatars/avatar_female.png'),
-      path.resolve(__dirname, '../apps/mobile/time_bank_flutter/assets/avatars/avatar.png'),
-    ];
+    const avatarDir = desktop
+      ? path.resolve(__dirname, '../../time_bank_flutter/assets/avatars')
+      : path.resolve(__dirname, '../apps/mobile/time_bank_flutter/assets/avatars');
+    const avatarFiles = ['avatar_female.png', 'avatar.png'].map((name) => path.join(avatarDir, name));
     const avatarBytes = await Promise.all(avatarFiles.map((file) => fs.readFile(file)));
-    for (const [i, person] of [
+    const peopleWithPhotos = [
       coordinator,
       admin,
       ...staff,
-      ...volunteers,
-      ...beneficiaries,
-    ].entries()) {
+      ...(desktop ? volunteers.slice(0, 4) : volunteers),
+      ...(desktop ? beneficiaries.slice(0, 3) : beneficiaries),
+    ];
+    for (const [i, person] of peopleWithPhotos.entries()) {
       await step(`profile photo ${person.phone}`, async () => {
         const token = await login(person.phone);
         const headers = { authorization: `Bearer ${token}` };
@@ -935,6 +965,22 @@ const WARDS = [
     console.warn('Community posts skipped because the QA database has no Community Feed migration');
   }
 
+  if (desktop) {
+    await seedDesktopScreens(db, fixture);
+    await step('saved sponsor report', async () => {
+      const [period] = await db.query(
+        "SELECT to_char((now() AT TIME ZONE 'Asia/Kolkata') - interval '1 month', 'YYYY-MM') AS month",
+      );
+      const [existingReport] = await db.query(
+        'SELECT id FROM sponsor_reports WHERE organization_id=$1 AND period_month=$2 LIMIT 1',
+        [org, period.month],
+      );
+      if (!existingReport) {
+        const token = await staffLogin(admin.phone);
+        await call('POST', `/organizations/${org}/reports/sponsor`, token, { month: period.month });
+      }
+    });
+  }
   const [earnings] = await db.query(
     `SELECT count(*)::int AS visits, coalesce(sum(minutes),0)::int AS minutes,
             coalesce(sum(amount),0) AS credits

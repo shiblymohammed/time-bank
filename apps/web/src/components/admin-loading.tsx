@@ -1,4 +1,4 @@
-import { BrandMark } from './icons';
+import { Icon } from './icons';
 
 export function AdminLoading({ children }: { children: string }) {
   return (
@@ -13,10 +13,10 @@ export function AdminSessionLoading({ theme = 'system' }: { theme?: 'light' | 'd
   return (
     <main className="admin-loader-screen" data-admin-theme={theme}>
       <div className="admin-loader-card">
-        <div className="admin-loader-brand" aria-hidden="true">
-          <BrandMark size={34} />
+        <div className="admin-login-mark" aria-hidden="true">
+          <Icon name="clock" size={23} />
         </div>
-        <p className="admin-loader-title">Indian Time Bank</p>
+        <p className="admin-loader-title">Time Bank</p>
         <AdminLoading>Checking your session…</AdminLoading>
       </div>
     </main>

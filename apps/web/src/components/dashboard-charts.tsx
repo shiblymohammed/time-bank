@@ -17,19 +17,20 @@ import {
 import { shown } from '@/lib/report-utils';
 
 const palette = {
-  blue: '#0052FF',
-  purple: '#8B5CF6',
-  teal: '#10B981',
-  grey: '#E2E8F0',
-  grid: '#F1F5F9',
-  label: '#64748B',
+  blue: 'var(--admin-series-memberships)',
+  purple: 'var(--admin-series-users)',
+  teal: 'var(--admin-series-organizations)',
+  grey: 'var(--admin-strong-line)',
+  grid: 'var(--admin-line)',
+  label: 'var(--admin-copy)',
 };
 const tick = { fill: palette.label, fontSize: 12 };
 const tooltipStyle = {
-  border: '1px solid #E2E8F0',
+  border: '1px solid var(--admin-line)',
   borderRadius: 12,
-  background: '#fff',
-  boxShadow: '0 8px 22px rgba(15, 23, 42, 0.08)',
+  background: 'var(--admin-raised)',
+  color: 'var(--admin-ink)',
+  boxShadow: 'var(--admin-popover-shadow)',
   padding: '10px 14px',
 };
 
@@ -53,7 +54,7 @@ export function ActivityTrend({ points }: { points?: ActivityPoint[] | undefined
     series.map(({ key }) => key),
   );
   const visible = series.filter(({ key }) => active.includes(key));
-  
+
   const data = points?.slice(-months) ?? [];
   const chartTitle = 'Activity trends';
 
@@ -349,7 +350,7 @@ export function ReportBars({
               />
               <Tooltip
                 contentStyle={tooltipStyle}
-                cursor={{ fill: '#f2f4fa' }}
+                cursor={{ fill: 'var(--admin-hover)' }}
                 formatter={(value) => [typeof value === 'number' ? shown(value) : value, unit]}
               />
               <Bar

@@ -1682,7 +1682,7 @@ function AddServiceModal({
                   </label>
 
                   {requiresSkills && (
-                    <div style={{ background: '#f8fafc', padding: 12, borderRadius: 10, border: '1px solid #e2e8f0' }}>
+                    <div style={{ background: 'var(--admin-subtle, #f8fafc)', padding: 12, borderRadius: 10, border: '1px solid var(--admin-line, #e2e8f0)' }}>
                       <div className="form-field">
                         <label className="form-field-label">
                           <span>Required Skill Codes</span>
@@ -2346,7 +2346,7 @@ function EditServiceModal({
                   </label>
 
                   {requiresSkills && (
-                    <div style={{ background: '#f8fafc', padding: 12, borderRadius: 10, border: '1px solid #e2e8f0' }}>
+                    <div style={{ background: 'var(--admin-subtle, #f8fafc)', padding: 12, borderRadius: 10, border: '1px solid var(--admin-line, #e2e8f0)' }}>
                       <div className="form-field">
                         <label className="form-field-label">
                           <span>Required Skill Codes</span>

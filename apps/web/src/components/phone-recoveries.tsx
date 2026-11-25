@@ -292,7 +292,7 @@ export function PhoneRecoveries({
             name: 'Total Requests',
             val: totalRecoveries,
             icon: 'phoneRecovery',
-            color: '#2563EB',
+            color: 'var(--admin-link, #2563EB)',
             glow: 'rgba(37, 99, 235, 0.08)',
             tone: 'blue',
             pill: 'Number update records',
@@ -310,7 +310,7 @@ export function PhoneRecoveries({
             name: 'Needs Decision',
             val: waitingDecision,
             icon: 'check',
-            color: '#7C3AED',
+            color: 'var(--admin-link, #7C3AED)',
             glow: 'rgba(124, 58, 237, 0.08)',
             tone: 'purple',
             pill: 'Ready for admin approval',
@@ -319,7 +319,7 @@ export function PhoneRecoveries({
             name: 'Successfully Transferred',
             val: completedCount,
             icon: 'check',
-            color: '#059669',
+            color: 'var(--admin-success, #059669)',
             glow: 'rgba(5, 150, 105, 0.08)',
             tone: 'emerald',
             pill: 'Completed transfers',
@@ -356,11 +356,11 @@ export function PhoneRecoveries({
 
       {/* Governance Banner */}
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', padding: '14px 16px', background: 'rgba(37, 99, 235, 0.05)', border: '1px solid rgba(37, 99, 235, 0.15)', borderRadius: '12px', marginBottom: '18px' }}>
-        <div style={{ color: '#2563eb', flexShrink: 0, marginTop: '2px' }}>
+        <div style={{ color: 'var(--admin-link, #2563eb)', flexShrink: 0, marginTop: '2px' }}>
           <Icon name="phoneRecovery" size={20} />
         </div>
-        <div style={{ fontSize: '0.80rem', lineHeight: '1.45', color: '#334155' }}>
-          <strong style={{ color: '#1e3a8a', display: 'block', marginBottom: '2px' }}>
+        <div style={{ fontSize: '0.80rem', lineHeight: '1.45', color: 'var(--admin-copy, #334155)' }}>
+          <strong style={{ color: 'var(--admin-link, #1e3a8a)', display: 'block', marginBottom: '2px' }}>
             Physical ID Verification & Anti-Hijack Guard
           </strong>
           A coordinator physically inspects the member&apos;s government ID in person, the new number confirms with an SMS code, and a Municipality Admin authorizes the migration. The account, wallets, and credits remain intact.

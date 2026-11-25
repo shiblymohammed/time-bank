@@ -1,4 +1,4 @@
-/* Super Admin shell and overview. The other admin roles use the existing shell. */
+/* Shared administration shell and dashboard palette. */
 [data-admin-theme] {
   --admin-page: #f5f6fa;
   --admin-nav: #fff;
@@ -14,9 +14,17 @@
   --admin-copy: #62677a;
   --admin-nav-ink: #494e61;
   --admin-accent: #5c54d8;
+  --admin-accent-hover: #4b43bc;
   --admin-link: #4b44be;
   --admin-selected: #f1f0ff;
+  --admin-accent-line: #ddd9fa;
   --admin-active: #237453;
+  --admin-success: #237453;
+  --admin-success-tint: #ebf7ef;
+  --admin-warning: #875000;
+  --admin-warning-tint: #fff4df;
+  --admin-danger: #a53442;
+  --admin-danger-tint: #fdecf0;
   --admin-series-users: #5c54d8;
   --admin-series-memberships: #386db7;
   --admin-series-organizations: #22805c;
@@ -40,11 +48,56 @@
   --admin-nav-ink: #d7d9e4;
   --admin-link: #c2bdff;
   --admin-selected: #414165;
+  --admin-accent-line: #615d90;
   --admin-active: #79dcb1;
+  --admin-success: #79dcb1;
+  --admin-success-tint: #263e3c;
+  --admin-warning: #ffd28a;
+  --admin-warning-tint: #463a32;
+  --admin-danger: #ffadb8;
+  --admin-danger-tint: #49333f;
   --admin-series-users: #b7b1ff;
   --admin-series-memberships: #89c4ff;
   --admin-series-organizations: #79dcb1;
   --admin-popover-shadow: 0 8px 24px rgba(9, 11, 22, .32);
+}
+
+:is(.app-container, .drawer, .wallet-modal-backdrop)[data-admin-theme] {
+  --bg-page: var(--admin-page);
+  --bg-surface: var(--admin-panel);
+  --bg-subtle: var(--admin-subtle);
+  --bg-hover: var(--admin-hover);
+  --border: var(--admin-line);
+  --border-strong: var(--admin-strong-line);
+  --text-main: var(--admin-ink);
+  --text-muted: var(--admin-copy);
+  --text-faint: var(--admin-copy);
+  --primary: var(--admin-accent);
+  --primary-hover: var(--admin-accent-hover);
+  --primary-tint: var(--admin-selected);
+  --primary-ring: color-mix(in srgb, var(--admin-link) 28%, transparent);
+  --success: var(--admin-success);
+  --success-tint: var(--admin-success-tint);
+  --warning: var(--admin-warning);
+  --warning-tint: var(--admin-warning-tint);
+  --danger: var(--admin-danger);
+  --danger-tint: var(--admin-danger-tint);
+  --neutral-tint: var(--admin-subtle);
+  --admin-success-line: color-mix(in srgb, var(--admin-success) 26%, var(--admin-line));
+  --admin-warning-line: color-mix(in srgb, var(--admin-warning) 26%, var(--admin-line));
+  --admin-danger-line: color-mix(in srgb, var(--admin-danger) 26%, var(--admin-line));
+  --shadow-sm: 0 1px 2px rgb(15 18 37 / 5%);
+  --shadow-lg: var(--admin-popover-shadow);
+  color-scheme: light;
+  color: var(--admin-ink);
+}
+
+:is(.app-container, .drawer, .wallet-modal-backdrop)[data-admin-theme='dark'] {
+  color-scheme: dark;
+}
+
+.app-container[data-admin-theme] {
+  background: var(--admin-page);
 }
 
 .app-container[data-admin-theme] .sidebar {
@@ -168,6 +221,9 @@
   width: clamp(132px, 17vw, 214px);
   min-width: 0;
 }
+
+[data-admin-theme] .admin-unified-toolbar .scope-label { min-width: 0; }
+[data-admin-theme] .admin-unified-toolbar .scope-select-trigger:not(button) { cursor: default; }
 
 [data-admin-theme] .admin-control {
   display: inline-flex;
@@ -438,13 +494,53 @@
 [data-admin-theme] .admin-content-heading h1 { font-size: 28px; font-weight: 700; line-height: 1.15; }
 [data-admin-theme] .admin-content-heading p { margin-top: 6px; font-size: 13px; }
 
-[data-admin-overview] { background: var(--admin-page); color: var(--admin-ink); }
-[data-admin-overview] .content-body {
+.app-container[data-admin-theme] .content-body {
   max-width: 1520px;
   padding: 28px clamp(16px, 3vw, 36px) 40px;
 }
-[data-admin-overview] .admin-content-heading h1 { color: var(--admin-ink); }
-[data-admin-overview] :is(.admin-content-heading p, .loading-line) { color: var(--admin-copy); }
+[data-admin-theme] .admin-content-heading h1 { color: var(--admin-ink); }
+[data-admin-theme] :is(.admin-content-heading p, .loading-line) { color: var(--admin-copy); }
+
+[data-admin-theme] :is(.glass-panel, .table-container.glass-panel, .toolbar, .section-heading, .ops) {
+  border-color: var(--admin-line);
+  border-radius: 12px;
+  box-shadow: var(--shadow-sm);
+}
+
+[data-admin-theme] .drawer-section .section-heading { border-radius: 0; box-shadow: none; }
+[data-admin-theme] :is(.custom-table, .service-table) tbody tr:hover td { background-color: var(--admin-hover); }
+:is(.app-container, .drawer, .wallet-modal-backdrop)[data-admin-theme] .btn-primary {
+  box-shadow: none;
+}
+.app-container[data-admin-theme] .btn-primary:hover:not(:disabled) { box-shadow: none; }
+[data-admin-theme] .badge-pending { color: var(--admin-warning); }
+[data-admin-theme] :is(.badge-suspended, .badge-rejected) { color: var(--admin-danger); }
+[data-admin-theme] :is(.drawer-footer, .drawer-header, .membership-number-chip, .membership-phone-chip) {
+  background: var(--admin-panel);
+}
+[data-admin-theme] :is(.membership-number-chip, .membership-phone-chip) { color: var(--admin-copy); }
+[data-admin-theme] :is(.membership-role-label, .membership-profile-avatar) {
+  background: var(--admin-selected);
+  color: var(--admin-link);
+}
+.drawer[data-admin-theme] { background: var(--admin-page); }
+[data-admin-theme] :is(.modal-content, .modern-modal-content) { border-color: var(--admin-line); }
+[data-admin-theme] .proposal-modal-footer { background: var(--admin-panel); }
+:is(.app-container, .drawer, .wallet-modal-backdrop)[data-admin-theme] .form-input {
+  color: var(--admin-ink);
+}
+:is(.app-container, .drawer, .wallet-modal-backdrop)[data-admin-theme] .form-input::placeholder {
+  color: var(--admin-copy);
+}
+:is(.app-container, .drawer, .wallet-modal-backdrop)[data-admin-theme] .form-input:focus {
+  border-color: var(--admin-link);
+  box-shadow: 0 0 0 3px var(--primary-ring);
+}
+[data-admin-theme] .ops-segmented-tab:hover:not([aria-pressed='true']) {
+  background: var(--admin-hover);
+  color: var(--admin-ink);
+}
+
 [data-admin-overview] {
   --overview-blue: #386db7;
   --overview-green: #237453;
@@ -791,15 +887,6 @@ html[data-admin-startup-theme='dark'] .admin-loader-screen[data-admin-theme='sys
   border-radius: 12px;
   background: var(--admin-panel);
   text-align: center;
-}
-
-.admin-loader-brand {
-  display: grid;
-  place-items: center;
-  width: 48px;
-  height: 48px;
-  border-radius: 11px;
-  background: #e6e4ff;
 }
 
 .admin-loader-title {

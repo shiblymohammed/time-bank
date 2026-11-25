@@ -26,6 +26,7 @@ services:
       start_period: 30s
     networks:
       - ktb_internal
+      - ktb_postgres_host
 
   # ─── NestJS API ──────────────────────────────────────────────────────────
   # D#95: NestJS + TypeScript + PostgreSQL backend
@@ -127,8 +128,11 @@ volumes:
     driver: local
 
 networks:
+  # A non-internal bridge allows Docker to publish the localhost-only database port.
+  ktb_postgres_host:
+    driver: bridge
   # Firebase token verification fetches Google's public signing certificates.
-  # This grants API outbound connectivity without giving Postgres an external network.
+  # Keep API egress on its own bridge.
   ktb_api_egress:
     driver: bridge
   # Internal network — only containers can reach postgres and api directly
