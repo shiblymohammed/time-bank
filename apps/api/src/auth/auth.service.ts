@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   Injectable,
   BadRequestException,
@@ -658,6 +659,40 @@ export class AuthService {
       success: true,
       message: 'Logged out successfully',
     };
+  }
+
+  // Bounded long polling works across API instances because the source of
+  // truth is the committed membership row, not an in-process event.
+  async watchMembership(userId: string, organizationId: string, known: string, signal: AbortSignal) {
+    const deadline = Date.now() + 12_000;
+    while (!signal.aborted) {
+      const [row] = await this.dataSource.query(
+        `SELECT m.id, m.status, m.updated_at AS "updatedAt",
+                n.id AS "nocId", n.review_status AS "nocStatus", n.reviewed_at AS "nocReviewedAt"
+           FROM organization_memberships m
+           LEFT JOIN LATERAL (
+             SELECT id, review_status, reviewed_at
+               FROM membership_documents
+              WHERE membership_id = m.id AND document_type = 'WARD_NOC'
+              ORDER BY created_at DESC, id DESC LIMIT 1
+           ) n ON true
+          WHERE m.user_id = $1 AND m.organization_id = $2`,
+        [userId, organizationId],
+      );
+      if (!row) throw new NotFoundException('Membership not found');
+      const revision = [row.id, row.status, row.updatedAt, row.nocId, row.nocStatus, row.nocReviewedAt]
+        .map((value) => value instanceof Date ? value.toISOString() : (value ?? ''))
+        .join('|');
+      if (revision !== known || Date.now() >= deadline) {
+        return { id: row.id, status: row.status, nocId: row.nocId, nocStatus: row.nocStatus, revision };
+      }
+      try {
+        await delay(2_000, undefined, { signal });
+      } catch (error) {
+        if (!signal.aborted) throw error;
+      }
+    }
+    return null;
   }
 
   /**

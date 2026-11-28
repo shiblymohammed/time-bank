@@ -563,6 +563,38 @@ describe('AuthService', () => {
     });
   });
 
+  it('watches a status only within the signed-in member and requested organization', async () => {
+    mockDataSource.query.mockResolvedValueOnce([
+      { id: 'membership', status: 'APPROVED', nocId: 'noc', nocStatus: 'APPROVED' },
+    ]);
+    const signal = new AbortController().signal;
+    await expect(service.watchMembership('member', 'org', '', signal)).resolves.toMatchObject({
+      status: 'APPROVED',
+      nocStatus: 'APPROVED',
+      revision: expect.any(String),
+    });
+    expect(mockDataSource.query).toHaveBeenCalledWith(expect.any(String), ['member', 'org']);
+    mockDataSource.query.mockResolvedValueOnce([]);
+    await expect(service.watchMembership('other-member', 'org', '', signal)).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+
+  it('returns a committed approval before the long-poll deadline', async () => {
+    const pending = { id: 'membership', status: 'APPLIED', nocId: 'noc', nocStatus: 'PENDING' };
+    const approved = { ...pending, status: 'APPROVED', nocStatus: 'APPROVED' };
+    mockDataSource.query
+      .mockResolvedValueOnce([pending])
+      .mockResolvedValueOnce([pending])
+      .mockResolvedValueOnce([approved]);
+    const signal = new AbortController().signal;
+    const baseline = await service.watchMembership('member', 'org', '', signal);
+    await expect(
+      service.watchMembership('member', 'org', baseline!.revision, signal),
+    ).resolves.toMatchObject({ status: 'APPROVED', nocStatus: 'APPROVED' });
+    expect(mockDataSource.query).toHaveBeenCalledTimes(3);
+  });
+
   describe('getMe', () => {
     it('returns the owner’s application feedback and answers for corrections', async () => {
       const details = { participationIntent: 'BOTH', helpFor: 'CAREGIVER' };

@@ -7,7 +7,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { EntityManager, In, Repository } from 'typeorm';
 import {
   MembershipStatus,
   MembershipApprovalAction,
@@ -264,7 +264,10 @@ export class MembershipsService {
    * The app no longer asks for availability when joining, so missing answers get the same
    * defaults matching uses (5 km, available at short notice); the ward is still recorded.
    */
-  private async seedVolunteerProfile(membership: OrganizationMembership): Promise<void> {
+  private async seedVolunteerProfile(
+    membership: OrganizationMembership,
+    manager: EntityManager = this.membershipRepo.manager,
+  ): Promise<void> {
     const answers = membership.applicationDetails?.volunteer ?? {
       maxTravelRadiusKm: 5,
       availableAtShortNotice: true,
@@ -272,7 +275,6 @@ export class MembershipsService {
       usualTimes: [],
       skillCodes: [],
     };
-    const manager = this.membershipRepo.manager;
     const availabilityRepo = manager.getRepository(VolunteerAvailability);
     const existing = await availabilityRepo.findOne({
       where: { organizationId: membership.organizationId, membershipId: membership.id },
@@ -309,8 +311,11 @@ export class MembershipsService {
   }
 
   /** Each call takes the next number atomically, so simultaneous approvals never share one. */
-  private async nextMembershipSequence(organizationId: string): Promise<number> {
-    const result = await this.orgRepo
+  private async nextMembershipSequence(
+    organizationId: string,
+    repository: Repository<Organization>,
+  ): Promise<number> {
+    const result = await repository
       .createQueryBuilder()
       .update(Organization)
       .set({ membershipSequence: () => 'membership_sequence + 1' })
@@ -357,91 +362,98 @@ export class MembershipsService {
     this.authorizationService.assertNoSelfEscalation(approverId, membership.userId, initialRole);
     await this.assertCanManageRole(organizationId, approverId, initialRole);
 
-    // Every new member uploads a ward NOC. Approving the membership accepts it in the same step,
-    // so staff only click Approve (simplified flow, 22 Nov 2026).
-    const documents = await this.documentRepo.find({ where: { membershipId } });
-    const noc = currentNoc(documents);
-    if (!noc || noc.reviewStatus === DocumentReviewStatus.SUPERSEDED) {
-      throw new ConflictException('This member has not uploaded their ward NOC yet');
-    }
-    if (noc.reviewStatus !== DocumentReviewStatus.APPROVED) {
-      noc.reviewStatus = DocumentReviewStatus.APPROVED;
-      noc.reviewNotes = null;
-      noc.reviewedByUserId = approverId;
-      noc.reviewedAt = new Date();
-      await this.documentRepo.save(noc);
-    }
+    await this.membershipRepo.manager.transaction(async (manager) => {
+      const memberships = manager.getRepository(OrganizationMembership);
+      const organizations = manager.getRepository(Organization);
+      const documentsRepo = manager.getRepository(MembershipDocument);
+      const roleGrants = manager.getRepository(MembershipRoleGrant);
+      const approvals = manager.getRepository(MembershipApproval);
+      const org = await organizations.findOne({ where: { id: organizationId } });
+      if (!org) {
+        throw new NotFoundException('Organization not found');
+      }
 
-    const org = await this.orgRepo.findOne({ where: { id: organizationId } });
-    if (!org) {
-      throw new NotFoundException('Organization not found');
-    }
+      // Generate formatted sequential membership number: {ORG_CODE}-{YEAR}-{INDEX}
+      const year = new Date().getFullYear();
+      const sequence = await this.nextMembershipSequence(organizationId, organizations);
+      const membershipNumber = `${org.code}-${year}-${String(sequence).padStart(4, '0')}`;
 
-    // Generate formatted sequential membership number: {ORG_CODE}-{YEAR}-{INDEX}
-    const year = new Date().getFullYear();
-    const sequence = await this.nextMembershipSequence(organizationId);
-    const membershipNumber = `${org.code}-${year}-${String(sequence).padStart(4, '0')}`;
-
-    const approvedFields = {
-      status: MembershipStatus.APPROVED,
-      approvedAt: new Date(),
-      approvedBy: approverId,
-      membershipNumber,
-      rejectionReason: null,
-    };
-    // Only one of two simultaneous approvals may go on to grant the role.
-    const claimed = await this.membershipRepo.update(
-      { id: membershipId, organizationId, status: previousStatus },
-      approvedFields,
-    );
-    if (!claimed.affected) throw new ConflictException('Membership was already reviewed');
-    const saved = Object.assign(membership, approvedFields);
-
-    // Grant initial role (default: VOLUNTEER)
-    const existingGrant = await this.roleGrantRepo.findOne({
-      where: {
-        membershipId: saved.id,
-        role: initialRole,
-        status: RoleGrantStatus.ACTIVE,
-      },
-    });
-
-    if (!existingGrant) {
-      const grant = this.roleGrantRepo.create({
-        membershipId: saved.id,
-        role: initialRole,
-        status: RoleGrantStatus.ACTIVE,
-        grantedBy: approverId,
-      });
-      await this.roleGrantRepo.save(grant);
-    }
-    if (initialRole === UserRole.VOLUNTEER) await this.seedVolunteerProfile(saved);
-
-    // Record approval audit trail
-    const approval = this.approvalRepo.create({
-      membershipId: saved.id,
-      action: MembershipApprovalAction.MEMBERSHIP_APPROVED,
-      actorId: approverId,
-      notes: dto.notes ?? 'Application approved',
-    });
-    await this.approvalRepo.save(approval);
-
-    await this.auditService.logEvent({
-      eventType: 'MEMBERSHIP_APPROVED',
-      actorId: approverId,
-      targetId: saved.id,
-      targetType: 'ORGANIZATION_MEMBERSHIP',
-      organizationId,
-      ipAddress,
-      payload: {
+      const approvedFields = {
+        status: MembershipStatus.APPROVED,
+        approvedAt: new Date(),
+        approvedBy: approverId,
         membershipNumber,
-        initialRole,
-        notes: dto.notes ?? null,
-      },
+        rejectionReason: null,
+      };
+      // Only one of two simultaneous approvals may go on to grant the role.
+      const claimed = await memberships.update(
+        { id: membershipId, organizationId, status: previousStatus },
+        approvedFields,
+      );
+      if (!claimed.affected) throw new ConflictException('Membership was already reviewed');
+      // Every new member uploads a ward NOC. Approving the membership accepts it in the same step,
+      // so staff only click Approve (simplified flow, 22 Nov 2026).
+      const documents = await documentsRepo.find({ where: { membershipId } });
+      const noc = currentNoc(documents);
+      if (!noc || noc.reviewStatus === DocumentReviewStatus.SUPERSEDED) {
+        throw new ConflictException('This member has not uploaded their ward NOC yet');
+      }
+      if (noc.reviewStatus !== DocumentReviewStatus.APPROVED) {
+        noc.reviewStatus = DocumentReviewStatus.APPROVED;
+        noc.reviewNotes = null;
+        noc.reviewedByUserId = approverId;
+        noc.reviewedAt = new Date();
+        await documentsRepo.save(noc);
+      }
+
+      const saved = Object.assign(membership, approvedFields);
+
+      // Grant initial role (default: VOLUNTEER)
+      const existingGrant = await roleGrants.findOne({
+        where: {
+          membershipId: saved.id,
+          role: initialRole,
+          status: RoleGrantStatus.ACTIVE,
+        },
+      });
+
+      if (!existingGrant) {
+        const grant = roleGrants.create({
+          membershipId: saved.id,
+          role: initialRole,
+          status: RoleGrantStatus.ACTIVE,
+          grantedBy: approverId,
+        });
+        await roleGrants.save(grant);
+      }
+      if (initialRole === UserRole.VOLUNTEER) await this.seedVolunteerProfile(saved, manager);
+
+      // Record approval audit trail
+      const approval = approvals.create({
+        membershipId: saved.id,
+        action: MembershipApprovalAction.MEMBERSHIP_APPROVED,
+        actorId: approverId,
+        notes: dto.notes ?? 'Application approved',
+      });
+      await approvals.save(approval);
+
+      await this.auditService.logEvent({
+        eventType: 'MEMBERSHIP_APPROVED',
+        actorId: approverId,
+        targetId: saved.id,
+        targetType: 'ORGANIZATION_MEMBERSHIP',
+        organizationId,
+        ipAddress,
+        payload: {
+          membershipNumber,
+          initialRole,
+          notes: dto.notes ?? null,
+        },
+      }, manager);
     });
 
     const updated = await this.membershipRepo.findOne({
-      where: { id: saved.id },
+      where: { id: membership.id },
       relations: ['roleGrants', 'approvals'],
     });
     return updated!;

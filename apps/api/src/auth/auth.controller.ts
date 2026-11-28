@@ -1,7 +1,7 @@
-import { Controller, Post, Get, Body, Req, HttpCode, HttpStatus, UseGuards } from '@nestjs/common';
+import { Controller, Post, Get, Body, Req, HttpCode, HttpStatus, UseGuards, Header, Param, ParseUUIDPipe, Query, Res } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import { Request } from 'express';
+import { Request, Response } from 'express';
 import { FirebaseTokenService } from './firebase-token.service';
 import { FirebaseSignInDto } from './dto/firebase-sign-in.dto';
 import { AuthService } from './auth.service';
@@ -90,6 +90,31 @@ export class AuthController {
     // Extract optional user id from request if user is authenticated
     const userId = (req as any).user?.id ?? (req as any).userId;
     return this.authService.logout(dto, userId, ip);
+  }
+
+  @Get('me/memberships/:organizationId/status')
+  @UseGuards(AuthGuard)
+  @Header('Cache-Control', 'private, no-store')
+  @ApiBearerAuth('JWT-auth')
+  async watchMembership(
+    @CurrentUserId() userId: string,
+    @Param('organizationId', ParseUUIDPipe) organizationId: string,
+    @Query('known') known: unknown,
+    @Res({ passthrough: true }) response: Response,
+  ) {
+    const abort = new AbortController();
+    const stop = () => abort.abort();
+    response.once('close', stop);
+    try {
+      return await this.authService.watchMembership(
+        userId,
+        organizationId,
+        typeof known === 'string' && known.length <= 240 ? known : '',
+        abort.signal,
+      );
+    } finally {
+      response.off('close', stop);
+    }
   }
 
   @Get('me')

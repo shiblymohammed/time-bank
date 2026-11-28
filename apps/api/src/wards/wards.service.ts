@@ -237,6 +237,19 @@ export class WardsService {
       );
     }
     await this.db.transaction(async (m) => {
+      const locked = await m.findOne(OrganizationMembership, {
+        where: { id: membership.id, organizationId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      if (!locked || locked.wardId !== membership.wardId || !OPEN_STATUSES.includes(locked.status)) {
+        throw new ConflictException('Your membership changed. Check your status before retrying.');
+      }
+      const latest = currentNoc(await m.find(MembershipDocument, {
+        where: { membershipId: membership.id, documentType: WARD_NOC },
+      }));
+      if (latest?.reviewStatus === DocumentReviewStatus.APPROVED) {
+        throw new ConflictException('Your NOC has been accepted. Ask your coordinator to change your ward.');
+      }
       await m.update(OrganizationMembership, { id: membership.id }, { wardId: ward.id });
       // A NOC still waiting was signed for the old ward, so it no longer counts.
       await m.update(
@@ -283,11 +296,33 @@ export class WardsService {
     if (currentNoc(membership.documents)?.reviewStatus === DocumentReviewStatus.APPROVED) {
       throw new ConflictException('Your NOC has already been accepted');
     }
+    const checksum = createHash('sha256').update(file.buffer).digest('hex');
+    const existing = currentNoc(membership.documents);
+    if (existing?.reviewStatus === DocumentReviewStatus.PENDING &&
+        existing.wardId === (membership.wardId ?? null) && existing.sha256 === checksum) {
+      return nocView(existing);
+    }
     const id = randomUUID();
     const storageKey = `${organizationId}/${id}.${type.extension}`;
     await this.storage.save(storageKey, file.buffer);
     try {
       const saved = await this.db.transaction(async (m) => {
+        const lockedMembership = await m.findOne(OrganizationMembership, {
+          where: { id: membership.id, organizationId },
+          lock: { mode: 'pessimistic_write' },
+        });
+        if (!lockedMembership || lockedMembership.wardId !== membership.wardId ||
+            !OPEN_STATUSES.includes(lockedMembership.status)) {
+          throw new ConflictException('Your ward or membership changed. Check your status before retrying.');
+        }
+        const latest = currentNoc(await m.find(MembershipDocument, {
+          where: { membershipId: membership.id, documentType: WARD_NOC },
+        }));
+        if (latest?.reviewStatus === DocumentReviewStatus.APPROVED) {
+          throw new ConflictException('Your NOC has already been accepted');
+        }
+        if (latest?.reviewStatus === DocumentReviewStatus.PENDING && latest.sha256 === checksum &&
+            latest.wardId === (membership.wardId ?? null)) return latest;
         // Only the newest NOC is reviewed; one still waiting is replaced.
         await m.update(
           MembershipDocument,
@@ -304,7 +339,7 @@ export class WardsService {
             wardId: membership.wardId ?? null,
             contentType: type.contentType,
             sizeBytes: file.buffer.length,
-            sha256: createHash('sha256').update(file.buffer).digest('hex'),
+            sha256: checksum,
           }),
         );
         await this.audit.logEvent(
@@ -337,6 +372,7 @@ export class WardsService {
         );
         return document;
       });
+      if (saved.id !== id) await this.storage.remove(storageKey).catch(() => undefined);
       return nocView(saved);
     } catch (error) {
       await this.storage.remove(storageKey).catch(() => undefined);

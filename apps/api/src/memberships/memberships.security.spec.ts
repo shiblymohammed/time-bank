@@ -35,6 +35,8 @@ describe('MembershipsService - Role Escalation Security (Finding #1)', () => {
   let service: MembershipsService;
   let authorizationService: AuthorizationService;
   let membershipRepo: jest.Mocked<Repository<OrganizationMembership>>;
+  let documentRepo: jest.Mocked<Repository<MembershipDocument>>;
+  let approvalRepo: jest.Mocked<Repository<MembershipApproval>>;
   let roleGrantRepo: jest.Mocked<Repository<MembershipRoleGrant>>;
   let orgRepo: jest.Mocked<Repository<Organization>>;
 
@@ -159,6 +161,8 @@ describe('MembershipsService - Role Escalation Security (Finding #1)', () => {
     authorizationService = module.get<AuthorizationService>(AuthorizationService);
     membershipRepo = module.get(getRepositoryToken(OrganizationMembership));
     roleGrantRepo = module.get(getRepositoryToken(MembershipRoleGrant));
+    documentRepo = module.get(getRepositoryToken(MembershipDocument));
+    approvalRepo = module.get(getRepositoryToken(MembershipApproval));
     orgRepo = module.get(getRepositoryToken(Organization));
   });
 
@@ -366,6 +370,22 @@ describe('MembershipsService - Role Escalation Security (Finding #1)', () => {
       const dto: ApproveMembershipDto = {
         initialRole: UserRole.VOLUNTEER,
       };
+
+      const manager = membershipRepo.manager;
+      const originalGetRepository = manager.getRepository.bind(manager);
+      const transaction = {
+        getRepository: (entity: { name: string }) => {
+          switch (entity.name) {
+            case 'OrganizationMembership': return membershipRepo;
+            case 'Organization': return orgRepo;
+            case 'MembershipDocument': return documentRepo;
+            case 'MembershipRoleGrant': return roleGrantRepo;
+            case 'MembershipApproval': return approvalRepo;
+            default: return originalGetRepository(entity.name);
+          }
+        },
+      };
+      manager.transaction = jest.fn(async (run) => run(transaction as never)) as unknown as typeof manager.transaction;
 
       // Should succeed
       await expect(

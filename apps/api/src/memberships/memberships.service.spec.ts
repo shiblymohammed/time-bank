@@ -55,9 +55,20 @@ describe('MembershipsService', () => {
     execute: jest.fn().mockResolvedValue(undefined),
   };
   const mockManager = {
-    getRepository: jest.fn((entity: { name: string }) =>
-      entity.name === 'GlobalServiceDefinition' ? mockServiceRepo : mockAvailabilityRepo,
+    transaction: jest.fn(async (run: (manager: unknown) => Promise<unknown>): Promise<unknown> =>
+      run(mockManager),
     ),
+    getRepository: jest.fn((entity: { name: string }): unknown => {
+      switch (entity.name) {
+        case 'GlobalServiceDefinition': return mockServiceRepo;
+        case 'OrganizationMembership': return mockMembershipRepo;
+        case 'Organization': return mockOrgRepo;
+        case 'MembershipDocument': return mockDocumentRepo;
+        case 'MembershipRoleGrant': return mockRoleGrantRepo;
+        case 'MembershipApproval': return mockApprovalRepo;
+        default: return mockAvailabilityRepo;
+      }
+    }),
     createQueryBuilder: jest.fn(() => skillInsert),
   };
 
@@ -452,6 +463,7 @@ describe('MembershipsService', () => {
       );
       expect(mockAuditService.logEvent).toHaveBeenCalledWith(
         expect.objectContaining({ eventType: 'MEMBERSHIP_APPROVED' }),
+        mockManager,
       );
     });
   });
