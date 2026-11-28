@@ -2,10 +2,10 @@
 name: Time Bank Admin
 description: Compact staff tools for municipal Time Bank operations.
 colors:
-  indigo: "#5c54d8"
-  indigo-hover: "#4b43bc"
-  indigo-link: "#4b44be"
-  indigo-tint: "#f1f0ff"
+  brand-blue: "#578AF9"
+  brand-blue-hover: "#497de8"
+  brand-blue-link: "#2857aa"
+  brand-blue-tint: "#eef3fe"
   series-blue: "#386db7"
   series-green: "#22805c"
   slate: "#f5f6fa"
@@ -28,7 +28,7 @@ colors:
   dark-line: "#44485e"
   dark-ink: "#f5f6fa"
   dark-copy: "#a9aec0"
-  dark-link: "#c2bdff"
+  dark-link: "#baccff"
 typography:
   display:
     fontFamily: "Inter, system-ui, -apple-system, Segoe UI, sans-serif"
@@ -64,13 +64,13 @@ spacing:
   section-gap: "24px"
 components:
   button-primary:
-    backgroundColor: "{colors.indigo}"
-    textColor: "{colors.white}"
+    backgroundColor: "{colors.brand-blue}"
+    textColor: "{colors.ink}"
     rounded: "{rounded.pill}"
     height: "38px"
     padding: "0 18px"
   button-primary-hover:
-    backgroundColor: "{colors.indigo-hover}"
+    backgroundColor: "{colors.brand-blue-hover}"
   button-secondary:
     backgroundColor: "{colors.white}"
     textColor: "{colors.slate-copy}"
@@ -88,8 +88,8 @@ components:
     rounded: "{rounded.navigation}"
     padding: "7px 10px"
   nav-item-active:
-    backgroundColor: "{colors.indigo}"
-    textColor: "{colors.white}"
+    backgroundColor: "{colors.brand-blue}"
+    textColor: "{colors.ink}"
   status-approved:
     backgroundColor: "{colors.green-tint}"
     textColor: "{colors.green}"
@@ -111,19 +111,19 @@ components:
 
 The Time Bank web dashboard is compact and direct. A persistent navigation rail and unified toolbar establish where staff are working, with the available actions and records in the main pane.
 
-Light and dark themes use slate surfaces and an indigo accent. Borders define everyday panels, while a stronger shadow separates floating controls from the content beneath them.
+Light and dark themes use slate surfaces and a blue accent. Borders define everyday panels, while a stronger shadow separates floating controls from the content beneath them.
 
 - Compact, labeled controls with visible active and focus states.
 - Bordered panels and neutral tables with semantic status badges.
-- Shared indigo actions and theme-aware slate surfaces.
+- Blue primary actions and theme-aware slate surfaces.
 
 This document covers the Next.js dashboard and staff sign-in. The scoped light and dark theme variables in [admin-overview.css](apps/web/src/app/admin-overview.css) take precedence over the base styles in [globals.css](apps/web/src/app/globals.css). [admin-sign-in.css](apps/web/src/app/admin-sign-in.css) defines sign-in-specific treatments.
 
 ## Colors
 
-**Primary.** Indigo fills primary actions and the active navigation row. Deep indigo marks hover, pale indigo supports selected surfaces, and light indigo carries link and focus treatments in dark mode.
+**Primary.** Brand blue fills primary actions and the active navigation row. A deeper blue marks hover, pale blue marks selected surfaces, and light blue marks links and focus in dark mode.
 
-**Secondary.** Blue and green distinguish chart series alongside indigo. Their dark-theme variants are defined with the chart tokens in the admin stylesheet.
+**Secondary.** A second blue and a green distinguish the membership and organization chart series. Their dark-theme variants are defined with the chart tokens in the admin stylesheet.
 
 **Status.** Green identifies positive states, amber marks pending or warning states, and red marks errors and restrictions. Each has a matching tinted surface and a text label.
 
@@ -150,11 +150,11 @@ Panel corners use a 12px radius and navigation rows use 9px. Shared buttons, inp
 
 ## Components
 
-**Buttons.** The shared dashboard button is 38px high. Primary actions use white text on indigo. Secondary actions use a panel fill and border, with a quieter surface change on hover. The dashboard uses a visible two-pixel focus outline for buttons.
+**Buttons.** The shared dashboard button is 38px high. Primary actions use dark text on blue. Secondary actions use a panel fill and border, with a quieter surface change on hover. The dashboard uses a visible two-pixel focus outline for buttons.
 
 **Inputs.** Standard fields have a subtle fill and border. Focus changes the border and adds a three-pixel ring. Sign-in fields use a 46px minimum height and 16px type on narrow screens.
 
-**Navigation.** A row combines an icon with a text label. Hover uses a neutral tint. The current section uses a filled indigo row with white ink. The toolbar groups search, organization scope, and account and utility actions.
+**Navigation.** A row combines an icon with a text label. Hover uses a neutral tint. The current section uses a filled blue row with dark ink. The toolbar groups search, organization scope, and account and utility actions.
 
 **Status badges.** Small tinted pills pair a semantic color with a named status. Keep the label visible at compact widths.
 

@@ -13,11 +13,11 @@
   --admin-ink: #171a27;
   --admin-copy: #62677a;
   --admin-nav-ink: #494e61;
-  --admin-accent: #5c54d8;
-  --admin-accent-hover: #4b43bc;
-  --admin-link: #4b44be;
-  --admin-selected: #f1f0ff;
-  --admin-accent-line: #ddd9fa;
+  --admin-accent: #578AF9;
+  --admin-accent-hover: #497de8;
+  --admin-link: #2857aa;
+  --admin-selected: #eef3fe;
+  --admin-accent-line: #c4d6fd;
   --admin-active: #237453;
   --admin-success: #237453;
   --admin-success-tint: #ebf7ef;
@@ -25,7 +25,7 @@
   --admin-warning-tint: #fff4df;
   --admin-danger: #a53442;
   --admin-danger-tint: #fdecf0;
-  --admin-series-users: #5c54d8;
+  --admin-series-users: #578AF9;
   --admin-series-memberships: #386db7;
   --admin-series-organizations: #22805c;
   --admin-popover-shadow: 0 8px 24px rgba(20, 24, 40, .12);
@@ -46,9 +46,9 @@
   --admin-ink: #f5f6fa;
   --admin-copy: #a9aec0;
   --admin-nav-ink: #d7d9e4;
-  --admin-link: #c2bdff;
-  --admin-selected: #414165;
-  --admin-accent-line: #615d90;
+  --admin-link: #baccff;
+  --admin-selected: #343f60;
+  --admin-accent-line: #566b94;
   --admin-active: #79dcb1;
   --admin-success: #79dcb1;
   --admin-success-tint: #263e3c;
@@ -56,7 +56,7 @@
   --admin-warning-tint: #463a32;
   --admin-danger: #ffadb8;
   --admin-danger-tint: #49333f;
-  --admin-series-users: #b7b1ff;
+  --admin-series-users: #a0bdff;
   --admin-series-memberships: #89c4ff;
   --admin-series-organizations: #79dcb1;
   --admin-popover-shadow: 0 8px 24px rgba(9, 11, 22, .32);
@@ -159,7 +159,7 @@
 [data-admin-theme] .nav-item svg { color: inherit; }
 [data-admin-theme] .nav-item:hover { background: var(--admin-hover); }
 [data-admin-theme] .nav-item.active {
-  color: #fff;
+  color: var(--on-primary);
   background: var(--admin-accent);
   box-shadow: none;
 }
@@ -375,7 +375,7 @@
 [data-admin-theme] .scope-option.selected { border-color: color-mix(in srgb, var(--admin-link) 25%, var(--admin-line)); }
 [data-admin-theme] .scope-option-mark { width: 32px; height: 32px; flex-basis: 32px; }
 [data-admin-theme] .scope-option.selected .scope-option-mark,
-[data-admin-theme] .scope-option-check { background: var(--admin-accent); color: #fff; }
+[data-admin-theme] .scope-option-check { background: var(--admin-accent); color: var(--on-primary); }
 
 .admin-page-search { position: relative; flex: 1 1 auto; min-width: 0; }
 .admin-search-field {
@@ -866,7 +866,7 @@ button.super-kpi:hover,
   --admin-line: light-dark(#e4e6ef, #44485e);
   --admin-ink: light-dark(#171a27, #f5f6fa);
   --admin-copy: light-dark(#62677a, #a9aec0);
-  --admin-link: light-dark(#4b44be, #c2bdff);
+  --admin-link: light-dark(#2857aa, #baccff);
 }
 
 html[data-admin-startup-theme='light'] .admin-loader-screen[data-admin-theme='system'] {

@@ -33,7 +33,7 @@
 }
 
 .admin-login-theme button:hover { background: var(--admin-hover); }
-.admin-login-theme button[aria-pressed='true'] { background: var(--admin-accent); color: white; }
+.admin-login-theme button[aria-pressed='true'] { background: var(--admin-accent); color: var(--on-primary); }
 
 .admin-login-card {
   display: grid;
@@ -69,7 +69,7 @@
   height: 44px;
   border-radius: 13px;
   background: var(--admin-accent);
-  color: #fff;
+  color: var(--on-primary);
 }
 
 .admin-login-form h1 {
@@ -115,9 +115,9 @@
   justify-content: space-between;
   border-color: transparent;
   background: var(--admin-accent);
-  color: white;
+  color: var(--on-primary);
 }
-.admin-login-form .btn-primary:hover:not(:disabled) { background: #493fbf; }
+.admin-login-form .btn-primary:hover:not(:disabled) { background: var(--admin-accent-hover); }
 .admin-login-form .btn-secondary {
   border-color: var(--admin-line);
   background: var(--admin-subtle);

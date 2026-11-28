@@ -1,6 +1,6 @@
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-/* Light, quiet surfaces with the app's violet as the single accent. */
+/* Light surfaces with the shared primary blue. */
 :root {
   --bg-page: #f7f7f9;
   --bg-surface: #ffffff;
@@ -10,10 +10,11 @@
   --border: #e7e5ee;
   --border-strong: #d6d3e0;
 
-  --primary: #6a11e6;
-  --primary-hover: #5a0dc6;
-  --primary-tint: #f3ecfe;
-  --primary-ring: rgba(106, 17, 230, 0.18);
+  --primary: #578AF9;
+  --on-primary: #171a27;
+  --primary-hover: #497de8;
+  --primary-tint: #eef3fe;
+  --primary-ring: rgba(87, 138, 249, 0.18);
 
   --success: #15803d;
   --success-tint: #ecfdf3;
@@ -299,8 +300,8 @@ pre {
   text-align: center;
 }
 .nav-item.active {
-  color: #fff;
-  background: var(--admin-accent, #0052ff);
+  color: var(--on-primary);
+  background: var(--admin-accent, var(--primary));
   font-weight: 600;
   border-radius: 12px;
   box-shadow: 0 4px 14px rgba(0, 82, 255, 0.35);
@@ -568,11 +569,11 @@ pre {
 .scope-option.selected { border-color: var(--admin-accent-line, #bfdbfe); background: var(--admin-selected, #eff6ff); color: var(--admin-link, #0052ff); }
 .scope-option-mark { display: grid; place-items: center; width: 28px; height: 28px; flex: 0 0 28px; border-radius: 8px; color: var(--admin-link, #0052ff); background: var(--admin-selected, #eff6ff); }
 .scope-option-mark svg { width: 15px; height: 15px; }
-.scope-option.selected .scope-option-mark { color: #ffffff; background: var(--admin-accent, #0052ff); }
+.scope-option.selected .scope-option-mark { color: var(--on-primary); background: var(--admin-accent, var(--primary)); }
 .scope-option-text { display: grid; gap: 2px; flex: 1; min-width: 0; }
 .scope-option-text strong { overflow: hidden; color: inherit; font-size: .78rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .scope-option-text small { overflow: hidden; color: var(--admin-copy, #64748b); font-size: .66rem; text-overflow: ellipsis; white-space: nowrap; }
-.scope-option-check { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: #fff; background: var(--admin-accent, #0052ff); }
+.scope-option-check { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; color: var(--on-primary); background: var(--admin-accent, var(--primary)); }
 .scope-option-check svg { width: 13px; height: 13px; stroke-width: 2.4; }
 .scope-options-empty { padding: 15px 11px; color: var(--text-muted); font-size: .78rem; }
 .top-actions .scope-label { align-self: center; }
@@ -3095,8 +3096,8 @@ pre {
 
 .analytics-switch button.active-pill,
 .analytics-switch button[aria-pressed='true'] {
-  background: var(--admin-accent, #0052ff);
-  color: #ffffff;
+  background: var(--admin-accent, var(--primary));
+  color: var(--on-primary);
   box-shadow: 0 1px 4px rgba(0, 82, 255, 0.28);
 }
 
@@ -3201,7 +3202,7 @@ pre {
 }
 
 .legend-bullet.bullet-active {
-  background: var(--admin-accent, #0052ff);
+  background: var(--admin-accent, var(--primary));
 }
 
 .legend-bullet.bullet-inactive {
@@ -3667,7 +3668,7 @@ pre {
 .btn-primary {
   background: var(--primary);
   border-color: var(--primary);
-  color: #ffffff;
+  color: var(--on-primary);
 }
 .btn-primary:hover {
   background: var(--primary-hover);
@@ -4868,14 +4869,14 @@ details summary {
 }
 
 .btn-primary {
-  background: var(--admin-accent, #0052ff);
-  color: #ffffff;
+  background: var(--admin-accent, var(--primary));
+  color: var(--on-primary);
   border-color: var(--admin-link, #0052ff);
   box-shadow: 0 2px 6px rgba(0, 82, 255, 0.25);
 }
 
 .btn-primary:hover:not(:disabled) {
-  background: var(--admin-accent-hover, #0045d8);
+  background: var(--admin-accent-hover, var(--primary-hover));
   border-color: var(--admin-link, #0045d8);
   box-shadow: 0 4px 12px rgba(0, 82, 255, 0.35);
 }
@@ -5324,8 +5325,8 @@ label.inline-check input[type="checkbox"] {
 }
 
 .modal-tab-btn.is-active {
-  background: var(--admin-accent, #0052ff);
-  color: #ffffff;
+  background: var(--admin-accent, var(--primary));
+  color: var(--on-primary);
   border-color: var(--admin-link, #0052ff);
 }
 
@@ -6278,8 +6279,8 @@ label.inline-check input[type="checkbox"] {
   position: absolute;
   bottom: 10px;
   right: 10px;
-  background: var(--admin-accent, #0052ff);
-  color: #ffffff;
+  background: var(--admin-accent, var(--primary));
+  color: var(--on-primary);
   font-size: 0.72rem;
   font-weight: 750;
   padding: 4px 10px;
@@ -6425,8 +6426,8 @@ label.inline-check input[type="checkbox"] {
 }
 
 .skill-tag-chip.is-selected {
-  background: var(--admin-accent, #0052ff);
-  color: #ffffff;
+  background: var(--admin-accent, var(--primary));
+  color: var(--on-primary);
   border-color: var(--admin-link, #0052ff);
 }
 
@@ -6456,8 +6457,8 @@ label.inline-check input[type="checkbox"] {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  background: var(--admin-accent, #0052ff);
-  color: #ffffff;
+  background: var(--admin-accent, var(--primary));
+  color: var(--on-primary);
   display: flex;
   align-items: center;
   justify-content: center;
