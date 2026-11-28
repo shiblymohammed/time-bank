@@ -38,7 +38,7 @@ import { NotificationsService } from '../notifications/notifications.service';
 import { VolunteerAssignment } from '../matching/entities/volunteer-assignment.entity';
 import { AuditService } from '../audit/audit.service';
 import { TimeLedgerService } from '../time-ledger/time-ledger.service';
-import { chargeRequestCredits, creditCents, releaseRequestCredits, requestCreditEstimate, reserveRequestCredits } from './request-credit-accounting';
+import { chargeRequestCredits, creditCents, releaseRequestCredits, requestCreditEstimate } from './request-credit-accounting';
 import {
   AuthorizationService,
   EvaluatedMembershipContext,
@@ -269,7 +269,7 @@ export class RequestsService {
     let beneficiaryMembershipId: string;
     const creationChannel = dto.creationChannel ?? CreationChannel.DIRECT_BENEFICIARY;
     let caregiverAuthId: string | null = null;
-    let creditBacked = false;
+    let requiresBeneficiaryEligibility = true;
 
     if (creationChannel === CreationChannel.DIRECT_BENEFICIARY) {
       // Find calling user's membership in this organization
@@ -291,22 +291,15 @@ export class RequestsService {
         (rg) => rg.role === UserRole.VOLUNTEER && rg.status === RoleGrantStatus.ACTIVE,
       );
 
-      if (!hasBeneficiaryRole) {
-        if (hasVolunteerRole) {
-          creditBacked = true;
-          // Volunteers can ask for help if they have spendable time credits
-          const summary = await this.timeLedgerService.mySummary(callingUserId);
-          if (summary.balanceCredits <= 0) {
-            throw new ForbiddenException(
-              'Volunteers require an active time credit balance to request assistance. Earn credits by helping first!',
-            );
-          }
-        } else {
-          throw new ForbiddenException(
-            'Caller must hold approved BENEFICIARY role or VOLUNTEER role with time credits to submit requests directly',
-          );
-        }
+      if (!hasBeneficiaryRole && !hasVolunteerRole) {
+        throw new ForbiddenException(
+          'Caller must hold an approved BENEFICIARY or VOLUNTEER role to submit requests directly',
+        );
       }
+
+      // Asking for help is free for both beneficiaries and volunteers. Only
+      // beneficiary-role requests are subject to the beneficiary monthly cap.
+      requiresBeneficiaryEligibility = hasBeneficiaryRole;
 
       beneficiaryMembershipId = callerMembership.id;
     } else if (creationChannel === CreationChannel.CAREGIVER_PROXY) {
@@ -359,7 +352,7 @@ export class RequestsService {
     }
 
     // 3. Verify Beneficiary Eligibility and Frequency Quota (D#24, D#26, FR-BEN-04)
-    if (!creditBacked) {
+    if (requiresBeneficiaryEligibility) {
       await this.beneficiariesService.checkEligibilityAndQuota(
         orgId, beneficiaryMembershipId, catalogItem.globalService?.categoryId, manager,
       );
@@ -418,13 +411,6 @@ export class RequestsService {
       await manager.query(
         'INSERT INTO service_request_photos(request_id,jpeg,sha256) VALUES ($1,$2,$3)',
         [saved.id, photo, createHash('sha256').update(photo).digest('hex')]);
-    }
-
-    if (creditBacked) {
-      const global = catalogItem.globalService!;
-      await reserveRequestCredits(manager, this.auditService, saved, callingUserId,
-        dto.acceptedCreditLimit, { baseCreditRateHourly: Number(global.baseCreditRateHourly),
-          creditMultiplier: Number(global.creditMultiplier), allowPartialHours: global.allowPartialHours });
     }
 
     // 7. Mandatory Immediate Candidate Matching Dispatch (D#60, D#61)

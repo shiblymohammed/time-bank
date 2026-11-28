@@ -42,6 +42,9 @@ const mockNotifications = {
   notifyRequestOwners: jest.fn(),
   notifyCoordinators: jest.fn(),
 };
+const mockTimeLedger = {
+  mySummary: jest.fn().mockResolvedValue({ balanceCredits: 0, status: 'ACTIVE' }),
+};
 
 describe('RequestsService', () => {
   let service: RequestsService;
@@ -142,7 +145,7 @@ describe('RequestsService', () => {
         { provide: BeneficiariesService, useValue: mockBeneficiariesService },
         { provide: MatchingService, useValue: mockMatchingService },
         { provide: AuditService, useValue: mockAuditService },
-        { provide: TimeLedgerService, useValue: { mySummary: jest.fn().mockResolvedValue({ balanceCredits: 0, status: 'ACTIVE' }) } },
+        { provide: TimeLedgerService, useValue: mockTimeLedger },
         { provide: NotificationsService, useValue: mockNotifications },
         {
           provide: AuthorizationService,
@@ -337,6 +340,7 @@ describe('RequestsService', () => {
       });
 
       expect(result.creationChannel).toBe(CreationChannel.CAREGIVER_PROXY);
+      expect(mockTimeLedger.mySummary).not.toHaveBeenCalled();
       expect(mockBeneficiariesService.verifyCaregiverProxyAccess).toHaveBeenCalledWith(
         'org-1',
         'caregiver-mem-1',
@@ -393,7 +397,7 @@ describe('RequestsService', () => {
       ).rejects.toThrow(BadRequestException);
     });
 
-    it('throws ForbiddenException if caller has no approved BENEFICIARY role for direct request', async () => {
+    it('allows an approved volunteer to request help without time credits', async () => {
       mockOrgRepo.findOne.mockResolvedValue({ id: 'org-1', code: 'KZK' });
       mockCatalogRepo.findOne.mockResolvedValue({
         id: 'cat-item-1',
@@ -405,6 +409,38 @@ describe('RequestsService', () => {
         organizationId: 'org-1',
         status: MembershipStatus.APPROVED,
         roleGrants: [{ role: UserRole.VOLUNTEER, status: RoleGrantStatus.ACTIVE }],
+      });
+      mockRequestRepo.findOne.mockResolvedValue(null);
+
+      const result = await service.createRequest('org-1', 'user-1', {
+        serviceCatalogId: 'cat-item-1',
+        urgency: UrgencyType.IMMEDIATE,
+        scheduledStartTime: new Date().toISOString(),
+        locationAddressText: 'Location Text',
+        locationWardNumber: '1',
+        locationPostalCode: '676503',
+      });
+
+      expect(result.status).toBe(ServiceRequestStatus.MATCHING_ACTIVE);
+      expect(mockTimeLedger.mySummary).not.toHaveBeenCalled();
+      expect(mockBeneficiariesService.checkEligibilityAndQuota).not.toHaveBeenCalled();
+      expect(mockRequestRepo.save).toHaveBeenCalledWith(
+        expect.not.objectContaining({ creditPayerUserId: expect.anything() }),
+      );
+    });
+
+    it('still refuses direct requests without an approved beneficiary or volunteer role', async () => {
+      mockOrgRepo.findOne.mockResolvedValue({ id: 'org-1', code: 'KZK' });
+      mockCatalogRepo.findOne.mockResolvedValue({
+        id: 'cat-item-1',
+        isEnabled: true,
+        globalService: { categoryId: 'cat-1' },
+      });
+      mockMembershipRepo.findOne.mockResolvedValue({
+        id: 'mem-1',
+        organizationId: 'org-1',
+        status: MembershipStatus.APPROVED,
+        roleGrants: [],
       });
 
       await expect(
